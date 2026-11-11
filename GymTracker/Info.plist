@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Status</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- Launch screen (cold start): solid brand blue (#007AFF, the app
+	     icon background), matching the SwiftUI loading view so the static
+	     launch screen hands off seamlessly to the logo assembly. -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<!-- Status bar: always visible (standard iOS status bar — time, WiFi,
+	     battery). Never hidden, never custom-drawn. -->
+	<key>UIStatusBarHidden</key>
+	<false/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+	<!-- Live Activities (rest timer on the lock screen + Dynamic Island):
+	     the system only lets the app start one with this key set. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<!-- ProMotion 120Hz: without these keys iOS caps the app at 60fps even
+	     on 120Hz hardware (the system enforces a minimum frame duration of
+	     1/60s). The iPhone key lifts the cap on iPhone; the plain key does
+	     the same on iPad Pro. SwiftUI animations then render at the
+	     display's native rate (up to 120Hz) automatically — no code
+	     change needed anywhere else. -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CADisableMinimumFrameDuration</key>
+	<true/>
+	<!-- Deep links: gymtracker://today, gymtracker://workout?day=legs -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.daronbarkley.GymTracker</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>gymtracker</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Apple Calendar (opt-in, write-only): the prompt text the user
+	     sees the first time they turn the integration on in Settings.
+	     The app only adds its own workout events — it never reads the
+	     user's other calendar events and never sends anything anywhere. -->
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Status adds your planned workout days to Apple Calendar so you can see them alongside your day. It only adds its own workout events, on this phone — it never reads your other calendar events and never sends anything anywhere.</string>
+	<!-- Camera (flashlight Morse signal, opt-in, off by default): the
+	     torch needs camera access. The prompt text the user sees the
+	     first time they turn the flashlight signal on in Settings.
+	     The app only uses the camera for the flashlight — it never
+	     takes photos or video and never sends anything anywhere.
+	     iOS crashes without this key, so it must stay even though the
+	     toggle is the only caller. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Status can flash the flashlight in Morse code (the word STATUS) once when a rest timer ends, so you can see the rest is over without looking at the screen. The camera is only used for the flashlight — no photos or video are taken, and nothing leaves the device.</string>
+	<!-- Local network (phone MCP server, LAN-only, user-enabled): the prompt
+	     text the user sees the first time the server is enabled. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Status can run a local server on your Wi-Fi so your own AI agents (on your Mac) can read your workouts and log sets. The server is off by default, runs only while the app is open, and never sends data to the internet.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_gymtracker._tcp</string>
+	</array>
+	<!-- Face ID (Muse access approval): the prompt text the user sees
+	     when approving a Muse connection. Face ID crashes without this
+	     key, so it must stay even though the grant flow is the only
+	     caller. -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID confirms it's you before Muse is allowed to connect to Status.</string>
+	<!-- Allow cleartext HTTP on the local network only (the MCP server).
+	     Does not allow arbitrary internet HTTP. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- Alternate app icons (Settings → App icon). The image sets live in
+	     Assets.xcassets as AppIcon-Dark and AppIcon-Teal. -->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIcon-Dark</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIcon-Dark</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>AppIcon-Teal</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIcon-Teal</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
+	<!-- Privacy manifest is a separate PrivacyInfo.xcprivacy file (Data Not
+	     Collected). This plist carries no data-collection declarations. -->
+</dict>
+</plist>

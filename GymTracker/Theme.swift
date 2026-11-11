@@ -1,0 +1,364 @@
+import SwiftUI
+import UIKit
+
+/// OLED dark theme (DaRon, 2026-11-09: "make dark mode oled", "high
+/// contrast", "vibrant colors"). This supersedes the old "keeps its light
+/// look" rule — the app is dark by default now.
+///
+/// Rules the palette follows:
+/// - TRUE BLACK backgrounds in dark mode (#000000) — OLED pixels turn off.
+///   Card surfaces are near-black (#0D0D0D / #1A1A1A), never dark gray,
+///   and every card carries a visible border so it reads on the black.
+/// - HIGH CONTRAST: primary text is white, secondary text is #D9D9D9 —
+///   never washed-out gray-on-black. No `.secondary` system text anywhere
+///   in dark mode (it renders at ~60% white and looks faded).
+/// - VIBRANT colors: saturated accents (iOS dark-mode vibrant values) —
+///   vivid blue accent, vivid green/red for trends, vivid orange for the
+///   body highlight. In light mode the same names resolve to the matching
+///   saturated system colors.
+///
+/// All colors are dynamic (UIColor trait-collection providers), so they
+/// resolve per color scheme automatically — no view has to thread the
+/// scheme through. The app forces dark by default
+/// (`AppSettings.colorScheme == .dark`); Light / Dark (OLED) / Auto is in
+/// Settings → Appearance, free for everyone.
+enum Theme {
+    /// Screen background: true black in dark mode, system background in light.
+    static let background = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? .black : .systemBackground
+    })
+
+    /// Card surface: near-black in dark mode (reads as black, separates
+    /// from the true-black base), secondary system background in light.
+    static let card = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 0.05, alpha: 1) : .secondarySystemBackground
+    })
+
+    /// Elevated card (nested rows, timer pills, text fields).
+    static let cardElevated = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 0.10, alpha: 1) : .tertiarySystemBackground
+    })
+
+    /// Borders and dividers: strong white in dark mode so edges read on
+    /// black; subtle black in light mode.
+    static let border = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.22) : UIColor(white: 0, alpha: 0.12)
+    })
+
+    /// Primary text: white on black, label on white.
+    static let text = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? .white : .label
+    })
+
+    /// Secondary text: bright, never washed out — #D9D9D9 on black.
+    static let secondaryText = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 0.85, alpha: 1) : .secondaryLabel
+    })
+
+    /// Tertiary text: still readable — #A6A6A6 on black.
+    static let tertiaryText = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 0.65, alpha: 1) : .tertiaryLabel
+    })
+
+    /// Track (rings, progress bars, chart gridlines, unselected chips).
+    static let track = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.18) : .tertiarySystemFill
+    })
+
+    /// Vivid accent blue — brighter than #007AFF on black.
+    static let accent = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.04, green: 0.52, blue: 1.0, alpha: 1)
+            : UIColor(red: 0.0, green: 0.478, blue: 1.0, alpha: 1)
+    })
+
+    /// Vivid green (trends up, done states, "have" checks).
+    static let vividGreen = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.188, green: 0.819, blue: 0.345, alpha: 1)
+            : .systemGreen
+    })
+
+    /// Vivid red (trends down, destructive states).
+    static let vividRed = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.271, blue: 0.227, alpha: 1)
+            : .systemRed
+    })
+
+    /// Vivid orange (body highlight, warm accents).
+    static let vividOrange = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.624, blue: 0.039, alpha: 1)
+            : .systemOrange
+    })
+
+    /// Vivid pink (fresh-muscle state).
+    static let vividPink = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.216, blue: 0.373, alpha: 1)
+            : .systemPink
+    })
+
+    /// Vivid purple (recovering-muscle state).
+    static let vividPurple = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.749, green: 0.353, blue: 0.949, alpha: 1)
+            : .systemPurple
+    })
+
+    /// Vivid teal.
+    static let vividTeal = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.392, green: 0.824, blue: 1.0, alpha: 1)
+            : .systemTeal
+    })
+
+    /// Vivid yellow.
+    static let vividYellow = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.839, blue: 0.039, alpha: 1)
+            : .systemYellow
+    })
+}
+
+/// Completed-state tints (DaRon 22:32): when a set or a whole exercise
+/// is completed, its colors mute to a very, very light tint of the
+/// original accent — not grey, not full color, just a faint whisper of
+/// the accent so completed work reads as done but still carries it.
+/// The accent comes from Color.accentColor (the app's tint: the
+/// Pro-picked accent, or Theme.accent blue when free), so a Pro accent
+/// change flows through automatically. Uncompleted work keeps its full
+/// vivid colors. The single shared definition — Today, History, and
+/// anywhere else a done checkmark appears use this, never a local copy.
+enum CompletedTint {
+    /// Faint accent wash for filled shapes (done "+" disc, "Current"
+    /// pill on a done card).
+    static var completedFill: Color { Color.accentColor.opacity(0.15) }
+    /// Faint accent for glyphs and text on completed work (the check
+    /// itself, the "+" glyph, "All sets done", the hint on a done card,
+    /// done set dots).
+    static var completedGlyph: Color { Color.accentColor.opacity(0.35) }
+}
+
+/// Bottom clearance shared by every scrollable screen (Debug Pass 2,
+/// DaRon 2026-11-10: "UI elements shouldn't be cut off at the bottom").
+/// One rule, one constant — no per-screen magic numbers. The floating
+/// stack in ContentView (menu button, and the rest-timer panel above it
+/// while a rest runs) floats over every page, so scrollable content
+/// must end this far above its container's bottom edge for the last
+/// element to scroll fully into view, clear of the floating stack.
+/// The clearance is measured from the scroll container's bottom edge
+/// (the bottom safe area), while the floating stack is measured from
+/// the screen's bottom edge — the safe area only ever adds room, so
+/// these values clear on every device and pose.
+enum LayoutClearance {
+    /// 96pt — clears the floating menu button alone: 56pt button +
+    /// 24pt above the screen's bottom edge + 16pt gap. The button's
+    /// top is 80pt above the screen bottom; 96pt from the safe-area
+    /// bottom always exceeds it.
+    static let fab: CGFloat = 96
+
+    /// The floating rest-timer panel's height, compact layout
+    /// (RestTimerCard: ~34pt header row + 6 + ~20pt water row + 6 +
+    /// 44pt pill row + 16pt vertical padding ≈ 126pt). The panel sits
+    /// 16pt above the menu button, so while a rest runs the floating
+    /// stack's top is 96 + 126 = 222pt above the screen's bottom edge
+    /// — and it would cover the Finish & Save button at scroll-bottom
+    /// if content only cleared the menu button.
+    static let restTimerPanelHeight: CGFloat = 126
+
+    /// 238pt — clears the whole floating stack while a rest runs:
+    /// 96 (menu-button zone) + 126 (timer panel) + 16 (gap). Same
+    /// safe-area reasoning as `fab`: measured from the safe-area
+    /// bottom, it always exceeds the panel top's height above the
+    /// screen bottom on every device.
+    static let withRestTimer: CGFloat = fab + restTimerPanelHeight + 16
+
+    /// The clearance in effect right now: the timer value while a rest
+    /// is running or paused (the panel is on screen), else the
+    /// menu-button value.
+    static func bottom(restActive: Bool) -> CGFloat {
+        restActive ? withRestTimer : fab
+    }
+}
+
+/// The ONE fold/unfold animation scheme (Debug Pass 2, fold glitch,
+/// Tue 2026-11-10): every pose-driven change in the app animates on
+/// this spring, so all elements finish together instead of popping in
+/// sequence. One spring, one namespace scheme — no per-screen curves.
+///
+/// - `morph`: the fold morph itself. Same 0.25s response as
+///   `AppAnimation.snappy` (Models.swift:617 — read-only here, do not
+///   move the enum) so fold morphs and in-flight snappy animations
+///   finish together, but near-critically damped (0.9 vs snappy's 0.8)
+///   so the morph never overshoots and pops back — overshoot on a
+///   frame interpolation reads as a jump. The old `AppAnimation.fold`
+///   (0.45/0.85) settled in ~0.8s, longer than the physical fold, so
+///   the UI was still settling after the hinge stopped — that lag IS
+///   the glitch. This settles in ~0.45s, inside the fold.
+/// - `settle`: the 150–200ms ease-out for fades that ride the fold
+///   (Track 3: continuity transitions are 150–200ms ease-out).
+/// - `poseSettleNanoseconds`: the debounce window for the pose commit
+///   (TodayView.schedulePoseCommit). Mid-fold the window size sweeps
+///   through intermediate aspect ratios and crosses the layout
+///   thresholds transiently; a kind only commits after the size has
+///   been quiet this long. A fold-back inside the window cancels the
+///   pending commit, so a mid-animation reversal never mounts an
+///   intermediate layout and never stacks animations — the single
+///   commit just retargets the same spring from its current
+///   presentation value.
+enum FoldAnimation {
+    static let morph = Animation.spring(response: 0.25, dampingFraction: 0.9)
+    static let settle = Animation.easeOut(duration: 0.2)
+    static let poseSettleNanoseconds: UInt64 = 90_000_000
+}
+
+extension View {
+    /// OLED card: near-black surface + a visible border so the card reads
+    /// on the true-black background. Use for the top-level cards (exercise
+    /// cards, timer card, stat cards, day cards).
+    func themeCard(cornerRadius: CGFloat = 12) -> some View {
+        background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(Theme.border, lineWidth: 1))
+    }
+
+    /// OLED list/form: true-black base behind the rows, near-black rows,
+    /// visible separators. System dark-mode rows are #1C1C1E gray — this
+    /// replaces them. Apply to every List/Form in the app.
+    func oledList() -> some View {
+        scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .listRowBackground(Theme.card)
+            .listRowSeparatorTint(Theme.border)
+    }
+
+    /// Dismiss the keyboard from any screen — the shared dismiss behind
+    /// the keyboard Done button and tap-outside-to-dismiss. Resigning
+    /// the first responder is the whole mechanism; each field's save
+    /// path already runs live (Profile bodyweight saves on every
+    /// keystroke, Today weight/reps commit on focus loss, notes save on
+    /// every keystroke, editors save via their Save button), so
+    /// dismissing IS confirming — nothing extra to wire per field.
+    func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    /// Native keyboard toolbar: exactly ONE Done button, directly above
+    /// the keyboard (iOS 27.2 native standard). No floating Done, no
+    /// custom dismiss button over content. Apply to every view that
+    /// contains an editable field — the toolbar only appears while the
+    /// keyboard is up. (DaRon 2026-11-10 08:49: Profile bodyweight had
+    /// no Done button at all — the keyboard had no way out.)
+    func withKeyboardDoneToolbar() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { dismissKeyboard() }
+            }
+        }
+    }
+
+    /// Tap-outside-to-dismiss: a tap on empty space dismisses the
+    /// keyboard — the second dismissal path besides Done. WARNING: do
+    /// NOT apply this to a List/Form whose rows are themselves
+    /// tap targets (Picker/Toggle rows): the parent .onTapGesture
+    /// eats those row taps in the gesture arena — Buttons win, row
+    /// taps do not (D20/D24/D39, 2026-11-10). It is safe only where
+    /// the controls are Buttons/fields, e.g. the Today page and
+    /// Notes, where it is verified working on screen.
+    func dismissKeyboardOnTapOutside() -> some View {
+        onTapGesture { dismissKeyboard() }
+    }
+}
+
+/// One clean menu pill: a single capsule with one background and one
+/// border, native iOS Menu styling. Use for EVERY dropdown filter and
+/// sort control. The old per-view filterMenu helpers each drew a card
+/// inside the List row's own card (the "double pill": a halo around a
+/// gray pill), and the List's default button style tinted the label
+/// accent blue. This pill has exactly one fill + one stroke, an
+/// explicit text color, and `.buttonStyle(.plain)` so the List can
+/// never re-tint it. Active (a filter is picked, not "All"): accent
+/// tint, so the active state reads at a glance.
+struct MenuPill<Content: View>: View {
+    var label: String
+    var isActive: Bool = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        Menu(content: content) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isActive ? Color.accentColor : Theme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(isActive ? Color.accentColor : Theme.secondaryText)
+            }
+            .frame(minHeight: 44)
+            .padding(.horizontal, 12)
+            .background(isActive ? Color.accentColor.opacity(0.15) : Theme.card)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(isActive ? Color.accentColor.opacity(0.4) : Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// − / value / + stepper that always fits its row (DaRon 2026-11-10
+/// 08:54: the "Default rest 90s" native stepper was clipped at the
+/// right edge — the + side ran off-screen — with a heavy black divider
+/// and flat muddy gray). Fixed 44pt hit targets, a bounded width (two
+/// 44pt buttons + a centered value label), Theme.cardElevated fill with
+/// a 1pt Theme.border outline and hairline dividers — never the system
+/// stepper's gray pill. The control sizes itself to its content, so it
+/// can never run off the screen edge in any pose. Value changes go
+/// through the same binding the native Stepper used (same floor, same
+/// step, clamped to the range), so saving is unchanged.
+struct RowStepper<Value: Strideable>: View where Value.Stride: Comparable {
+    var value: Binding<Value>
+    var range: ClosedRange<Value>
+    var step: Value.Stride
+    var label: (Value) -> String
+
+    private var canDecrement: Bool { value.wrappedValue > range.lowerBound }
+    private var canIncrement: Bool { value.wrappedValue < range.upperBound }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            stepButton(systemImage: "minus", label: "Decrease", disabled: !canDecrement) {
+                value.wrappedValue = max(value.wrappedValue.advanced(by: -step), range.lowerBound)
+            }
+            Rectangle().fill(Theme.border).frame(width: 1)
+            Text(label(value.wrappedValue))
+                .font(.subheadline.monospacedDigit())
+                .frame(minWidth: 48)
+                .padding(.horizontal, 4)
+            Rectangle().fill(Theme.border).frame(width: 1)
+            stepButton(systemImage: "plus", label: "Increase", disabled: !canIncrement) {
+                value.wrappedValue = min(value.wrappedValue.advanced(by: step), range.upperBound)
+            }
+        }
+        .background(Theme.cardElevated)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+        .foregroundStyle(Theme.text)
+    }
+
+    private func stepButton(systemImage: String, label: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.35 : 1)
+        .accessibilityLabel(label)
+    }
+}
