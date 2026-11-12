@@ -79,8 +79,16 @@ struct NotesView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Title lines up with the content below it (same 16pt
             // leading), not flush to the edge — like every page.
-            HStack(spacing: 12) {
-                PageTitle(text: "Notes")
+            // "+" sits beside the title AND count line (bottom-aligned),
+            // so it stays clear of the status bar on the open Duo, where
+            // a title-row button ran into the Wi-Fi/time cluster.
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    PageTitle(text: "Notes")
+                    Text("\(store.userNotes.count) note\(store.userNotes.count == 1 ? "" : "s") · on this device only")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
                 Spacer()
                 // Compose: same vivid "+" as the workout actions.
                 Button { editorTarget = EditorTarget(note: nil, initialCategory: initialCategoryForNewNote) } label: {
@@ -98,11 +106,6 @@ struct NotesView: View {
             .padding(.trailing, 16)
             .padding(.top, 2)
 
-            Text("\(store.userNotes.count) note\(store.userNotes.count == 1 ? "" : "s") · on this device only")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
-                .padding(.leading, 16)
-                .padding(.top, 4)
 
             // Search across notes (title + body + workout).
             HStack(spacing: 8) {
