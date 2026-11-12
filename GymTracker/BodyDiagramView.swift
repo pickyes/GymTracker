@@ -358,6 +358,39 @@ struct BodyFigureView: View {
     var onTap: ((MuscleID) -> Void)? = nil
 
     private var anatomyName: String { side == .front ? "BodyAnatomyFront" : "BodyAnatomyBack" }
+    /// Brightness map of the painting (white = light): multiplied by the
+    /// highlight colour it gives a tinted muscle with its fibres intact.
+    private var shadeName: String { side == .front ? "BodyShadeFront" : "BodyShadeBack" }
+
+    private var primaryLit: Set<MuscleID> {
+        guard let primary else { return highlighted }
+        return highlighted.intersection(primary)
+    }
+    private var secondaryLit: Set<MuscleID> {
+        guard let primary else { return [] }
+        return highlighted.subtracting(primary)
+    }
+
+    /// The shade image tinted with the highlight colour, cut to the given
+    /// areas' exact outlines.
+    @ViewBuilder
+    private func tintLayer(ids: Set<MuscleID>, scale: CGFloat) -> some View {
+        if !ids.isEmpty {
+            let specs = muscleSpecs.filter { $0.side == side && ids.contains($0.id) }
+            Image(shadeName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .colorMultiply(litColor ?? Self.litGlow)
+                .mask {
+                    Path { path in
+                        for spec in specs { path.addPath(overlayPath(spec, scale: scale)) }
+                    }
+                    .fill(style: FillStyle())
+                    .frame(width: 200 * scale, height: 400 * scale)
+                }
+                .animation(AppAnimation.snappy, value: ids)
+        }
+    }
 
     /// Segmented style (Nov 12, approved preview): a dark body silhouette,
     /// every muscle its own flat grey shape with the gaps between them
@@ -412,6 +445,15 @@ struct BodyFigureView: View {
                     Image(anatomyName)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
+                    // Lit muscles: the painting itself, recoloured to the
+                    // highlight colour — its own light and dark kept, so
+                    // fibres and tendons stay visible (Nov 12). Prime
+                    // movers full strength, synergists blended lighter.
+                    if !highlighted.isEmpty {
+                        tintLayer(ids: primaryLit, scale: scale)
+                        tintLayer(ids: secondaryLit, scale: scale)
+                            .opacity(0.55)
+                    }
                     ForEach(muscleSpecs.filter { $0.side == side }, id: \.id) { spec in
                         muscleOverlay(spec, scale: scale)
                     }
@@ -464,14 +506,11 @@ struct BodyFigureView: View {
         let litBase = litColor ?? Self.litGlow
         let fill: Color?
         if lit {
-            fill = litColor == nil && !secondary
-                ? Self.litFill
-                : litBase.opacity(secondary ? 0.37 : 0.78)
+            // Colour comes from the tinted painting (tintLayer); no flat fill.
+            fill = nil
         } else if let state = recovery[spec.id] {
             fill = state == .fresh ? Self.freshFill : Self.recoveringFill
         } else {
-            // Resting: muscles show as their own grey shape; joints,
-            // hands, feet and head blend into the silhouette.
             // Resting: no fill — the detailed grey anatomy painting shows
             // through (fibres, tendons, face), Nov 12.
             fill = nil
