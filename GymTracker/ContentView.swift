@@ -84,14 +84,6 @@ struct ContentView: View {
                             .blur(radius: navExpanded ? 10 : 0)
                             .saturation(navExpanded ? 0 : 1)
                             .animation(AppAnimation.snappy, value: navExpanded)
-                        // Swap sides (open Duo only): bottom-left corner,
-                        // mirrors the two pages.
-                        if Self.isWide(steadySize == .zero ? proxy.size : steadySize) {
-                            swapSidesButton
-                                .padding(.leading, 20)
-                                .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        }
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -349,6 +341,12 @@ struct ContentView: View {
                     .frame(width: 340)
                     .shadow(radius: 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            // Swap sides (open Duo only): right above the menu button
+            // (DaRon), centered on it. Hidden while the menu is open.
+            if Self.isWide(steadySize) && !navExpanded {
+                swapSidesButton
+                    .frame(width: 56)
             }
             fabButton
         }

@@ -57,6 +57,8 @@ struct TodayView: View {
     /// current exercise's card glide between layouts in this space.
     /// (DaRon 21:53.)
     @Namespace private var foldNamespace
+    /// StandBy-style tent pose: which card the right tile shows.
+    @State private var standbyCard: StandbyCard? = .rest
     /// Live-body side/flip, hoisted out of LiveBodyView (Debug Pass 2):
     /// LiveBodyView is rebuilt per layout (a new identity each swap),
     /// so its own @State would snap the figure back to the auto side on
@@ -864,9 +866,65 @@ struct TodayView: View {
         return HStack(alignment: .top, spacing: 0) {
             if split && !swapped { splitBodyPane(for: plan, anchor: .trailing) }
             compactColumn(for: plan, showBody: !split)
+                // The column keeps the folded screen's sizing on the open
+                // Duo (compact fields), or the set rows got crushed to
+                // "S…  P…" at its 466pt width.
+                .environment(\.horizontalSizeClass, split ? .compact : horizontalSizeClass)
                 .frame(width: split ? Self.outerDisplayWidth : nil)
             if swapped { splitBodyPane(for: plan, anchor: .leading) }
         }
+    }
+
+    /// Today's session at a glance (open Duo, above the body): a ring
+    /// for sets done, then sets, exercises, and weight moved.
+    private var sessionProgressCard: some View {
+        let allLogs = exercises.map { store.draftLogs[$0.id] ?? [] }
+        let totalSets = allLogs.reduce(0) { $0 + $1.count }
+        let doneSets = allLogs.reduce(0) { $0 + $1.filter(\.done).count }
+        let doneExercises = allLogs.filter { !$0.isEmpty && $0.allSatisfy(\.done) }.count
+        let volumeLb = allLogs.flatMap { $0 }.filter(\.done)
+            .reduce(0.0) { $0 + ($1.weightLb ?? 0) * Double($1.reps) }
+        let unit = store.settings.weightUnit
+        let volume = unit.displayValue(for: volumeLb) ?? volumeLb
+        let progress = totalSets == 0 ? 0 : Double(doneSets) / Double(totalSets)
+        let ring = ZStack {
+            Circle().stroke(Theme.track, lineWidth: 8)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(Int((progress * 100).rounded()))%")
+                .font(.subheadline.weight(.bold).monospacedDigit())
+        }
+        .frame(width: 64, height: 64)
+        .animation(AppAnimation.snappy, value: progress)
+        let setsLine = Text("\(doneSets) of \(totalSets) sets").font(.title3.weight(.bold))
+        let detail = Text("\(doneExercises) of \(exercises.count) exercises · \(volume.formatted(.number.precision(.fractionLength(0)))) \(unit.label) lifted")
+            .font(.subheadline)
+            .foregroundStyle(Theme.secondaryText)
+        // Wide pane: ring beside the text. Narrow pane (open Duo held
+        // upright, ~200pt): ring over the text, centered.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                ring
+                VStack(alignment: .leading, spacing: 4) {
+                    setsLine.fixedSize()
+                    detail.fixedSize()
+                }
+                Spacer(minLength: 0)
+            }
+            VStack(spacing: 8) {
+                ring
+                setsLine
+                detail
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(16)
+        .themeCard(cornerRadius: 20)
+        .accessibilityElement(children: .combine)
     }
 
     /// The body pane revealed beside the workout column on the open Duo.
@@ -874,15 +932,29 @@ struct TodayView: View {
     private func splitBodyPane(for plan: DayPlan, anchor: UnitPoint) -> some View {
         if let currentID = displayedExerciseID(for: plan),
            let current = exercises.first(where: { $0.id == currentID }) {
-            LiveBodyView(
-                exerciseID: current.id,
-                nextExerciseID: nextExercise(after: current.id, in: exercises)?.id,
-                figureHeight: nil,
-                sideBinding: $liveBodySide,
-                userFlippedBinding: $liveBodyUserFlipped
-            )
-            .padding(.horizontal, 12)
-            .padding(.top, 60)
+            // Starts at the top of the pane (it sat 60pt down, leaving an
+            // empty strip — Nov 12). Held sideways the pane is wide enough
+            // for the session progress card above the body; upright (a
+            // ~200pt strip) it's just the body (DaRon: "undo only in
+            // portrait").
+            // The card sits at the bottom of the screen, under the body
+            // (DaRon).
+            VStack(spacing: 18) {
+                LiveBodyView(
+                    exerciseID: current.id,
+                    nextExerciseID: nextExercise(after: current.id, in: exercises)?.id,
+                    figureHeight: nil,
+                    sideBinding: $liveBodySide,
+                    userFlippedBinding: $liveBodyUserFlipped
+                )
+                if pageContainerSize.width > pageContainerSize.height {
+                    Spacer(minLength: 0)
+                    sessionProgressCard
+                        .padding(.bottom, 16)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // Follows the real hinge: the waiting pane comes up to full
             // brightness exactly as the phone opens flat.
@@ -1328,150 +1400,264 @@ struct TodayView: View {
     /// the next set and starts the rest timer.
     @ViewBuilder
     private func tentLayout(for plan: DayPlan) -> some View {
-        // Tent pose (Nov 12 redesign, DaRon: "cool but it sucks"): the
-        // phone stands on a bench and is read from a few feet away, so
-        // the page is one glanceable card — what you're on, the weight
-        // × reps as big as the screen allows, then the dots and either
-        // the rest countdown or what's next, and one big action button
-        // that never sits under the floating menu. Swipe left/right to
-        // change exercise. (The finisher lives in the full list.)
+        // Tent pose, StandBy-style (Nov 12, DaRon: "more like the today
+        // page but a simplified view that behaves identical to the
+        // standby mode"). Two big rounded tiles side by side, readable
+        // from across the room:
+        // - Left: the current exercise as a simplified Today card — tap a
+        //   set to check it off (same as Today: haptic + rest timer).
+        //   Swipe up/down to change exercise, like a StandBy widget stack.
+        // - Right: a stack you swipe through — rest / next up, the body,
+        //   session progress. It jumps to the rest timer on its own when
+        //   a rest starts (StandBy's Smart Rotate).
         let currentID = displayedExerciseID(for: plan)
         let current = exercises.first(where: { $0.id == currentID }) ?? exercises.first!
-        let next = nextExercise(after: current.id, in: exercises)
-        let logs = store.draftLogs[current.id] ?? []
-        let doneCount = logs.filter { $0.done }.count
-        let nextIndex = logs.firstIndex(where: { !$0.done })
-        return VStack(alignment: .leading, spacing: 0) {
-            // What you're on.
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(current.name)
-                        .font(.title2.weight(.bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(nextIndex == nil
-                         ? "All \(logs.count) sets done"
-                         : "Set \(min(doneCount + 1, max(logs.count, 1))) of \(logs.count)")
-                        .font(.headline)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Spacer(minLength: 8)
-                workoutActionsMenu
-            }
-
-            // The number, as big as the space allows.
-            Group {
-                if let idx = nextIndex {
-                    let set = logs[idx]
-                    Text("\(store.displayWeightLabel(set.weightLb, isPair: current.isPair, for: current)) × \(set.reps)")
-                } else {
-                    Text("Done")
-                        .foregroundStyle(CompletedTint.completedGlyph)
-                }
-            }
-            .font(.system(size: 140, weight: .heavy, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.2)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .accessibilityLabel(nextIndex.map { "\(store.displayWeightLabel(logs[$0].weightLb, isPair: current.isPair, for: current)), \(logs[$0].reps) reps" } ?? "All sets done")
-
-            // Dots + rest countdown (or what's next).
-            HStack(spacing: 10) {
-                ForEach(logs.indices, id: \.self) { i in
-                    Circle()
-                        .fill(logs[i].done ? Color.accentColor : Theme.track)
-                        .frame(width: 14, height: 14)
-                }
-                Spacer(minLength: 12)
-                tentStatus(next: next)
-            }
-            .padding(.bottom, 14)
-
-            // One action, clear of the floating menu button.
-            Group {
-                if nextIndex != nil {
-                    Button { markNextSetDone(for: current) } label: {
-                        Label("Mark Set Done", systemImage: "checkmark.circle.fill")
-                            .font(.title3.weight(.bold))
-                            .frame(maxWidth: .infinity, minHeight: 56)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .accessibilityLabel("Mark set done")
-                } else if let next {
-                    Button { tentSwipe(from: current.id, forward: true) } label: {
-                        Label("Next: \(next.name)", systemImage: "arrow.right.circle.fill")
-                            .font(.title3.weight(.bold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .frame(maxWidth: .infinity, minHeight: 56)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                } else {
-                    saveButton(for: plan)
-                }
-            }
-            .padding(.trailing, 76)
+        return HStack(spacing: 14) {
+            standbyExerciseTile(current, plan: plan)
+            standbyInfoStack(current: current, plan: plan)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .contentShape(Rectangle())
-        // Swipe left/right to change exercise. simultaneousGesture so
-        // the buttons' taps still fire (a plain .gesture swallowed them).
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 40, coordinateSpace: .local)
-                .onEnded { value in
-                    let horizontal = value.translation.width
-                    guard abs(horizontal) > 60, abs(horizontal) > abs(value.translation.height) else { return }
-                    tentSwipe(from: current.id, forward: horizontal < 0)
-                }
-        )
-        // Keyboard lift (a keyboard left over from another layout).
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.bottom, keyboardHeight)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar { keyboardDoneToolbar }
-        .background(Theme.background)
+        .background(Color.black)
     }
 
-    /// Tent status line: a big rest countdown while resting, otherwise
-    /// the next exercise.
+    /// StandBy left tile: the current exercise and its sets.
+    private func standbyExerciseTile(_ current: ExerciseTemplate, plan: DayPlan) -> some View {
+        let logs = store.draftLogs[current.id] ?? []
+        let nextIndex = logs.firstIndex(where: { !$0.done })
+        let index = exercises.firstIndex(where: { $0.id == current.id }) ?? 0
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(current.name)
+                        .font(.title3.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    if nextIndex != nil {
+                        Text("Current")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor, in: Capsule())
+                    }
+                }
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 6) {
+                        ForEach(Array(logs.enumerated()), id: \.offset) { i, set in
+                            standbySetRow(set, number: i + 1, isNext: i == nextIndex, template: current)
+                        }
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+            // Exercise "stack" dots, like StandBy's widget-stack indicator.
+            VStack(spacing: 5) {
+                ForEach(exercises.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(i == index ? Color.white : Color.white.opacity(0.25))
+                        .frame(width: 5, height: i == index ? 14 : 5)
+                }
+            }
+            .animation(AppAnimation.snappy, value: index)
+            .accessibilityHidden(true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let v = value.translation.height
+                    guard abs(v) > 50, abs(v) > abs(value.translation.width) else { return }
+                    tentSwipe(from: current.id, forward: v < 0)
+                }
+        )
+        .accessibilityAction(named: "Next exercise") { tentSwipe(from: current.id, forward: true) }
+        .accessibilityAction(named: "Previous exercise") { tentSwipe(from: current.id, forward: false) }
+    }
+
+    /// One set, StandBy-sized: tap anywhere on it to check it off.
+    private func standbySetRow(_ set: SetLog, number: Int, isNext: Bool, template: ExerciseTemplate) -> some View {
+        Button { toggleSet(number - 1, of: template) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: set.done ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(set.done ? CompletedTint.completedGlyph : isNext ? Color.accentColor : Theme.tertiaryText)
+                Text("\(store.displayWeightLabel(set.weightLb, isPair: template.isPair, for: template)) × \(set.reps)")
+                    .font(.system(size: isNext ? 30 : 22, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(set.done ? Theme.secondaryText : Theme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Spacer(minLength: 0)
+                if set.kind != .working {
+                    Text(set.kind.shortLabel)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.vertical, isNext ? 8 : 4)
+            .padding(.horizontal, 10)
+            .background(isNext ? Color.accentColor.opacity(0.15) : .clear,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Set \(number), \(set.done ? "done" : "not done")")
+        .accessibilityHint("Double-tap to \(set.done ? "uncheck" : "check off") this set")
+    }
+
+    /// Same as Today's set checkbox: toggle, haptic, and start the rest
+    /// timer on a working set.
+    private func toggleSet(_ index: Int, of template: ExerciseTemplate) {
+        var logs = store.draftLogs[template.id] ?? []
+        guard logs.indices.contains(index) else { return }
+        logs[index].done.toggle()
+        let done = logs[index].done
+        let kind = logs[index].kind
+        store.draftLogs[template.id] = logs
+        if done {
+            if store.settings.hapticsEnabled {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
+            if kind != .warmup { store.startRest(for: template) }
+        }
+    }
+
+    private enum StandbyCard: Int, CaseIterable, Hashable { case rest, body, progress }
+
+    /// StandBy right tile: swipe up/down through rest / body / progress.
+    private func standbyInfoStack(current: ExerciseTemplate, plan: DayPlan) -> some View {
+        GeometryReader { geo in
+            HStack(spacing: 10) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(StandbyCard.allCases, id: \.self) { card in
+                            standbyCard(card, current: current, plan: plan)
+                                .frame(width: geo.size.width - 31, height: geo.size.height)
+                                .id(card)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $standbyCard)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                VStack(spacing: 5) {
+                    ForEach(StandbyCard.allCases, id: \.self) { card in
+                        Capsule()
+                            .fill(card == (standbyCard ?? .rest) ? Color.white : Color.white.opacity(0.25))
+                            .frame(width: 5, height: card == (standbyCard ?? .rest) ? 14 : 5)
+                    }
+                }
+                .frame(width: 21)
+                .accessibilityHidden(true)
+            }
+        }
+        // Smart Rotate: a rest starting brings the timer to the front.
+        .onChange(of: store.restEndsAt) { _, endsAt in
+            if endsAt != nil { withAnimation(AppAnimation.snappy) { standbyCard = .rest } }
+        }
+    }
+
     @ViewBuilder
-    private func tentStatus(next: ExerciseTemplate?) -> some View {
+    private func standbyCard(_ card: StandbyCard, current: ExerciseTemplate, plan: DayPlan) -> some View {
+        Group {
+            switch card {
+            case .rest: standbyRestCard(current: current, plan: plan)
+            case .body:
+                LiveBodyView(
+                    exerciseID: current.id,
+                    nextExerciseID: nextExercise(after: current.id, in: exercises)?.id,
+                    figureHeight: nil,
+                    sideBinding: $liveBodySide,
+                    userFlippedBinding: $liveBodyUserFlipped
+                )
+                .padding(14)
+            case .progress:
+                sessionProgressCard
+                    .padding(14)
+                    .frame(maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.card)
+    }
+
+    /// Rest countdown ring while resting (tap to skip); otherwise what's
+    /// next, or Finish & Save once everything is done.
+    @ViewBuilder
+    private func standbyRestCard(current: ExerciseTemplate, plan: DayPlan) -> some View {
         if let endsAt = store.restEndsAt {
-            // Tap the countdown to skip the rest.
+            let total = max(store.restSeconds(for: current), 1)
             Button { store.cancelRest() } label: {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let remaining = max(0, Int(endsAt.timeIntervalSince(context.date).rounded(.up)))
-                    HStack(spacing: 8) {
-                        Label("Rest \(remaining / 60):\(String(format: "%02d", remaining % 60))", systemImage: "timer")
-                            .font(.title2.weight(.bold).monospacedDigit())
-                            .foregroundStyle(Color.accentColor)
-                        Text("Skip")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.secondaryText)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Theme.card, in: Capsule())
+                    let remaining = max(0, endsAt.timeIntervalSince(context.date))
+                    let secs = Int(remaining.rounded(.up))
+                    ZStack {
+                        Circle().stroke(Theme.track, lineWidth: 12)
+                        Circle()
+                            .trim(from: 0, to: remaining / total)
+                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 1), value: secs)
+                        VStack(spacing: 2) {
+                            Text("\(secs / 60):\(String(format: "%02d", secs % 60))")
+                                .font(.system(size: 54, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                            Text("Rest · tap to skip")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.secondaryText)
+                        }
                     }
+                    .padding(22)
                 }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Rest timer. Tap to skip the rest.")
+            .accessibilityLabel("Rest timer. Double-tap to skip.")
         } else if store.restPausedRemaining != nil {
             Label("Rest paused", systemImage: "pause.circle")
-                .font(.title3.weight(.semibold))
+                .font(.title2.weight(.bold))
                 .foregroundStyle(Theme.secondaryText)
-        } else if let next {
-            Text("Next: \(next.name)")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Theme.secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+        } else if let next = nextExercise(after: current.id, in: exercises) {
+            let allDone = (store.draftLogs[current.id] ?? []).allSatisfy(\.done)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Next up")
+                    .font(.headline)
+                    .foregroundStyle(Theme.secondaryText)
+                Text(next.name)
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.5)
+                Spacer(minLength: 0)
+                if allDone {
+                    Button { tentSwipe(from: current.id, forward: true) } label: {
+                        Label("Go to \(next.name)", systemImage: "arrow.right.circle.fill")
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            VStack(spacing: 14) {
+                Text("Last exercise")
+                    .font(.title2.weight(.bold))
+                saveButton(for: plan)
+            }
+            .padding(20)
         }
     }
 
@@ -2514,9 +2700,10 @@ struct SetRow: View {
                 // At large Dynamic Type sizes the fixed-width weight/reps
                 // fields leave little room: shrink the label before it
                 // truncates to "…", and keep it ahead of the Spacer.
-                .minimumScaleFactor(0.5)
                 .lineLimit(1)
-                .layoutPriority(1)
+                // Never squeezed to "S…": it keeps its full width; the
+                // grey Prev hint gives way instead.
+                .fixedSize()
                 .frame(height: 32)
                 .accessibilityLabel("Set \(number)")
 
@@ -2551,12 +2738,16 @@ struct SetRow: View {
             .accessibilityLabel("Set type: \(set.kind.label)")
 
             if let previousText {
-                Text(previousText)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(height: 32)
+                // Shown whole or not at all — a "P…" stub said nothing.
+                ViewThatFits(in: .horizontal) {
+                    Text(previousText)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                        .fixedSize()
+                    Color.clear.frame(width: 0)
+                }
+                .frame(height: 32)
             }
 
             Spacer()
