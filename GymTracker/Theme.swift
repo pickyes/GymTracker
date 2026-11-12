@@ -518,3 +518,141 @@ extension View {
     func hingeEmerge() -> some View { modifier(HingeEmerge()) }
     func hingeReveal(anchor: UnitPoint = .trailing) -> some View { modifier(HingeReveal(anchor: anchor)) }
 }
+
+// MARK: - Lava-lamp liquid (rest pill, Nov 12)
+
+/// A glass capsule filled with glowing accent-colored liquid, like a lava
+/// lamp: a wavy surface that sloshes gently, soft blobs rising and
+/// drifting inside, a rounded 3D shade, and a glass highlight on top. The
+/// level drains smoothly from full to empty as the rest counts down to
+/// zero, and everything freezes while the rest is paused.
+struct LavaLiquidFill: View {
+    /// When the rest ends (nil while paused).
+    var endsAt: Date?
+    /// Seconds left while paused.
+    var pausedRemaining: TimeInterval?
+    /// The full rest length — the level is remaining / total.
+    var total: TimeInterval
+    var color: Color
+
+    var body: some View {
+        TimelineView(.animation(paused: endsAt == nil)) { context in
+            let now = context.date
+            let remaining = endsAt.map { max(0, $0.timeIntervalSince(now)) } ?? pausedRemaining ?? 0
+            let level = total > 0 ? min(1, remaining / total) : 0
+            let t = now.timeIntervalSinceReferenceDate
+            GeometryReader { geo in
+                let w = geo.size.width, h = geo.size.height
+                let surfaceY = h * (1 - level)
+                // Slosh fades out near full/empty so the ends stay clean.
+                let amp = level > 0.02 && level < 0.98 ? min(3.5, h * 0.03) : 0
+                ZStack {
+                    // Back wave: lighter, offset — gives the surface depth.
+                    LiquidWave(surfaceY: surfaceY, amplitude: amp * 0.8, phase: t * 1.7 + 1.3)
+                        .fill(color.opacity(0.45))
+                    // Main liquid, shaded like a lit cylinder: brighter at
+                    // the top, deep at the bottom, darker toward the edges.
+                    LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3)
+                        .fill(LinearGradient(colors: [color.blend(with: .white, by: 0.25), color, color.blend(with: .black, by: 0.45)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .overlay {
+                            LinearGradient(colors: [.black.opacity(0.35), .clear, .clear, .black.opacity(0.35)],
+                                           startPoint: .leading, endPoint: .trailing)
+                                .mask(LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3))
+                        }
+                    // Lava blobs: soft glowing shapes rising and drifting
+                    // inside the liquid only.
+                    ZStack {
+                        ForEach(0..<4, id: \.self) { i in
+                            let k = Double(i)
+                            let size = w * (0.42 + 0.12 * sin(t * 0.6 + k * 1.9))
+                            let rise = (t * (0.08 + 0.03 * k) + k * 0.27).truncatingRemainder(dividingBy: 1)
+                            Ellipse()
+                                .fill(color.blend(with: .white, by: 0.55))
+                                .frame(width: size, height: size * (1.1 + 0.25 * sin(t * 0.9 + k)))
+                                .position(x: w / 2 + sin(t * 0.7 + k * 2.1) * w * 0.22,
+                                          y: h - rise * h)
+                        }
+                    }
+                    .blur(radius: w * 0.12)
+                    .blendMode(.plusLighter)
+                    .opacity(0.75)
+                    .mask(LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3))
+                    // Bright meniscus line on the surface.
+                    if level > 0.02 && level < 0.98 {
+                        LiquidSurfaceLine(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3)
+                            .stroke(color.blend(with: .white, by: 0.6).opacity(0.8), lineWidth: 1.2)
+                    }
+                    // Glass: a highlight down the left side and a soft rim.
+                    Capsule()
+                        .fill(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.05), .clear],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: w * 0.42, height: h * 0.86)
+                        .position(x: w * 0.3, y: h / 2)
+                        .blendMode(.plusLighter)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The liquid body: everything below a gently waving surface.
+struct LiquidWave: Shape {
+    var surfaceY: CGFloat
+    var amplitude: CGFloat
+    var phase: Double
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: rect.maxY))
+        p.addLine(to: CGPoint(x: 0, y: y(at: 0, rect)))
+        let steps = 24
+        for s in 1...steps {
+            let x = rect.width * CGFloat(s) / CGFloat(steps)
+            p.addLine(to: CGPoint(x: x, y: y(at: x, rect)))
+        }
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+
+    fileprivate func y(at x: CGFloat, _ rect: CGRect) -> CGFloat {
+        surfaceY + amplitude * CGFloat(sin(Double(x / max(rect.width, 1)) * .pi * 2 + phase))
+    }
+}
+
+/// Just the surface line of the liquid (the meniscus highlight).
+struct LiquidSurfaceLine: Shape {
+    var surfaceY: CGFloat
+    var amplitude: CGFloat
+    var phase: Double
+
+    func path(in rect: CGRect) -> Path {
+        let wave = LiquidWave(surfaceY: surfaceY, amplitude: amplitude, phase: phase)
+        var p = Path()
+        let steps = 24
+        for s in 0...steps {
+            let x = rect.width * CGFloat(s) / CGFloat(steps)
+            let pt = CGPoint(x: x, y: wave.y(at: x, rect))
+            if s == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        }
+        return p
+    }
+}
+
+extension Color {
+    /// Blends toward another color (0 = self, 1 = other). iOS 17-safe
+    /// stand-in for Color.mix(with:by:).
+    func blend(with other: Color, by amount: Double) -> Color {
+        let a = UIColor(self), b = UIColor(other)
+        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+        a.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+        b.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+        let f = CGFloat(min(max(amount, 0), 1))
+        return Color(red: Double(r1 + (r2 - r1) * f), green: Double(g1 + (g2 - g1) * f),
+                     blue: Double(b1 + (b2 - b1) * f), opacity: Double(a1 + (a2 - a1) * f))
+    }
+}

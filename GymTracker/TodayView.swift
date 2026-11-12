@@ -2067,6 +2067,19 @@ struct RestTimerCard: View {
     @State private var collapsed: Bool? = nil
     private var isCollapsed: Bool { collapsed ?? pill }
 
+    /// The app's effective accent (Pro accent, else the default) — the
+    /// lava liquid's color.
+    private var pillAccent: Color {
+        store.isPro ? store.settings.accentColor.color : Theme.accent
+    }
+
+    /// The full length of this rest, so the liquid starts full. A +15s
+    /// beyond it just keeps the pill full until it drains back down.
+    private var restTotal: TimeInterval {
+        let template = store.restTemplateID.flatMap { id in store.draftExercises.first { $0.id == id } }
+        return max(store.restSeconds(for: template), store.restRemainingSeconds ?? 0)
+    }
+
     var body: some View {
         if store.restEndsAt != nil || store.restPausedRemaining != nil {
             TimelineView(.periodic(from: Date(), by: 1.0)) { context in
@@ -2083,23 +2096,46 @@ struct RestTimerCard: View {
                             // Upright pill (DaRon, Nov 12): the same 56pt
                             // width as the swap and menu buttons below it,
                             // so the three read as one column.
-                            VStack(spacing: 6) {
+                            // Lava-lamp pill (DaRon, Nov 12): glass filled
+                            // with glowing accent liquid that drains to
+                            // empty as the rest counts down to zero.
+                            VStack(spacing: 8) {
                                 Image(systemName: paused ? "pause.fill" : "timer")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color.accentColor)
                                 Text(formatted(max(0, remaining)))
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .font(.system(size: 15, weight: .heavy, design: .rounded))
                                     .monospacedDigit()
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.7)
                                 Image(systemName: "chevron.up")
                                     .font(.caption2.weight(.bold))
-                                    .foregroundStyle(Theme.secondaryText)
+                                    .opacity(0.8)
                             }
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                             .frame(width: 56)
-                            .padding(.vertical, 14)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(Capsule().stroke(Theme.border, lineWidth: 1.5))
+                            .padding(.vertical, 22)
+                            .background {
+                                ZStack {
+                                    Capsule().fill(.ultraThinMaterial)
+                                    Capsule().fill(Color.black.opacity(0.35))
+                                    LavaLiquidFill(
+                                        endsAt: store.restEndsAt,
+                                        pausedRemaining: store.restPausedRemaining,
+                                        total: restTotal,
+                                        color: pillAccent
+                                    )
+                                }
+                                .clipShape(Capsule())
+                            }
+                            // Glass rim: bright at the top, fading down.
+                            .overlay(
+                                Capsule().stroke(
+                                    LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.08), pillAccent.opacity(0.5)],
+                                                   startPoint: .top, endPoint: .bottom),
+                                    lineWidth: 1.5)
+                            )
+                            .shadow(color: pillAccent.opacity(0.45), radius: 10)
                         } else {
                             HStack(spacing: 8) {
                                 Image(systemName: "timer")
