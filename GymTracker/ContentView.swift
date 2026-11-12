@@ -342,7 +342,9 @@ struct ContentView: View {
                 navPills
                     .padding(.bottom, 12)
             }
-            if restActive {
+            // Tent pose shows its own big countdown on the page, so the
+            // floating card would only cover the weight × reps.
+            if restActive && !isTentPose {
                 RestTimerCard()
                     .frame(width: 340)
                     .shadow(radius: 12)
@@ -351,6 +353,12 @@ struct ContentView: View {
             fabButton
         }
         .animation(AppAnimation.snappy, value: restActive)
+    }
+
+    /// Today on the folded screen held sideways / in tent pose (the same
+    /// rule TodayView uses for its tent layout).
+    private var isTentPose: Bool {
+        selectedPage == .today && steadySize.width > steadySize.height * 1.2 && steadySize.height < 520
     }
 
     /// A rest is running (counting down) or paused.

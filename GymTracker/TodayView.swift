@@ -1328,198 +1328,151 @@ struct TodayView: View {
     /// the next set and starts the rest timer.
     @ViewBuilder
     private func tentLayout(for plan: DayPlan) -> some View {
-        // Swiping picks an exercise (selectedExerciseID); otherwise the
-        // current exercise is the first with sets left, like everywhere
-        // else. (DaRon 21:42: Tent/Seated must be swipeable.)
-        // Same non-empty guarantee as proppedLayout (todayContent
-        // routes an empty list to emptyWorkoutView first).
+        // Tent pose (Nov 12 redesign, DaRon: "cool but it sucks"): the
+        // phone stands on a bench and is read from a few feet away, so
+        // the page is one glanceable card — what you're on, the weight
+        // × reps as big as the screen allows, then the dots and either
+        // the rest countdown or what's next, and one big action button
+        // that never sits under the floating menu. Swipe left/right to
+        // change exercise. (The finisher lives in the full list.)
         let currentID = displayedExerciseID(for: plan)
         let current = exercises.first(where: { $0.id == currentID }) ?? exercises.first!
         let next = nextExercise(after: current.id, in: exercises)
         let logs = store.draftLogs[current.id] ?? []
         let doneCount = logs.filter { $0.done }.count
         let nextIndex = logs.firstIndex(where: { !$0.done })
-        // Plain Group: the page's single NavigationStack lives in body.
-        Group {
-            // Title row, top-left like every other layout (DaRon
-            // 2026-11-10: the toolbar-principal "Pull" rendered
-            // centered, and the toolbar-trailing "+" drifted — top
-            // center with the keyboard up, top right with it down.
-            // The toolbar placed both; the in-content row pins both:
-            // title at the 16pt content margin, "+" center exactly
-            // 60pt from the right edge, in every pose and state).
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    calendarTitle(greetingTitle(normal: plan.title))
-                    Spacer()
-                    workoutActionsMenu
+        return VStack(alignment: .leading, spacing: 0) {
+            // What you're on.
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(current.name)
+                        .font(.title2.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(nextIndex == nil
+                         ? "All \(logs.count) sets done"
+                         : "Set \(min(doneCount + 1, max(logs.count, 1))) of \(logs.count)")
+                        .font(.headline)
+                        .foregroundStyle(Theme.secondaryText)
                 }
-                .padding(.horizontal, 16)
-                // Exact 50/50 split (same fix as proppedLayout): fixed
-                // half-widths measured from the actual HStack width.
-                GeometryReader { geo in
-                    // Clamp at 0: during the first layout pass the
-                    // GeometryReader can report a zero width, which
-                    // would make paneWidth negative (invalid frame).
-                    let paneWidth = max((geo.size.width - 16) / 2, 0)
-                    // Short pane (outer screen held sideways, ~290pt):
-                    // tighter type and button so Mark Set Done stays on
-                    // screen instead of being pushed off the bottom.
-                    let short = geo.size.height < 310
-                    HStack(alignment: .top, spacing: 16) {
-                        // Left: the current exercise, huge.
-                        VStack(alignment: .leading, spacing: short ? 6 : 12) {
-                            // The name must fit, never clip: smaller base size,
-                            // shrink to half if needed, two lines, and it takes
-                            // the height its wrapped lines need. (DaRon 21:42:
-                            // "Seated DB Overhead P…" still truncated.)
-                            Text(current.name)
-                                .font(.title)
-                                .fontWeight(.bold)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.5)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .multilineTextAlignment(.leading)
-                                .accessibilityAddTraits(.isHeader)
-                            if let cues = current.cues {
-                                Text(cues)
-                                    .font(.subheadline)
-                                    .foregroundStyle(Theme.secondaryText)
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.8)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Text("Set \(min(doneCount + 1, max(logs.count, 1))) of \(logs.count)")
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(Theme.secondaryText)
-                            if let idx = nextIndex {
-                                let set = logs[idx]
-                                // Never truncate mid-content: shrink to
-                                // half, then wrap to a second line.
-                                // ("130 lb × 12…" on DaRon's photo.)
-                                Text("\(store.displayWeightLabel(set.weightLb, isPair: current.isPair, for: current)) × \(set.reps) reps")
-                                    .scaledFont(size: short ? 34 : 44, weight: .bold)
-                                    .minimumScaleFactor(0.5)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            } else {
-                                Text("All sets done")
-                                    .scaledFont(size: 32, weight: .bold)
-                                    // Done: faint accent tint, not vivid green.
-                                    // (DaRon 22:32.)
-                                    .foregroundStyle(CompletedTint.completedGlyph)
-                            }
-                            // Set dots — one per set, filled when done.
-                            HStack(spacing: 10) {
-                                ForEach(logs.indices, id: \.self) { i in
-                                    Circle()
-                                        .fill(logs[i].done ? CompletedTint.completedGlyph : Theme.track)
-                                        .frame(width: 16, height: 16)
-                                }
-                            }
-                            Spacer()
-                            Button {
-                                markNextSetDone(for: current)
-                            } label: {
-                                Label("Mark Set Done", systemImage: "checkmark.circle.fill")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                    .frame(maxWidth: .infinity, minHeight: short ? 52 : 72)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(nextIndex == nil)
-                            .accessibilityLabel("Mark set done")
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(short ? 14 : 20)
-                        .themeCard(cornerRadius: 20)
-                        // Swipe left/right to turn the page between exercises,
-                        // like standup mode. (DaRon 21:42.) The drag needs 40pt
-                        // of horizontal travel. NOTE (2026-11-10): this MUST be
-                        // .simultaneousGesture, not .gesture — a plain
-                        // .gesture(DragGesture) claims the touch and swallows
-                        // the child Buttons' taps (proven on the calendar grid,
-                        // same pattern: date cells dead while the header
-                        // chevron worked). simultaneousGesture lets both fire:
-                        // taps still hit Mark Set Done / the set dots, and a
-                        // 40pt+ mostly-horizontal drag still turns the page.
-                        // Tent-pose verification still needed (Device Hub has
-                        // no tent control) — this fix is code-only until then.
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 40, coordinateSpace: .local)
-                                .onEnded { value in
-                                    let horizontal = value.translation.width
-                                    let vertical = value.translation.height
-                                    guard abs(horizontal) > 60, abs(horizontal) > abs(vertical) else { return }
-                                    tentSwipe(from: current.id, forward: horizontal < 0)
-                                }
-                        )
-                        .frame(width: paneWidth, alignment: .topLeading)
-                        .frame(maxHeight: .infinity)
-                        // Fold/unfold morph: the tent panel is the current
-                        // exercise's card in this pose, so it glides in from
-                        // the compact/open card instead of popping.
-                        // (DaRon 21:53.)
-                        .matchedGeometryEffect(id: "currentCard", in: foldNamespace)
-
-                        // Right: what's next + finisher + save. The rest timer
-                        // no longer lives here — it slides up from the floating
-                        // menu button instead (DaRon 21:28).
-                        ScrollView(showsIndicators: false) {
-                            VStack(spacing: 12) {
-                                if trainingAnywayPlan != nil {
-                                    trainAnywayBanner
-                                }
-                                if let next {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Next up")
-                                            .font(.headline)
-                                            .foregroundStyle(Theme.secondaryText)
-                                        Text(next.name)
-                                            .font(.title2)
-                                            .fontWeight(.bold)
-                                            .lineLimit(2)
-                                            .minimumScaleFactor(0.8)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(16)
-                                    .themeCard(cornerRadius: 16)
-                                }
-                                if plan.finisher != nil {
-                                    finisherCard(for: store.draftSourcePlan ?? plan)
-                                }
-                                saveButton(for: plan)
-                            }
-                            // 96pt so the save button never sits under the
-                            // floating menu button. (The keyboard lift for
-                            // this layout lives on the outer VStack below.)
-                            .padding(.bottom, fabClearance)
-                        }
-                        .frame(width: paneWidth)
-                        .frame(maxHeight: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .padding(.horizontal, 16)
+                Spacer(minLength: 8)
+                workoutActionsMenu
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Keyboard lift: the tent panes are fixed-height, so when the
-            // keyboard is up the whole layout shrinks from the bottom
-            // and the giant Mark Set Done button rises above the
-            // keyboard instead of hiding behind it. Tent has no text
-            // fields of its own — the keyboard here is a leftover from
-            // another layout — so the Done toolbar below is the way out,
-            // and this lift keeps the button reachable until then.
-            .padding(.bottom, keyboardHeight)
-            .toolbar(.hidden, for: .navigationBar)
-            // The keyboard toolbar was missing here (the other three
-            // layouts had it): a numeric/text field focused in this
-            // pose had no Done above the keyboard at all.
-            .toolbar { keyboardDoneToolbar }
+
+            // The number, as big as the space allows.
+            Group {
+                if let idx = nextIndex {
+                    let set = logs[idx]
+                    Text("\(store.displayWeightLabel(set.weightLb, isPair: current.isPair, for: current)) × \(set.reps)")
+                } else {
+                    Text("Done")
+                        .foregroundStyle(CompletedTint.completedGlyph)
+                }
+            }
+            .font(.system(size: 140, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .accessibilityLabel(nextIndex.map { "\(store.displayWeightLabel(logs[$0].weightLb, isPair: current.isPair, for: current)), \(logs[$0].reps) reps" } ?? "All sets done")
+
+            // Dots + rest countdown (or what's next).
+            HStack(spacing: 10) {
+                ForEach(logs.indices, id: \.self) { i in
+                    Circle()
+                        .fill(logs[i].done ? Color.accentColor : Theme.track)
+                        .frame(width: 14, height: 14)
+                }
+                Spacer(minLength: 12)
+                tentStatus(next: next)
+            }
+            .padding(.bottom, 14)
+
+            // One action, clear of the floating menu button.
+            Group {
+                if nextIndex != nil {
+                    Button { markNextSetDone(for: current) } label: {
+                        Label("Mark Set Done", systemImage: "checkmark.circle.fill")
+                            .font(.title3.weight(.bold))
+                            .frame(maxWidth: .infinity, minHeight: 56)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .accessibilityLabel("Mark set done")
+                } else if let next {
+                    Button { tentSwipe(from: current.id, forward: true) } label: {
+                        Label("Next: \(next.name)", systemImage: "arrow.right.circle.fill")
+                            .font(.title3.weight(.bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .frame(maxWidth: .infinity, minHeight: 56)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                } else {
+                    saveButton(for: plan)
+                }
+            }
+            .padding(.trailing, 76)
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        // Swipe left/right to change exercise. simultaneousGesture so
+        // the buttons' taps still fire (a plain .gesture swallowed them).
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 40, coordinateSpace: .local)
+                .onEnded { value in
+                    let horizontal = value.translation.width
+                    guard abs(horizontal) > 60, abs(horizontal) > abs(value.translation.height) else { return }
+                    tentSwipe(from: current.id, forward: horizontal < 0)
+                }
+        )
+        // Keyboard lift (a keyboard left over from another layout).
+        .padding(.bottom, keyboardHeight)
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar { keyboardDoneToolbar }
         .background(Theme.background)
+    }
+
+    /// Tent status line: a big rest countdown while resting, otherwise
+    /// the next exercise.
+    @ViewBuilder
+    private func tentStatus(next: ExerciseTemplate?) -> some View {
+        if let endsAt = store.restEndsAt {
+            // Tap the countdown to skip the rest.
+            Button { store.cancelRest() } label: {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let remaining = max(0, Int(endsAt.timeIntervalSince(context.date).rounded(.up)))
+                    HStack(spacing: 8) {
+                        Label("Rest \(remaining / 60):\(String(format: "%02d", remaining % 60))", systemImage: "timer")
+                            .font(.title2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(Color.accentColor)
+                        Text("Skip")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.secondaryText)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Theme.card, in: Capsule())
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Rest timer. Tap to skip the rest.")
+        } else if store.restPausedRemaining != nil {
+            Label("Rest paused", systemImage: "pause.circle")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+        } else if let next {
+            Text("Next: \(next.name)")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
     }
 
     /// Page-turn in the Tent/Seated layout: swipe to the next exercise
