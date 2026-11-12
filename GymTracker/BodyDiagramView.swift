@@ -316,6 +316,15 @@ struct BodyFigureView: View {
     let side: BodyDiagramSide
     var highlighted: Set<MuscleID> = []
     var recovery: [MuscleID: MuscleRecovery] = [:]
+    /// Highlight colour for lit muscles. Nil = the default orange-red
+    /// (the injury diagram keeps it: "this hurts" reads as warm). The
+    /// live workout figure passes the app's accent.
+    var litColor: Color? = nil
+    /// The prime movers among `highlighted`. Nil = every lit muscle at
+    /// full strength. When set, lit muscles NOT in it are synergists and
+    /// draw at reduced strength — a lighter fill, a faint edge, no glow —
+    /// so the figure shows what the exercise mainly works.
+    var primary: Set<MuscleID>? = nil
     var onTap: ((MuscleID) -> Void)? = nil
 
     private var imageName: String { side == .front ? "BodyFront" : "BodyBack" }
@@ -404,9 +413,13 @@ struct BodyFigureView: View {
 
     private func muscleOverlay(_ spec: MuscleSpec, scale: CGFloat) -> some View {
         let lit = highlighted.contains(spec.id)
+        let secondary = lit && (primary.map { !$0.contains(spec.id) } ?? false)
+        let litBase = litColor ?? Self.litGlow
         let fill: Color?
         if lit {
-            fill = Self.litFill
+            fill = litColor == nil && !secondary
+                ? Self.litFill
+                : litBase.opacity(secondary ? 0.4 : 0.85)
         } else if let state = recovery[spec.id] {
             fill = state == .fresh ? Self.freshFill : Self.recoveringFill
         } else {
@@ -430,7 +443,8 @@ struct BodyFigureView: View {
                     .fill(fill ?? Color.clear)
                     .frame(width: 200 * scale, height: 400 * scale)
                 if lit {
-                    shape.stroke(Self.litStroke, lineWidth: 2)
+                    shape.stroke(secondary ? Self.stateStroke : Self.litStroke,
+                                 lineWidth: secondary ? 1 : 2)
                         .frame(width: 200 * scale, height: 400 * scale)
                 } else if recovery[spec.id] == .fresh {
                     // Fresh is never color-only: a dashed white outline
@@ -449,9 +463,10 @@ struct BodyFigureView: View {
             // units the glow still reads as a glow, but two lit
             // muscles stay visibly separate. Fresh gets the full glow
             // too, matching the lit glow.
-            .shadow(color: lit ? Self.litGlow : (recovery[spec.id] == .fresh ? Self.freshFill : .clear),
-                    radius: (lit || recovery[spec.id] == .fresh) ? 3 * scale : 0)
-            .scaleEffect(lit ? 1.02 : 1.0)
+            .shadow(color: (lit && !secondary) ? litBase
+                        : (recovery[spec.id] == .fresh ? Self.freshFill : .clear),
+                    radius: ((lit && !secondary) || recovery[spec.id] == .fresh) ? 3 * scale : 0)
+            .scaleEffect(lit && !secondary ? 1.02 : 1.0)
             .animation(AppAnimation.snappy, value: lit)
         }
         .accessibilityLabel(spec.id.accessibilityLabel)
@@ -720,6 +735,32 @@ struct LiveBodyView: View {
         }.map { $0.id })
     }
 
+    /// The prime mover's regions: lit at full strength; the rest of
+    /// `litMuscles` are synergists and draw lighter.
+    private var primaryLitMuscles: Set<MuscleID> {
+        guard let primaryMuscle else { return litMuscles }
+        return litMuscles.filter { $0.muscleGroup == primaryMuscle }
+    }
+
+    /// The app's effective accent (same rule as the menu button and the
+    /// Live Activity): Pro users' chosen accent, else the default.
+    private var accent: Color {
+        store.isPro ? store.settings.accentColor.color : Theme.accent
+    }
+
+    /// "Back · Biceps · Forearms" with the prime mover in bold, so the
+    /// caption matches the figure's emphasis.
+    private var litCaption: Text {
+        litGroups.enumerated().reduce(Text("")) { text, item in
+            let (index, group) = item
+            let separator = index == 0 ? Text("") : Text(" · ")
+            let label = group == primaryMuscle
+                ? Text(group.label).bold().foregroundColor(.primary)
+                : Text(group.label)
+            return text + separator + label
+        }
+    }
+
     /// The side that shows the primary muscle first: a row shows the
     /// back, a squat shows the front (quads), a pushdown shows the back
     /// (triceps). Counting synergist groups hid the prime mover — a row
@@ -751,12 +792,13 @@ struct LiveBodyView: View {
                 .frame(width: 140)
                 .onChange(of: side) { _, _ in userFlipped = true }
             }
-            BodyFigureView(side: side, highlighted: litMuscles)
+            BodyFigureView(side: side, highlighted: litMuscles,
+                           litColor: accent, primary: primaryLitMuscles)
                 .modifier(LiveBodyFigureHeight(height: figureHeight))
                 .animation(AppAnimation.snappy, value: side)
                 .animation(AppAnimation.snappy, value: litMuscles)
             if !litGroups.isEmpty {
-                Text(litGroups.map { $0.label }.joined(separator: " · "))
+                litCaption
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .multilineTextAlignment(.center)
