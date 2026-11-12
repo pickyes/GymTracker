@@ -55,15 +55,6 @@ struct TodayView: View {
     /// current exercise's card glide between layouts in this space.
     /// (DaRon 21:53.)
     @Namespace private var foldNamespace
-    /// Fold/pose state (Debug Pass 2, fold glitch): `layoutKind(for:)`
-    /// is a step function of the live window size, so mid-fold the size
-    /// sweeps through intermediate aspect ratios and the raw kind flips
-    /// 2–3 times per physical fold. `stableLayoutKind` is the DEBOUNCED
-    /// kind todayContent renders — one swap per fold, committed only
-    /// after the size settles (see schedulePoseCommit). Nil before the
-    /// first fold: the live kind renders until then, with no delay.
-    @State private var stableLayoutKind: TodayLayoutKind? = nil
-    @State private var poseCommitTask: Task<Void, Never>? = nil
     /// Live-body side/flip, hoisted out of LiveBodyView (Debug Pass 2):
     /// LiveBodyView is rebuilt per layout (a new identity each swap),
     /// so its own @State would snap the figure back to the auto side on
@@ -120,22 +111,14 @@ struct TodayView: View {
         // they present from this stack's hierarchy.)
         NavigationStack {
             GeometryReader { proxy in
-                // The raw kind flips transiently mid-fold (see the
-                // stableLayoutKind note above); the debounced kind is
-                // what renders, the raw kind just reflows continuously
-                // underneath until the commit lands.
                 let rawKind = layoutKind(for: proxy.size)
-                todayContent(kind: stableLayoutKind ?? rawKind)
-                    // The fold/unfold animation: when the debounced kind
-                    // commits, the body and the current card glide to
-                    // their new panes on the one shared fold spring
-                    // instead of snapping. Only fires when the kind
-                    // commits — a keyboard pop or a scroll never
-                    // retriggers it. (DaRon 21:53.)
-                    .animation(FoldAnimation.morph, value: stableLayoutKind ?? rawKind)
-                    .onChange(of: rawKind) { _, newKind in
-                        schedulePoseCommit(newKind)
-                    }
+                // Fold/unfold (Nov 12 redesign): NO morph and no delay.
+                // Folded and open-upright are the SAME workout column view
+                // (see compactLayout), so opening the phone keeps it
+                // exactly where it was — same scroll, same width — and the
+                // body pane is simply revealed beside it, already waiting.
+                todayContent(kind: rawKind)
+                    .transaction { $0.animation = nil }
                     // Calendar dropdown (Item B): the same card ContentView's
                     // menu drops down — scrim + card over the Today page, so
                     // Today stays visible (dimmed) behind it. Never a sheet.
@@ -182,7 +165,6 @@ struct TodayView: View {
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
-            poseCommitTask?.cancel()
         }
         .onChange(of: plan?.key) { _, _ in
             if let plan {
@@ -443,7 +425,7 @@ struct TodayView: View {
     /// current exercise is derived from the draft, and each layout
     /// scrolls back to the current card on appear (scrollToCurrent).
     private enum TodayLayoutKind: Equatable {
-        case compact, regular, propped, tent
+        case compact, split, regular, propped, tent
     }
 
     private func layoutKind(for size: CGSize) -> TodayLayoutKind {
@@ -470,6 +452,10 @@ struct TodayView: View {
         // edge and covered the Front/Back toggle. That pose now gets the
         // single column, which has room to spare at 669pt.
         if horizontalSizeClass == .regular && size.width >= 760 { return .regular }
+        // Open inner display held upright (~669pt): the outer display's
+        // column at its own width on the right, the body revealed on the
+        // left (Nov 12: "the other side is just waiting to be seen").
+        if size.width >= Self.outerDisplayWidth + 150 { return .split }
         // Outer display: single column, one-handed.
         return .compact
     }
@@ -503,39 +489,12 @@ struct TodayView: View {
                     proppedLayout(for: plan)
                 case .regular:
                     regularLayout(for: plan)
-                case .compact:
-                    compactLayout(for: plan)
+                case .compact, .split:
+                    compactLayout(for: plan, split: kind == .split)
                 }
             }
         } else {
             restDayView()
-        }
-    }
-
-    /// Commits a layout kind after the window size settles (Debug Pass 2,
-    /// fold glitch — the return to the open display is the worst case:
-    /// front → open sweeps the size through the tent/propped thresholds
-    /// transiently, so the raw kind flips 2–3 times in one unfold).
-    /// The pending commit is cancelled and rescheduled on every raw flip,
-    /// so only the kind the size SETTLES on ever mounts — transient
-    /// tent/propped flashes never appear, and a fold-back mid-animation
-    /// just cancels the pending commit instead of stacking a second swap
-    /// on top of the first. The commit itself runs on
-    /// FoldAnimation.morph, so the matched-geometry views retarget the
-    /// same spring from their current presentation value — a reversal
-    /// glides back, it never snaps.
-    private func schedulePoseCommit(_ newKind: TodayLayoutKind) {
-        guard newKind != stableLayoutKind else { return }
-        poseCommitTask?.cancel()
-        // @MainActor: the commit writes @State, so the task must run on
-        // the main actor even though schedulePoseCommit itself is only
-        // ever called from main-actor UI callbacks.
-        poseCommitTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: FoldAnimation.poseSettleNanoseconds)
-            guard !Task.isCancelled else { return }
-            withAnimation(FoldAnimation.morph) {
-                stableLayoutKind = newKind
-            }
         }
     }
 
@@ -863,7 +822,37 @@ struct TodayView: View {
 
     // MARK: - Compact (outer display, one-handed, glanceable)
 
-    private func compactLayout(for plan: DayPlan) -> some View {
+    /// Width of the outer (folded) display, in points. In the open
+    /// upright pose the workout column keeps exactly this width so
+    /// unfolding never re-lays it out.
+    static let outerDisplayWidth: CGFloat = 466
+
+    /// Folded: the single column. `split` (open, upright): the SAME
+    /// column at the outer display's width on the right, with the live
+    /// body in a pane on the left. The column is always the HStack's
+    /// second child, so SwiftUI keeps its identity (and scroll position)
+    /// across fold/unfold; only the left pane appears or disappears.
+    private func compactLayout(for plan: DayPlan, split: Bool) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            if split, let currentID = displayedExerciseID(for: plan),
+               let current = exercises.first(where: { $0.id == currentID }) {
+                LiveBodyView(
+                    exerciseID: current.id,
+                    nextExerciseID: nextExercise(after: current.id, in: exercises)?.id,
+                    figureHeight: nil,
+                    sideBinding: $liveBodySide,
+                    userFlippedBinding: $liveBodyUserFlipped
+                )
+                .padding(.leading, 12)
+                .padding(.top, 60)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            compactColumn(for: plan, showBody: !split)
+                .frame(width: split ? Self.outerDisplayWidth : nil)
+        }
+    }
+
+    private func compactColumn(for plan: DayPlan, showBody: Bool) -> some View {
         // Plain Group: the page's single NavigationStack lives in body.
         Group {
             ScrollViewReader { proxy in
@@ -915,8 +904,9 @@ struct TodayView: View {
                             }
                             finisherCard(for: store.draftSourcePlan ?? plan)
                             saveButton(for: plan)
-                            // Live body, compact: under the current exercise.
-                            if let currentID = displayedExerciseID(for: plan),
+                            // Live body, compact: under the current exercise
+                            // (in the open pose it lives in the left pane).
+                            if showBody, let currentID = displayedExerciseID(for: plan),
                                let current = exercises.first(where: { $0.id == currentID }) {
                                 LiveBodyView(
                                     exerciseID: current.id,
@@ -924,11 +914,6 @@ struct TodayView: View {
                                     sideBinding: $liveBodySide,
                                     userFlippedBinding: $liveBodyUserFlipped
                                 )
-                                // Fold/unfold morph: the body glides from
-                                // under the card (outer display) into the
-                                // left pane (open) instead of popping.
-                                // (DaRon 21:53.)
-                                .matchedGeometryEffect(id: "liveBody", in: foldNamespace)
                             }
                         }
                         .padding(.horizontal, 16)

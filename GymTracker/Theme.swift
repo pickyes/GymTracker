@@ -220,19 +220,9 @@ extension EnvironmentValues {
 ///   the glitch. This settles in ~0.45s, inside the fold.
 /// - `settle`: the 150–200ms ease-out for fades that ride the fold
 ///   (Track 3: continuity transitions are 150–200ms ease-out).
-/// - `poseSettleNanoseconds`: the debounce window for the pose commit
-///   (TodayView.schedulePoseCommit). Mid-fold the window size sweeps
-///   through intermediate aspect ratios and crosses the layout
-///   thresholds transiently; a kind only commits after the size has
-///   been quiet this long. A fold-back inside the window cancels the
-///   pending commit, so a mid-animation reversal never mounts an
-///   intermediate layout and never stacks animations — the single
-///   commit just retargets the same spring from its current
-///   presentation value.
 enum FoldAnimation {
     static let morph = Animation.spring(response: 0.25, dampingFraction: 0.9)
     static let settle = Animation.easeOut(duration: 0.2)
-    static let poseSettleNanoseconds: UInt64 = 90_000_000
 }
 
 extension View {

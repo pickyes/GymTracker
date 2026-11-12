@@ -103,8 +103,8 @@ struct ContentView: View {
                             // bottom edge with no animation at all. Animate
                             // the button's travel on the shared fold spring
                             // so it glides with the rest of the morph.
-                            .animation(FoldAnimation.morph, value: proxy.safeAreaInsets.bottom)
-                            .animation(FoldAnimation.morph, value: proxy.size)
+                            // No glide on fold/unfold (Nov 12): the button is
+                            // simply in its corner on the new screen.
                         // Calendar dropdown (DaRon 22:28: "calendar needs
                         // to drop down from the menu not slide up") — a
                         // panel anchored above the menu button that drops

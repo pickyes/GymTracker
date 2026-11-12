@@ -867,20 +867,32 @@ struct LiveBodyView: View {
         return backCount > frontCount ? .back : .front
     }
 
+    private var sidePicker: some View {
+        Picker("View", selection: $side) {
+            ForEach(BodyDiagramSide.allCases, id: \.self) { side in
+                Text(side.label).tag(side)
+            }
+        }
+        .pickerStyle(.segmented)
+        .onChange(of: side) { _, _ in userFlipped = true }
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            HStack {
-                Text("Working now")
-                    .font(.headline)
-                Spacer()
-                Picker("View", selection: $side) {
-                    ForEach(BodyDiagramSide.allCases, id: \.self) { side in
-                        Text(side.label).tag(side)
-                    }
+            // Narrow panes (the open Duo's left strip, ~200pt) stack the
+            // title over the Front/Back switch; otherwise side by side.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text("Working now")
+                        .font(.headline)
+                    Spacer()
+                    sidePicker.frame(width: 140)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 140)
-                .onChange(of: side) { _, _ in userFlipped = true }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Working now")
+                        .font(.headline)
+                    sidePicker
+                }
             }
             BodyFigureView(side: side, highlighted: litMuscles,
                            litColor: accent, primary: primaryLitMuscles)
