@@ -871,33 +871,49 @@ extension View {
 /// so it blurs what's underneath without lightening the true-black page
 /// into a grey band (the tint was what made the earlier band).
 struct UntintedBlur: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
-        view.isUserInteractionEnabled = false
-        clearTint(view)
-        return view
+    func makeUIView(context: Context) -> UntintedBlurView { UntintedBlurView() }
+    func updateUIView(_ view: UntintedBlurView, context: Context) { view.stripTint() }
+}
+
+/// A system blur with every tint, dim and saturation layer removed, kept
+/// that way: the system re-adds them on layout and on light/dark changes
+/// (on the phone the strip came back grey 30 instead of black), so the
+/// strip is re-applied each time, not once.
+final class UntintedBlurView: UIVisualEffectView {
+    init() {
+        super.init(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+        isUserInteractionEnabled = false
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        stripTint()
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        stripTint()
+        DispatchQueue.main.async { [weak self] in self?.stripTint() }
+    }
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        stripTint()
     }
 
-    func updateUIView(_ view: UIVisualEffectView, context: Context) {
-        clearTint(view)
-    }
-
-    /// The first subview is the backdrop (the blur itself); the rest are
-    /// the material's color overlays.
-    private func clearTint(_ view: UIVisualEffectView) {
-        DispatchQueue.main.async {
-            for overlay in view.subviews.dropFirst() {
-                overlay.backgroundColor = .clear
-                overlay.alpha = 0
-            }
-            // The backdrop also dims/saturates what it blurs (white came
-            // out 247 grey — a visible band). Keep only its blur filter.
-            if let backdrop = view.subviews.first,
-               let filters = backdrop.layer.filters {
-                let blurOnly = filters.filter { String(describing: $0).lowercased().contains("blur") }
-                if !blurOnly.isEmpty, blurOnly.count != filters.count {
-                    backdrop.layer.filters = blurOnly
+    func stripTint() {
+        for sub in subviews {
+            let name = String(describing: type(of: sub))
+            if name.contains("Backdrop") {
+                // Keep only the blur itself.
+                if let filters = sub.layer.filters {
+                    let blur = filters.filter { String(describing: $0).lowercased().contains("blur") }
+                    if !blur.isEmpty, blur.count != filters.count { sub.layer.filters = blur }
                 }
+                sub.backgroundColor = .clear
+            } else {
+                // Tint / overlay views.
+                sub.backgroundColor = .clear
+                sub.alpha = 0
             }
         }
     }
