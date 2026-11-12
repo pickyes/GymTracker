@@ -2573,24 +2573,31 @@ struct SetRow: View {
                     .lineLimit(1)
                     .fixedSize()
             }
+
+            // Visible delete: icon-only red trash can, no text. (DaRon
+            // 2026-11-10 08:20: "Just make it a trash can no words".)
+            // It used to live in .swipeActions — but the rows sit in a
+            // plain VStack inside a ScrollView, not a List, so swipe
+            // actions never render and no trash icon ever appeared on
+            // screen. The button sits in the row itself, exactly
+            // setRowControlHeight tall, so it shares the row's single
+            // vertical center line with the checkbox, "Set N", "+", and
+            // the weight/reps boxes. The words survive as the
+            // VoiceOver label.
+            Button { onDelete() } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .frame(width: setRowControlHeight, height: setRowControlHeight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete set")
         }
         // Done rows sit back slightly — but only a touch: the old 0.6
         // dim would bury the faint completed tint to near-invisible,
         // and the tint is what says "done" now. (DaRon 22:32.)
         .opacity(set.done ? 0.85 : 1)
-        // Delete is icon-only (DaRon 2026-11-10 08:20: "Just make it a
-        // trash can no words") — the text label was also what made the
-        // system button taller than the boxes. The button fills the row,
-        // and the row is setRowControlHeight tall (the boxes set it), so
-        // the trash button is exactly the boxes' height and the row sits
-        // flush. The trash icon + destructive red keep it unmistakably
-        // a delete control; the words survive as the VoiceOver label.
-        .swipeActions {
-            Button(role: .destructive) { onDelete() } label: {
-                Image(systemName: "trash")
-            }
-            .accessibilityLabel("Delete set")
-        }
     }
 }
 

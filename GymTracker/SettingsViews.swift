@@ -387,8 +387,8 @@ enum AppIconChoice: String, CaseIterable {
     }
 
     /// The alternate icon name in the asset catalog (nil = the primary icon).
-    /// Verified against Info.plist CFBundleAlternateIcons: "AppIcon-Dark"
-    /// and "AppIcon-Teal" match the plist keys exactly.
+    /// Must match ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIcon-Dark"
+    /// and "AppIcon-Teal" (build setting; actool writes the plist entries).
     var iconName: String? {
         switch self {
         case .primary: return nil
@@ -855,6 +855,50 @@ struct ProgramsView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             }
+            // D43 (2026-11-10): the page ended at the Free footer with
+            // more than half the screen empty below it. Fill it with
+            // real data only — the active program's day breakdown and
+            // a library preview by goal — no invented content, no
+            // change to the rows or copy above, and the 96pt bottom
+            // clearance spacer below stays untouched.
+            if let activeProgram = store.activeProgram, !activeProgram.days.isEmpty {
+                Section("This week — \(activeProgram.name)") {
+                    ForEach(activeProgram.days) { day in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(day.title)
+                                    .font(.headline)
+                                Text(day.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            Spacer()
+                            Text("\(day.exercises.count) exercises · ~\(day.estimatedMinutes) min")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                    }
+                    Text(weekSummary(for: activeProgram))
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            Section("Library at a glance") {
+                HStack {
+                    Text("Your favorites")
+                    Spacer()
+                    Text("\(store.favoriteProgramIDs.count) program\(store.favoriteProgramIDs.count == 1 ? "" : "s")")
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                ForEach(CatalogGoal.allCases, id: \.self) { goal in
+                    HStack {
+                        Text(goal.label)
+                        Spacer()
+                        Text("\(ProgramLibrary.programs(goal: goal).count) programs")
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
             Section {
                 Text("Free: your generated program + 1 extra. Pro: unlimited programs.")
                     .font(.caption)
@@ -904,6 +948,14 @@ struct ProgramsView: View {
         if program.isPreset { return "Preset" }
         if store.extraPrograms.contains(where: { $0.id == program.id }) { return "Custom" }
         return "Generated"
+    }
+
+    /// D43: weekly totals for the active program's day breakdown —
+    /// days, exercises, and planned sets, all from the program itself.
+    private func weekSummary(for program: UserProgram) -> String {
+        let exercises = program.days.flatMap { $0.exercises }
+        let sets = exercises.reduce(0) { $0 + $1.sets }
+        return "\(program.days.count) days · \(exercises.count) exercises · \(sets) sets this week"
     }
 }
 

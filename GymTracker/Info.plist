@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
@@ -31,7 +31,7 @@
 	<true/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -122,32 +122,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<!-- Alternate app icons (Settings → App icon). The image sets live in
-	     Assets.xcassets as AppIcon-Dark and AppIcon-Teal. -->
-	<key>CFBundleIcons</key>
-	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>AppIcon-Dark</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Dark</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<false/>
-			</dict>
-			<key>AppIcon-Teal</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>AppIcon-Teal</string>
-				</array>
-				<key>UIPrerenderedIcon</key>
-				<false/>
-			</dict>
-		</dict>
-	</dict>
+	<!-- Alternate app icons (Settings → App icon): AppIcon-Dark and AppIcon-Teal
+	     in Assets.xcassets. Declared via the build setting
+	     ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES — actool compiles the
+	     icons and writes CFBundleIcons into the built Info.plist. Do not add
+	     CFBundleIcons here by hand (App Store rejects it: ITMS-90032). -->
+	<!-- Export compliance: only Apple-provided/exempt encryption is used. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- Privacy manifest is a separate PrivacyInfo.xcprivacy file (Data Not
 	     Collected). This plist carries no data-collection declarations. -->
 </dict>

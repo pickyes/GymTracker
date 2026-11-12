@@ -208,13 +208,16 @@ struct ContentView: View {
     /// "still too low"). The old 24pt rule put the center ~93% down,
     /// flush against the bottom edge; the approved shot has ~225px of
     /// clear space below the button. The button is 56pt, so the naive
-    /// padding is 0.26 * screenHeight - 28; the -8 below folds in a
-    /// +20pt upward calibration — the 20:47 measurement showed a
+    /// padding is 0.26 * screenHeight - 28; the +25 below folds in a
+    /// +53pt upward calibration — the 20:47 measurement showed a
     /// fraction-based pin landing ~39pt too low, consistent with the
     /// GeometryReader/window extending ~38pt below the visible display
-    /// (no home-indicator pill visible in the folded bottom strip).
-    /// Verify the landed position on screen per pose and adjust the
-    /// calibration if it is off; do not re-derive it from the code.
+    /// (no home-indicator pill visible in the folded bottom strip),
+    /// and the -8 baseline still landed ~33pt too low on screen
+    /// (21:08: (0.843, 0.780) folded). Verified on screen on all
+    /// pages/poses at (0.845, 0.733) folded / (0.833, 0.740) open —
+    /// adjust the constant only from a new on-screen measurement;
+    /// do not re-derive it from the code.
     /// When the keyboard is up, the safe area IS the keyboard
     /// (safeAreaBottom > 100): the padding becomes the keyboard height
     /// + 12, so the button sits 12pt above the keyboard.

@@ -4,13 +4,20 @@ import SwiftUI
 /// back — with overlays that tint or glow the muscle regions. The body
 /// is never drawn in code. The images are the matched pair in the asset
 /// catalog (`BodyFront` / `BodyBack`, 1120×2240, red anatomical muscle
-/// figure on a white background, no labels, correct human proportions).
-///
-/// The figure is shown on a white card (the images have white
-/// backgrounds, so the card blends with them and reads on both dark and
-/// light screens). Every muscle is a tappable overlay region: in the
-/// injury diagram it marks a body part; on the workout screen it lights
-/// up live for the current exercise's muscles; on the Body screen it is
+/// figure on a TRANSPARENT background — the white baked into the
+/// generated PNGs was converted to alpha by body-images/
+/// make_transparent.py, and the converted RGBA files are what the
+/// catalog holds. MUST STAY RGBA: putting the RGB white-background
+/// originals back in the catalog re-opens DaRon's 2026-11-10 defect
+/// ("background of the body needs to match") — a white box exactly the
+/// figure's frame on the true-black theme (seen in rerun-shot 212).
+/// No card sits behind the figure anywhere: the transparent image lets
+/// the app's own background show through — true black #000000 in dark
+/// mode (Theme.background), system background in light mode — on every
+/// surface that shows the body (Today open-pose pane, Body screen,
+/// rest-day recovery view, injury diagram). Every muscle is a tappable
+/// overlay region: in the injury diagram it marks a body part; on the
+/// workout screen it lights up live for the current exercise's muscles; on the Body screen it is
 /// coloured by recovery state from logged history (fresh muscles bright
 /// pink, recently trained muscles purple, the rest the image's own red).
 ///
@@ -293,8 +300,10 @@ private let muscleSpecs: [MuscleSpec] = [
     MuscleSpec(.footRight, .back, cx: 118, cy: 381, rx: 11, ry: 11),
 ]
 
-/// The anatomical figure itself: the real image on a white card, with a
-/// tappable tint/glow overlay over each muscle region. `highlighted` is
+/// The anatomical figure itself: the real image (transparent
+/// background — it sits directly on Theme.background, true black in
+/// dark mode, system background in light mode, with no card or panel
+/// behind it), with a tappable tint/glow overlay over each muscle region. `highlighted` is
 /// the set of muscles lit up right now (bright + glow — injury marks, or
 /// the live workout muscles). `recovery` colours each muscle by its
 /// recovery state from logged history (fresh = bright pink, recovering =

@@ -23,8 +23,10 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Title lines up with the section headers and card text
+                // Title lines up with the section headers and row text
                 // below it (same 16pt leading), not flush to the edge.
+                // Only true with .listStyle(.plain) on this List — see
+                // the note there.
                 PageTitle(text: "Profile")
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
@@ -371,6 +373,15 @@ struct ProfileView: View {
                     }
                 }
             }
+            // Plain style (same as HistoryView:127): the default
+            // .automatic style renders insetGrouped rows, which inset
+            // the cards AND stack this row's 16pt leading on top of
+            // the grouped margin — that pushed the title and the
+            // section headers ~16pt right of the card edges
+            // (measured Nov 10: title 394, headers 396–397, cards
+            // 379–380). Plain puts title, headers, and row text all
+            // on the same 16pt leading. Do not remove this.
+            .listStyle(.plain)
             .oledList()
             .onChange(of: weightText) { _, _ in
                 saveWeight()
