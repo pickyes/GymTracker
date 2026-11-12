@@ -142,7 +142,7 @@ struct TodayView: View {
                     .transaction { $0.animation = nil }
                     // Calendar open: the page behind blurs and goes black
                     // and white, like behind the open menu (DaRon, Nov 12).
-                    .blur(radius: showCalendarDropdown ? 10 : 0)
+                    .blur(radius: showCalendarDropdown ? 3 : 0)  // light: the page stays readable behind it
                     .saturation(showCalendarDropdown ? 0 : 1)
                     .animation(AppAnimation.snappy, value: showCalendarDropdown)
                     // Calendar dropdown: hangs from the Today arrow and
@@ -288,7 +288,7 @@ struct TodayView: View {
         let close = { withAnimation(AppAnimation.snappy) { showCalendarDropdown = false } }
         return ZStack(alignment: .topLeading) {
             // Tap anywhere outside to fold it back up.
-            Color.black.opacity(0.12)
+            Color.black.opacity(0.06)
                 .ignoresSafeArea()
                 .onTapGesture(perform: close)
             VStack(spacing: 0) {
