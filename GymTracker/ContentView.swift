@@ -123,10 +123,6 @@ struct ContentView: View {
                                 .accessibilityHidden(true)
                         }
                         bottomStack
-                            // Out of the way while Today's calendar is open.
-                            .opacity(store.calendarDropdownOpen ? 0 : 1)
-                            .allowsHitTesting(!store.calendarDropdownOpen)
-                            .animation(AppAnimation.snappy, value: store.calendarDropdownOpen)
                             // Bottom-right corner, lined up with the
                             // cards' "+" column (see fabTrailingPadding /
                             // fabBottomPadding). The rest-timer panel
@@ -406,14 +402,14 @@ struct ContentView: View {
             // Rest timer (Nov 12, DaRon): an upright pill at the top of the
             // button column (above swap), growing out of the corner. Tap
             // it for the full controls. Tent pose has its own tile.
-            if restActive && !isTentPose && !navExpanded {
+            if restActive && !isTentPose && !navExpanded && !store.calendarDropdownOpen {
                 RestTimerCard(pill: true)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
             // Swap sides (open Duo only): above the menu button (and
             // above the rest pill while one runs). Hidden while the menu
             // is open.
-            if showSwapButton && Self.isWide(steadySize) && !navExpanded {
+            if showSwapButton && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
                 swapSidesButton
                     // Out of the shadows: emerges with the hinge as the
                     // Duo opens, and fades/blurs in when it appears.
@@ -544,15 +540,20 @@ struct ContentView: View {
     private var fabButton: some View {
         Button {
             withAnimation(AppAnimation.snappy) {
-                if showCalendar {
+                // Today's calendar open: the button is its Done (✓).
+                if store.calendarDropdownOpen {
+                    store.calendarDropdownOpen = false
+                } else if showCalendar {
                     showCalendar = false
                 } else {
                     navExpanded.toggle()
                 }
             }
         } label: {
-            let open = navExpanded || showCalendar
-            let icon = Image(systemName: open ? "xmark" : "list.bullet")
+            let calendarDone = store.calendarDropdownOpen
+            let open = navExpanded || showCalendar || calendarDone
+            let icon = Image(systemName: calendarDone ? "checkmark" : open ? "xmark" : "list.bullet")
+                .contentTransition(.symbolEffect(.replace))
                 .font(.title3.weight(.semibold))
                 .frame(width: 56, height: 56)
             Group {
@@ -573,7 +574,7 @@ struct ContentView: View {
         .scaleEffect(navExpanded || showCalendar ? 1.25 : 1.0)
         .animation(AppAnimation.snappy, value: navExpanded)
         .animation(AppAnimation.snappy, value: showCalendar)
-        .accessibilityLabel(showCalendar ? "Close calendar" : navExpanded ? "Close navigation" : "Open navigation")
+        .accessibilityLabel(store.calendarDropdownOpen ? "Done with calendar" : showCalendar ? "Close calendar" : navExpanded ? "Close navigation" : "Open navigation")
     }
 
     /// The app's effective accent color — the same rule the Live

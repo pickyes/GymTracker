@@ -154,6 +154,12 @@ struct TodayView: View {
                     }
                     .animation(AppAnimation.snappy, value: showCalendarDropdown)
                     .onChange(of: showCalendarDropdown) { _, open in store.calendarDropdownOpen = open }
+                    // The menu button's ✓ closes it.
+                    .onChange(of: store.calendarDropdownOpen) { _, open in
+                        if !open && showCalendarDropdown {
+                            withAnimation(AppAnimation.snappy) { showCalendarDropdown = false }
+                        }
+                    }
             }
         }
         .disableVerticalBar()
@@ -274,7 +280,7 @@ struct TodayView: View {
         let wide = size.width > size.height && size.width > 600
         let arrowX = (columnX + 135) / max(size.width, 1)
         let close = { withAnimation(AppAnimation.snappy) { showCalendarDropdown = false } }
-        return CalendarView(onDone: close, sideBySide: wide)
+        return CalendarView(onDone: close, sideBySide: wide, showsDone: false)
             .padding(.top, 34)
             .frame(width: size.width, height: size.height + 34)
             // Solid to the very bottom edge (the page under it can measure

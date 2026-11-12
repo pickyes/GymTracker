@@ -38,6 +38,9 @@ struct CalendarView: View {
     /// calendar"): the whole month on the left, the chosen day's detail
     /// beside it, so nothing has to scroll.
     var sideBySide: Bool = false
+    /// The full-page Today calendar closes with the menu button's ✓, so
+    /// its header drops the Done button.
+    var showsDone: Bool = true
 
     private var selectedDate: Date {
         get { externalSelection?.wrappedValue ?? localSelectedDate }
@@ -135,7 +138,7 @@ struct CalendarView: View {
                 Text("Calendar")
                     .font(.headline)
                 HStack {
-                    Button("Done") { close() }
+                    if showsDone { Button("Done") { close() } }
                     Spacer()
                 }
             }
