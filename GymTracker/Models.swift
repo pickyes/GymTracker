@@ -1200,7 +1200,7 @@ struct AppSettings: Codable, Equatable {
     var keepScreenAwake: Bool = false
     // Appearance — theme is free for everyone; accent colors are Pro.
     // Default is OLED dark (DaRon, 2026-11-09).
-    var colorScheme: ColorSchemeSetting = .dark
+    var colorScheme: ColorSchemeSetting = .auto
     var accentColor: AccentColorName = .blue
     // Reminders
     var reminderTimeHour: Int = 17
@@ -3011,14 +3011,18 @@ final class WorkoutStore: ObservableObject {
         if let data = SharedDefaults.store.data(forKey: settingsKey),
            let decoded = SafeDecode.value(AppSettings.self, from: data, key: settingsKey) {
             settings = decoded
-            // OLED migration (2026-11-09): the old default was Auto and the
-            // theme picker was Pro-gated, so no user ever deliberately
-            // chose Auto — a stored Auto means "never chose", so it
-            // becomes the new default, OLED dark. A deliberate Light
-            // choice is untouched.
-            if settings.colorScheme == .auto {
-                settings.colorScheme = .dark
-                persistCustomization()
+            // Appearance follows the system (Nov 12: "app should respect
+            // all system settings"). The Nov 9 OLED migration forced every
+            // Auto to Dark on every launch, so a stored Dark was never a
+            // real choice: turn it back to Auto once. A Light choice, or a
+            // Dark picked after this, is kept.
+            let followsSystemKey = "gymtracker.themeFollowsSystem.v1"
+            if !SharedDefaults.store.bool(forKey: followsSystemKey) {
+                if settings.colorScheme == .dark {
+                    settings.colorScheme = .auto
+                    persistCustomization()
+                }
+                SharedDefaults.store.set(true, forKey: followsSystemKey)
             }
         }
         if let data = SharedDefaults.store.data(forKey: extraProgramsKey),

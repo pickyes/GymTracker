@@ -33,20 +33,20 @@ struct ContentView: View {
     @State private var selectedPage: Page = .today
     @State private var navExpanded = false
     @State private var showCalendar = false
+    /// System setting: Reduce Motion → fades instead of pops and grows.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Open Duo: mirror the two pages (swap button, bottom-left). Kept
     /// across launches.
-    /// Kept in the shared App Group store (with the workouts and notes,
-    /// which survive app updates and reinstalls) and flushed to disk on
-    /// every tap — so it stays swapped until tapped again, through
-    /// folding, closing the app, or powering off (DaRon, Nov 12).
-    @AppStorage("duoSwapSides", store: SharedDefaults.store) private var swapSides = false
+    /// Swap + swap-button choices, saved to their own file on every tap
+    /// so nothing (closing, updates, power-off) can undo them.
+    @ObservedObject private var duo = DuoSettings.shared
+    private var swapSides: Bool { duo.swapSides }
     /// The page area ignoring the keyboard. Pose decisions (two pages
     /// or one, Today's layout) use this: with the keyboard up the safe
     /// area shrinks, which flipped the open Duo to the folded layout
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
-    /// Settings → Open display → Swap button.
-    @AppStorage("duoShowSwapButton", store: SharedDefaults.store) private var showSwapButton = true
+    private var showSwapButton: Bool { duo.showSwapButton }
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
     @State private var calendarDay: Date = Calendar.current.startOfDay(for: Date())
@@ -93,6 +93,9 @@ struct ContentView: View {
                             .blur(radius: navExpanded ? 10 : 0)
                             .saturation(navExpanded ? 0 : 1)
                             .animation(AppAnimation.snappy, value: navExpanded)
+                        // Content scrolling up under the status bar blurs
+                        // and greys out, ombre-style (Nov 12).
+                        StatusBarFade()
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -236,9 +239,7 @@ struct ContentView: View {
     /// Mirrors the two pages on the open Duo.
     private var swapSidesButton: some View {
         Button {
-            withAnimation(AppAnimation.snappy) { swapSides.toggle() }
-            // Write it out now, not whenever the system gets to it.
-            SharedDefaults.store.synchronize()
+            withAnimation(AppAnimation.snappy) { duo.swapSides.toggle() }
         } label: {
             Image(systemName: "arrow.left.arrow.right")
                 .scaledFont(size: 20, weight: .semibold, maxScale: 1.3)
@@ -246,8 +247,8 @@ struct ContentView: View {
                 // Same 56pt circle, border and shadow as the menu button
                 // below it, so the two line up as one column (DaRon).
                 .frame(width: 56, height: 56)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(Theme.border, lineWidth: 1.5))
+                .background { GlassFill(shape: Circle()) }
+                .controlBorder(Circle())
                 .shadow(color: .black.opacity(0.3), radius: 6)
         }
         .buttonStyle(.plain)
@@ -397,7 +398,7 @@ struct ContentView: View {
             // it for the full controls. Tent pose has its own tile.
             if restActive && !isTentPose && !navExpanded {
                 RestTimerCard(pill: true)
-                    .transition(.scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
             // Swap sides (open Duo only): above the menu button (and
             // above the rest pill while one runs). Hidden while the menu
@@ -407,7 +408,7 @@ struct ContentView: View {
                     // Out of the shadows: emerges with the hinge as the
                     // Duo opens, and fades/blurs in when it appears.
                     .hingeEmerge()
-                    .transition(.asymmetric(
+                    .transition(reduceMotion ? .opacity : .asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
                         removal: .opacity.animation(.easeIn(duration: 0.15))))
             }
@@ -552,12 +553,12 @@ struct ContentView: View {
                     if navExpanded || showCalendar {
                         effectiveAccent
                     } else {
-                        Circle().fill(.ultraThinMaterial)
+                        GlassFill(shape: Circle())
                             .overlay(Circle().fill(Color.black.opacity(0.35)))
                     }
                 }
                 .clipShape(Circle())
-                .overlay(Circle().stroke(navExpanded || showCalendar ? effectiveAccent : Theme.border, lineWidth: 1.5))
+                .controlBorder(Circle(), tint: navExpanded || showCalendar ? effectiveAccent : nil)
                 .shadow(color: navExpanded || showCalendar ? effectiveAccent.opacity(0.55) : .black.opacity(0.3), radius: navExpanded || showCalendar ? 14 : 6)
         }
         .buttonStyle(.plain)

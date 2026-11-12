@@ -14,7 +14,6 @@ struct GymTrackerApp: App {
     /// appearance, in the app's exact background colour, so the bar
     /// reads as a continuation of the page, not a stripe.
     init() {
-        SharedDefaults.carryOverSwapSetting()
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = UIColor(Theme.background)

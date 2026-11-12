@@ -60,6 +60,8 @@ struct TodayView: View {
     @Namespace private var foldNamespace
     /// StandBy-style tent pose: which card the right tile shows.
     @State private var standbyCard: StandbyCard? = .rest
+    /// Progress card: headline shows exercises instead of sets (tap).
+    @State private var progressShowsExercises = false
     /// Live-body side/flip, hoisted out of LiveBodyView (Debug Pass 2):
     /// LiveBodyView is rebuilt per layout (a new identity each swap),
     /// so its own @State would snap the figure back to the auto side on
@@ -887,7 +889,12 @@ struct TodayView: View {
             .reduce(0.0) { $0 + ($1.weightLb ?? 0) * Double($1.reps) }
         let unit = store.settings.weightUnit
         let volume = unit.displayValue(for: volumeLb) ?? volumeLb
-        let progress = totalSets == 0 ? 0 : Double(doneSets) / Double(totalSets)
+        // Tap to switch the headline between sets and exercises (DaRon):
+        // the other one moves to the small line, and the ring follows.
+        let byExercise = progressShowsExercises
+        let progress = byExercise
+            ? (exercises.isEmpty ? 0 : Double(doneExercises) / Double(exercises.count))
+            : (totalSets == 0 ? 0 : Double(doneSets) / Double(totalSets))
         let ring = ZStack {
             Circle().stroke(Theme.track, lineWidth: 8)
             Circle()
@@ -899,8 +906,12 @@ struct TodayView: View {
         }
         .frame(width: 64, height: 64)
         .animation(AppAnimation.snappy, value: progress)
-        let setsLine = Text("\(doneSets) of \(totalSets) sets").font(.title3.weight(.bold))
-        let detail = Text("\(doneExercises) of \(exercises.count) exercises · \(volume.formatted(.number.precision(.fractionLength(0)))) \(unit.label) lifted")
+        let setsText = "\(doneSets) of \(totalSets) sets"
+        let exercisesText = "\(doneExercises) of \(exercises.count) exercises"
+        let setsLine = Text(byExercise ? exercisesText : setsText)
+            .font(.title3.weight(.bold))
+            .contentTransition(.numericText())
+        let detail = Text("\(byExercise ? setsText : exercisesText) · \(volume.formatted(.number.precision(.fractionLength(0)))) \(unit.label) lifted")
             .font(.subheadline)
             .foregroundStyle(Theme.secondaryText)
         // Wide pane: ring beside the text. Narrow pane (open Duo held
@@ -925,7 +936,13 @@ struct TodayView: View {
         }
         .padding(16)
         .themeCard(cornerRadius: 20)
+        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .onTapGesture {
+            withAnimation(AppAnimation.snappy) { progressShowsExercises.toggle() }
+        }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(byExercise ? "Shows sets instead" : "Shows exercises instead")
     }
 
     /// The body pane revealed beside the workout column on the open Duo.
@@ -1507,7 +1524,7 @@ struct TodayView: View {
                     .font(.title2)
                     .foregroundStyle(set.done ? CompletedTint.completedGlyph : isNext ? Color.accentColor : Theme.tertiaryText)
                 Text("\(store.displayWeightLabel(set.weightLb, isPair: template.isPair, for: template)) × \(set.reps)")
-                    .font(.system(size: isNext ? 30 : 22, weight: .bold, design: .rounded))
+                    .scaledFont(size: isNext ? 30 : 22, weight: .bold, design: .rounded, maxScale: 1.4)
                     .monospacedDigit()
                     .foregroundStyle(set.done ? Theme.secondaryText : Theme.text)
                     .lineLimit(1)
@@ -1626,7 +1643,7 @@ struct TodayView: View {
                             .animation(.linear(duration: 1), value: secs)
                         VStack(spacing: 2) {
                             Text("\(secs / 60):\(String(format: "%02d", secs % 60))")
-                                .font(.system(size: 54, weight: .bold, design: .rounded))
+                                .scaledFont(size: 54, weight: .bold, design: .rounded, maxScale: 1.3)
                                 .monospacedDigit()
                             Text("Rest · tap to skip")
                                 .font(.caption.weight(.semibold))
@@ -1649,7 +1666,7 @@ struct TodayView: View {
                     .font(.headline)
                     .foregroundStyle(Theme.secondaryText)
                 Text(next.name)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .scaledFont(size: 34, weight: .bold, design: .rounded, maxScale: 1.4)
                     .lineLimit(3)
                     .minimumScaleFactor(0.5)
                 Spacer(minLength: 0)
@@ -2105,9 +2122,9 @@ struct RestTimerCard: View {
                             // empty as the rest counts down to zero.
                             VStack(spacing: 8) {
                                 Image(systemName: paused ? "pause.fill" : "timer")
-                                    .font(.system(size: 17, weight: .semibold))
+                                    .scaledFont(size: 17, weight: .semibold, maxScale: 1.3)
                                 Text(formatted(max(0, remaining)))
-                                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                                    .scaledFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
                                     .monospacedDigit()
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.7)
@@ -2117,13 +2134,14 @@ struct RestTimerCard: View {
                             }
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
-                            .frame(width: 56)
-                            .padding(.vertical, 22)
+                            // As tall as three buttons in the column below,
+                            // gaps included (3 × 56 + 2 × 16), DaRon Nov 12.
+                            .frame(width: 56, height: 200)
                             // Same material as the swap and menu buttons:
                             // frosted, plain border, soft shadow — no gloss.
                             .background {
                                 ZStack {
-                                    Capsule().fill(.ultraThinMaterial)
+                                    GlassFill(shape: Capsule())
                                     LavaLiquidFill(
                                         endsAt: store.restEndsAt,
                                         pausedRemaining: store.restPausedRemaining,
@@ -2133,7 +2151,7 @@ struct RestTimerCard: View {
                                 }
                                 .clipShape(Capsule())
                             }
-                            .overlay(Capsule().stroke(Theme.border, lineWidth: 1.5))
+                            .controlBorder(Capsule())
                             .shadow(color: .black.opacity(0.3), radius: 6)
                         } else {
                             HStack(spacing: 8) {

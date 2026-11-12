@@ -15,9 +15,9 @@ struct SettingsView: View {
     /// D40 (2026-11-10): confirmation text shown after "Schedule
     /// reminders now" is tapped — the button used to give no feedback.
     @State private var remindersScheduledMessage: String?
-    /// Show the swap-sides button on the open Duo (Nov 12). Same shared
-    /// store as the swap itself, so it survives updates and power-off.
-    @AppStorage("duoShowSwapButton", store: SharedDefaults.store) private var showSwapButton = true
+    /// Show the swap-sides button on the open Duo (Nov 12). Saved with the
+    /// swap itself, straight to disk, so it survives updates and power-off.
+    @ObservedObject private var duo = DuoSettings.shared
 
     var body: some View {
         Form {
@@ -68,10 +68,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Swap button", isOn: Binding(
-                    get: { showSwapButton },
-                    set: { showSwapButton = $0; SharedDefaults.store.synchronize() }
-                ))
+                Toggle("Swap button", isOn: $duo.showSwapButton)
             } header: {
                 Text("Open display")
             } footer: {

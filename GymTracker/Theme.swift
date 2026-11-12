@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreMotion
 
 /// OLED dark theme (DaRon, 2026-11-09: "make dark mode oled", "high
 /// contrast", "vibrant colors"). This supersedes the old "keeps its light
@@ -463,6 +464,7 @@ extension View {
 /// hinge (or iOS < 27.1) show the view as-is.
 struct HingeReveal: ViewModifier {
     @State private var openness: Double = 1   // 0 = closed, 1 = flat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The edge toward the hinge (the pane grows out from it).
     var anchor: UnitPoint = .trailing
 
@@ -470,7 +472,7 @@ struct HingeReveal: ViewModifier {
         if #available(iOS 27.1, *) {
             content
                 .opacity(0.25 + 0.75 * openness)
-                .scaleEffect(0.96 + 0.04 * openness, anchor: anchor)
+                .scaleEffect(reduceMotion ? 1 : 0.96 + 0.04 * openness, anchor: anchor)
                 .onHingeChange { _, context in
                     guard let hinge = context.hinge else { openness = 1; return }
                     // Map 90°…180° to 0…1: the inner screen is only really
@@ -493,13 +495,14 @@ struct HingeReveal: ViewModifier {
 /// emerges with the opening instead of popping in afterward.
 struct HingeEmerge: ViewModifier {
     @State private var openness: Double = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
             content
                 .opacity(openness * openness)
-                .blur(radius: 10 * (1 - openness))
-                .scaleEffect(0.8 + 0.2 * openness)
+                .blur(radius: reduceMotion ? 0 : 10 * (1 - openness))
+                .scaleEffect(reduceMotion ? 1 : 0.8 + 0.2 * openness)
                 .onHingeChange { _, context in
                     guard let hinge = context.hinge else { openness = 1; return }
                     // Starts emerging past half open (120°), clear at flat.
@@ -535,72 +538,217 @@ struct LavaLiquidFill: View {
     var total: TimeInterval
     var color: Color
 
+    /// The simulation lives as long as the pill does (a reference, so
+    /// stepping it every frame never re-renders anything by itself).
+    @State private var sim = LiquidSim()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        TimelineView(.animation(paused: endsAt == nil)) { context in
+        TimelineView(.animation) { context in
             let now = context.date
             let remaining = endsAt.map { max(0, $0.timeIntervalSince(now)) } ?? pausedRemaining ?? 0
             let level = total > 0 ? min(1, remaining / total) : 0
-            let t = now.timeIntervalSinceReferenceDate
-            GeometryReader { geo in
-                let h = geo.size.height
-                let surfaceY = h * (1 - level)
-                // Slosh fades out near full/empty so the ends stay clean.
-                let amp = level > 0.02 && level < 0.98 ? min(3.5, h * 0.03) : 0
-                let liquid = LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3)
-                ZStack {
-                    // Solid accent liquid (DaRon, Nov 12): one flat color,
-                    // with a second wave behind it so the slosh still shows.
-                    LiquidWave(surfaceY: surfaceY, amplitude: amp * 0.8, phase: t * 1.7 + 1.3)
-                        .fill(color.opacity(0.55))
-                    liquid
-                        .fill(color)
+            Canvas { ctx, size in
+                let surfaceY = size.height * (1 - level)
+                // Reduce Motion: still water — the level just drains.
+                if reduceMotion {
+                    ctx.fill(Path(CGRect(x: 0, y: surfaceY, width: size.width, height: size.height - surfaceY)),
+                             with: .color(color))
+                    return
+                }
+                sim.step(to: now, size: size)
+                // Back sheet: the far side of the water, a touch behind and
+                // less tilted — gives the surface depth.
+                ctx.fill(sim.surfacePath(size: size, surfaceY: surfaceY + 3, tiltScale: 0.75), with: .color(color.opacity(0.5)))
+                ctx.fill(sim.surfacePath(size: size, surfaceY: surfaceY, tiltScale: 1), with: .color(color))
+                // Spray thrown off the glass.
+                for drop in sim.drops {
+                    let r = drop.size / 2
+                    ctx.fill(Path(ellipseIn: CGRect(x: drop.x - r, y: drop.y - r, width: drop.size, height: drop.size)),
+                             with: .color(color.opacity(min(1, drop.life * 1.5))))
                 }
             }
         }
+        .onAppear { if !reduceMotion { MotionSource.shared.start() } }
+        .onDisappear { if !reduceMotion { MotionSource.shared.stop() } }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }
 
-/// The liquid body: everything below a gently waving surface.
-struct LiquidWave: Shape {
-    var surfaceY: CGFloat
-    var amplitude: CGFloat
-    var phase: Double
+// MARK: - Liquid physics (rest pill)
 
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: 0, y: rect.maxY))
-        p.addLine(to: CGPoint(x: 0, y: y(at: 0, rect)))
-        let steps = 24
-        for s in 1...steps {
-            let x = rect.width * CGFloat(s) / CGFloat(steps)
-            p.addLine(to: CGPoint(x: x, y: y(at: x, rect)))
-        }
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.closeSubpath()
-        return p
+/// The phone's real gravity and shakes, in screen coordinates (x right,
+/// y down) for the current interface orientation. Device motion needs no
+/// permission prompt.
+final class MotionSource {
+    static let shared = MotionSource()
+    private let manager = CMMotionManager()
+    private var users = 0
+
+    var isAvailable: Bool { manager.isDeviceMotionAvailable }
+
+    func start() {
+        users += 1
+        guard users == 1, manager.isDeviceMotionAvailable else { return }
+        manager.deviceMotionUpdateInterval = 1.0 / 60
+        manager.startDeviceMotionUpdates()
     }
 
-    fileprivate func y(at x: CGFloat, _ rect: CGRect) -> CGFloat {
-        surfaceY + amplitude * CGFloat(sin(Double(x / max(rect.width, 1)) * .pi * 2 + phase))
+    func stop() {
+        users = max(0, users - 1)
+        if users == 0 { manager.stopDeviceMotionUpdates() }
+    }
+
+    /// Gyro: how fast the phone is spinning in the plane of the screen
+    /// (rad/s, + = counter-clockwise). Twisting the phone throws the water.
+    func spinRate() -> Double? {
+        manager.deviceMotion?.rotationRate.z
+    }
+
+    /// Effective gravity felt by the liquid: real gravity minus the
+    /// phone's own acceleration (a shove to the right throws the water
+    /// left, like a real cup).
+    func screenGravity() -> CGVector? {
+        guard let m = manager.deviceMotion else { return nil }
+        let dx = m.gravity.x - m.userAcceleration.x
+        let dy = m.gravity.y - m.userAcceleration.y
+        let orientation = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.interfaceOrientation ?? .portrait
+        switch orientation {
+        case .landscapeLeft: return CGVector(dx: dy, dy: dx)
+        case .landscapeRight: return CGVector(dx: -dy, dy: -dx)
+        case .portraitUpsideDown: return CGVector(dx: -dx, dy: dy)
+        default: return CGVector(dx: dx, dy: -dy)
+        }
     }
 }
 
-/// Just the surface line of the liquid (the meniscus highlight).
-struct LiquidSurfaceLine: Shape {
-    var surfaceY: CGFloat
-    var amplitude: CGFloat
-    var phase: Double
+/// A small real-time water simulation:
+/// - Slosh: the surface's tilt is a damped oscillator pulled toward
+///   level-with-gravity, so tilting or shoving the phone makes the water
+///   swing past level, climb the far wall, and settle.
+/// - Ripples: the surface is a row of spring-connected water columns
+///   (the classic "water springs" model); waves run, reflect off the
+///   glass, interfere, and die down on their own.
+/// - Spray: when water hits a wall fast enough, drops fly off and fall
+///   back under the same gravity.
+final class LiquidSim {
+    private let n = 20
+    private var h: [Double]        // column heights (in points, + = up)
+    private var v: [Double]
+    private var tilt = 0.0         // surface slope (dy/dx)
+    private var tiltV = 2.8        // starts mid-pour: a slosh as the rest begins
+    private var last: Date?
+    private var width: CGFloat = 56
+    private var gravity = CGVector(dx: 0, dy: 1)
+    private(set) var drops: [Drop] = []
 
-    func path(in rect: CGRect) -> Path {
-        let wave = LiquidWave(surfaceY: surfaceY, amplitude: amplitude, phase: phase)
+    struct Drop { var x: CGFloat; var y: CGFloat; var vx: CGFloat; var vy: CGFloat; var size: CGFloat; var life: Double }
+
+    init() {
+        h = Array(repeating: 0, count: n)
+        v = Array(repeating: 0, count: n)
+    }
+
+    func step(to now: Date, size: CGSize) {
+        width = size.width
+        let dt = min(1.0 / 20, max(0, now.timeIntervalSince(last ?? now)))
+        last = now
+        guard dt > 0 else { return }
+
+        // Gravity: the real phone, or a gentle hand-held sway where there
+        // is no motion sensor (the simulator).
+        let t = now.timeIntervalSinceReferenceDate
+        let g = MotionSource.shared.screenGravity()
+            ?? CGVector(dx: 0.16 * sin(t * 0.9) + 0.05 * sin(t * 2.1), dy: 1)
+        gravity = g
+        let target = max(-1.4, min(1.4, -Double(g.dx) / max(0.25, Double(g.dy))))
+
+        // On a real phone the water is driven only by the gyro and
+        // accelerometer (DaRon: "based off gyro"): a twist of the wrist
+        // spins the surface past level and it sloshes back.
+        let spin = MotionSource.shared.spinRate()
+        if let spin {
+            tiltV -= spin * dt * 9
+        }
+
+        let steps = 4
+        let s = dt / Double(steps)
+        for _ in 0..<steps {
+            // Slosh mode: under-damped, so it overshoots and rocks.
+            // Natural slosh: ~1.1 s swing that settles in about two.
+            let accel = -32 * (tilt - target) - 1.9 * tiltV
+            tiltV += accel * s
+            tilt += tiltV * s
+            // The rocking surface throws water up the walls it swings at.
+            let wallKick = tiltV * 8
+            v[0] -= wallKick * s * 6
+            v[n - 1] += wallKick * s * 6
+
+            // Columns: each a damped spring back to the surface line.
+            for i in 0..<n {
+                let a = -64 * h[i] - 2.6 * v[i]
+                v[i] += a * s
+                h[i] += v[i] * s
+            }
+            // Neighbors share height — this is what makes waves travel.
+            for _ in 0..<2 {
+                for i in 0..<n {
+                    if i > 0 { v[i - 1] += 0.32 * (h[i] - h[i - 1]) * s * 60 }
+                    if i < n - 1 { v[i + 1] += 0.32 * (h[i] - h[i + 1]) * s * 60 }
+                }
+            }
+        }
+
+        // Spray: water leaving a wall fast throws drops.
+        for (i, side) in [(0, 1.0), (n - 1, -1.0)] where v[i] > 42 && drops.count < 8 {
+            let x: CGFloat = i == 0 ? 3 : width - 3
+            drops.append(Drop(x: x, y: 0, vx: CGFloat(side) * CGFloat.random(in: 10...28),
+                              vy: -CGFloat(v[i]) * CGFloat.random(in: 0.9...1.5),
+                              size: CGFloat.random(in: 1.8...3.6), life: 1))
+            v[i] *= 0.85
+        }
+        // Drops fly under the same gravity and fade.
+        drops = drops.compactMap { d in
+            var d = d
+            d.vx += g.dx * 900 * dt
+            d.vy += g.dy * 900 * dt
+            d.x += d.vx * dt
+            d.y += d.vy * dt
+            d.life -= dt * 1.8
+            return d.life > 0 ? d : nil
+        }
+    }
+
+    /// Where the surface sits at column i (in points), for a resting level.
+    private func surface(_ i: Int, _ size: CGSize, _ surfaceY: CGFloat, _ tiltScale: Double) -> CGFloat {
+        let x = size.width * CGFloat(i) / CGFloat(n - 1)
+        return surfaceY + CGFloat(tilt * tiltScale) * (x - size.width / 2) - CGFloat(h[i])
+    }
+
+    func surfacePath(size: CGSize, surfaceY: CGFloat, tiltScale: Double) -> Path {
         var p = Path()
-        let steps = 24
-        for s in 0...steps {
-            let x = rect.width * CGFloat(s) / CGFloat(steps)
-            let pt = CGPoint(x: x, y: wave.y(at: x, rect))
-            if s == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        p.move(to: CGPoint(x: 0, y: size.height))
+        let pts = (0..<n).map { i in
+            CGPoint(x: size.width * CGFloat(i) / CGFloat(n - 1),
+                    y: min(size.height, surface(i, size, surfaceY, tiltScale)))
+        }
+        p.addLine(to: pts[0])
+        // Smooth curve through the column tops.
+        for i in 1..<pts.count {
+            let mid = CGPoint(x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2)
+            p.addQuadCurve(to: mid, control: pts[i - 1])
+        }
+        p.addLine(to: pts[pts.count - 1])
+        p.addLine(to: CGPoint(x: size.width, y: size.height))
+        p.closeSubpath()
+
+        // Spray positions are relative to the wall's water line.
+        if tiltScale == 1 {
+            let leftY = pts[0].y, rightY = pts[pts.count - 1].y
+            for k in drops.indices where drops[k].y == 0 {
+                drops[k].y = drops[k].x < size.width / 2 ? leftY : rightY
+            }
         }
         return p
     }
@@ -618,5 +766,72 @@ extension Color {
         let f = CGFloat(min(max(amount, 0), 1))
         return Color(red: Double(r1 + (r2 - r1) * f), green: Double(g1 + (g2 - g1) * f),
                      blue: Double(b1 + (b2 - b1) * f), opacity: Double(a1 + (a2 - a1) * f))
+    }
+}
+
+
+// MARK: - System accessibility settings (Nov 12: "respect all system settings")
+
+/// Frosted glass that turns solid when Reduce Transparency is on.
+struct GlassFill<S: Shape>: View {
+    var shape: S
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        if reduceTransparency {
+            shape.fill(Theme.card)
+        } else {
+            shape.fill(.ultraThinMaterial)
+        }
+    }
+}
+
+extension View {
+    /// The corner buttons' border: a quiet hairline normally, a strong
+    /// edge when Increase Contrast is on.
+    func controlBorder<S: Shape>(_ shape: S, lineWidth: CGFloat = 1.5, tint: Color? = nil) -> some View {
+        modifier(ControlBorder(shape: shape, lineWidth: lineWidth, tint: tint))
+    }
+}
+
+private struct ControlBorder<S: Shape>: ViewModifier {
+    var shape: S
+    var lineWidth: CGFloat
+    var tint: Color?
+    @Environment(\.colorSchemeContrast) private var contrast
+    func body(content: Content) -> some View {
+        content.overlay(
+            shape.stroke(tint ?? (contrast == .increased ? Theme.text.opacity(0.8) : Theme.border),
+                         lineWidth: contrast == .increased ? max(lineWidth, 2) : lineWidth)
+        )
+    }
+}
+
+
+/// The strip under the status bar (Nov 12): content that scrolls up into
+/// it blurs and goes grey — the same look as the page behind the open
+/// menu — fading in as an ombre, strongest at the very top edge and gone
+/// by the page titles (which sit level with the clock).
+struct StatusBarFade: View {
+    var height: CGFloat = 34
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let ombre = LinearGradient(stops: [
+            .init(color: .black, location: 0),
+            .init(color: .black.opacity(0.85), location: 0.45),
+            .init(color: .clear, location: 1),
+        ], startPoint: .top, endPoint: .bottom)
+        // No frosted material: over the true-black page it showed as a
+        // grey band. Content just loses its color and melts into the
+        // page's own background toward the top, so at rest the strip is
+        // exactly the page color.
+        Theme.background
+            .opacity(reduceTransparency ? 1 : 0.92)
+            .mask(ombre)
+        .frame(height: height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
