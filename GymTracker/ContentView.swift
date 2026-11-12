@@ -45,6 +45,8 @@ struct ContentView: View {
     /// area shrinks, which flipped the open Duo to the folded layout
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
+    /// Settings → Open display → Swap button.
+    @AppStorage("duoShowSwapButton", store: SharedDefaults.store) private var showSwapButton = true
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
     @State private var calendarDay: Date = Calendar.current.startOfDay(for: Date())
@@ -401,7 +403,7 @@ struct ContentView: View {
             // Swap sides (open Duo only): above the menu button (and
             // above the rest pill while one runs). Hidden while the menu
             // is open.
-            if Self.isWide(steadySize) && !navExpanded {
+            if showSwapButton && Self.isWide(steadySize) && !navExpanded {
                 swapSidesButton
                     // Out of the shadows: emerges with the hinge as the
                     // Duo opens, and fades/blurs in when it appears.

@@ -15,6 +15,9 @@ struct SettingsView: View {
     /// D40 (2026-11-10): confirmation text shown after "Schedule
     /// reminders now" is tapped — the button used to give no feedback.
     @State private var remindersScheduledMessage: String?
+    /// Show the swap-sides button on the open Duo (Nov 12). Same shared
+    /// store as the swap itself, so it survives updates and power-off.
+    @AppStorage("duoShowSwapButton", store: SharedDefaults.store) private var showSwapButton = true
 
     var body: some View {
         Form {
@@ -62,6 +65,17 @@ struct SettingsView: View {
             Section("Comfort") {
                 Toggle("Haptics", isOn: hapticsBinding)
                 Toggle("Keep screen awake during workouts", isOn: keepAwakeBinding)
+            }
+
+            Section {
+                Toggle("Swap button", isOn: Binding(
+                    get: { showSwapButton },
+                    set: { showSwapButton = $0; SharedDefaults.store.synchronize() }
+                ))
+            } header: {
+                Text("Open display")
+            } footer: {
+                Text("Shows the button above the menu that switches which side each page is on when the phone is open. Turning it off keeps the sides the way you left them.")
             }
 
             Section("Appearance") {

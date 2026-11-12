@@ -546,50 +546,81 @@ struct LavaLiquidFill: View {
                 let surfaceY = h * (1 - level)
                 // Slosh fades out near full/empty so the ends stay clean.
                 let amp = level > 0.02 && level < 0.98 ? min(3.5, h * 0.03) : 0
+                let liquid = LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3)
+                // Where the surface sits at the pill's center (for the
+                // lit top face).
+                let centerSurface = surfaceY + amp * CGFloat(sin(.pi + t * 2.3))
                 ZStack {
-                    // Back wave: lighter, offset — gives the surface depth.
+                    // Glass interior: dark, deeper toward the edges.
+                    Capsule()
+                        .fill(RadialGradient(colors: [.white.opacity(0.06), .black.opacity(0.35)],
+                                             center: .center, startRadius: 0, endRadius: w))
+                    // Back wave: a darker sheet behind — depth in the slosh.
                     LiquidWave(surfaceY: surfaceY, amplitude: amp * 0.8, phase: t * 1.7 + 1.3)
-                        .fill(color.opacity(0.45))
-                    // Main liquid, shaded like a lit cylinder: brighter at
-                    // the top, deep at the bottom, darker toward the edges.
-                    LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3)
-                        .fill(LinearGradient(colors: [color.blend(with: .white, by: 0.25), color, color.blend(with: .black, by: 0.45)],
+                        .fill(color.blend(with: .black, by: 0.35).opacity(0.7))
+                    // Main liquid: lit from the top, deep at the bottom.
+                    liquid
+                        .fill(LinearGradient(colors: [color.blend(with: .white, by: 0.2), color, color.blend(with: .black, by: 0.55)],
                                              startPoint: .top, endPoint: .bottom))
-                        .overlay {
-                            LinearGradient(colors: [.black.opacity(0.35), .clear, .clear, .black.opacity(0.35)],
-                                           startPoint: .leading, endPoint: .trailing)
-                                .mask(LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3))
-                        }
-                    // Lava blobs: soft glowing shapes rising and drifting
-                    // inside the liquid only.
+                    // Round-tube shading across the width: dark edges, a
+                    // bright band left of center — reads as a cylinder.
+                    LinearGradient(stops: [
+                        .init(color: .black.opacity(0.55), location: 0),
+                        .init(color: .black.opacity(0.05), location: 0.22),
+                        .init(color: .white.opacity(0.28), location: 0.36),
+                        .init(color: .clear, location: 0.55),
+                        .init(color: .black.opacity(0.15), location: 0.78),
+                        .init(color: .black.opacity(0.6), location: 1),
+                    ], startPoint: .leading, endPoint: .trailing)
+                    .mask(liquid)
+                    // Lava blobs: shaded spheres (lit top-left, dark
+                    // bottom-right) rising and drifting inside the liquid.
                     ZStack {
                         ForEach(0..<4, id: \.self) { i in
                             let k = Double(i)
-                            let size = w * (0.42 + 0.12 * sin(t * 0.6 + k * 1.9))
-                            let rise = (t * (0.08 + 0.03 * k) + k * 0.27).truncatingRemainder(dividingBy: 1)
+                            let size = w * (0.36 + 0.1 * sin(t * 0.6 + k * 1.9))
+                            let rise = (t * (0.07 + 0.025 * k) + k * 0.27).truncatingRemainder(dividingBy: 1)
                             Ellipse()
-                                .fill(color.blend(with: .white, by: 0.55))
-                                .frame(width: size, height: size * (1.1 + 0.25 * sin(t * 0.9 + k)))
-                                .position(x: w / 2 + sin(t * 0.7 + k * 2.1) * w * 0.22,
-                                          y: h - rise * h)
+                                .fill(RadialGradient(colors: [color.blend(with: .white, by: 0.75),
+                                                              color.blend(with: .white, by: 0.3),
+                                                              color.blend(with: .black, by: 0.4)],
+                                                     center: UnitPoint(x: 0.32, y: 0.28),
+                                                     startRadius: 0, endRadius: size * 0.75))
+                                .frame(width: size, height: size * (1.15 + 0.25 * sin(t * 0.9 + k)))
+                                .shadow(color: .black.opacity(0.35), radius: 2, x: 1, y: 2)
+                                .position(x: w / 2 + sin(t * 0.7 + k * 2.1) * w * 0.2,
+                                          y: h + size / 2 - rise * (h + size))
                         }
                     }
-                    .blur(radius: w * 0.12)
-                    .blendMode(.plusLighter)
-                    .opacity(0.75)
-                    .mask(LiquidWave(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3))
-                    // Bright meniscus line on the surface.
-                    if level > 0.02 && level < 0.98 {
-                        LiquidSurfaceLine(surfaceY: surfaceY, amplitude: amp, phase: t * 2.3)
-                            .stroke(color.blend(with: .white, by: 0.6).opacity(0.8), lineWidth: 1.2)
+                    .blur(radius: 0.8)
+                    .mask(liquid)
+                    // The liquid's top face, seen at an angle: a lit oval
+                    // riding the wave — gives the surface volume.
+                    if level > 0.03 && level < 0.97 {
+                        Ellipse()
+                            .fill(LinearGradient(colors: [color.blend(with: .white, by: 0.55), color.blend(with: .white, by: 0.15)],
+                                                 startPoint: .top, endPoint: .bottom))
+                            .overlay(Ellipse().stroke(color.blend(with: .white, by: 0.8).opacity(0.9), lineWidth: 0.8))
+                            .frame(width: w * 0.92, height: max(5, w * 0.16))
+                            .position(x: w / 2, y: centerSurface)
                     }
-                    // Glass: a highlight down the left side and a soft rim.
+                    // Glass: inner shadow at the rim for thickness…
                     Capsule()
-                        .fill(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.05), .clear],
-                                             startPoint: .leading, endPoint: .trailing))
-                        .frame(width: w * 0.42, height: h * 0.86)
-                        .position(x: w * 0.3, y: h / 2)
-                        .blendMode(.plusLighter)
+                        .strokeBorder(Color.black.opacity(0.55), lineWidth: 4)
+                        .blur(radius: 3)
+                    // …a sharp specular streak down the left side…
+                    Capsule()
+                        .fill(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.15), .white.opacity(0.6)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .frame(width: max(3, w * 0.09), height: h * 0.72)
+                        .position(x: w * 0.24, y: h / 2)
+                        .blur(radius: 0.6)
+                    // …and a faint reflection on the right.
+                    Capsule()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(width: max(2, w * 0.05), height: h * 0.5)
+                        .position(x: w * 0.8, y: h * 0.42)
+                        .blur(radius: 1)
                 }
             }
         }
