@@ -63,7 +63,9 @@ BACK={ # canvas-left = person's LEFT on the back view
 def ellipse_mask(shape,cx,cy,rx,ry):
     m=np.zeros(shape,np.uint8); cv2.ellipse(m,(int(cx*S),int(cy*S)),(int(rx*S),int(ry*S)),0,0,360,1,-1); return m.astype(bool)
 
+FILL_ZONES=[]
 def build(side):
+    FILL_ZONES.clear()
     alpha,lab=load(side)
     table=FRONT if side=='front' else BACK
     masks={k:np.isin(lab,v) for k,v in table.items()}
@@ -84,18 +86,44 @@ def build(side):
     used=np.zeros_like(alpha)
     for m in masks.values(): used|=m
     free=alpha&~used
-    # joints: the non-muscle body area around the joint, cut to the silhouette
-    J=[('kneeRight' if side=='front' else 'kneeLeft',82,284 if side=='front' else 287,13,12),
-       ('kneeLeft' if side=='front' else 'kneeRight',118,284 if side=='front' else 287,13,12),
-       ('ankleRight' if side=='front' else 'ankleLeft',81,357,11,10),
-       ('ankleLeft' if side=='front' else 'ankleRight',119,357,11,10),
-       ('wristRight' if side=='front' else 'wristLeft',43,197,9,8),
-       ('wristLeft' if side=='front' else 'wristRight',157,197,9,8)]
-    for name,cx,cy,rx,ry in J:
-        masks[name]=free&ellipse_mask(alpha.shape,cx,cy,rx,ry)
-    used=np.zeros_like(alpha)
-    for m in masks.values(): used|=m
-    free=alpha&~used
+    # Joints as BANDS between the muscles around them, cut to the
+    # silhouette: knee = thigh muscles' bottom -> calf/shin top; ankle =
+    # calf/shin bottom -> foot; wrist = forearm bottom -> hand.
+    L,Rn=('Right','Left') if side=='front' else ('Left','Right')
+    H,W=alpha.shape
+    yy,xx=np.mgrid[0:H,0:W]
+    def ybot(names,q=96):
+        ys=np.concatenate([np.where(masks[n])[0] for n in names if n in masks and masks[n].any()]); return np.percentile(ys,q)
+    def ytop(names,q=4):
+        ys=np.concatenate([np.where(masks[n])[0] for n in names if n in masks and masks[n].any()]); return np.percentile(ys,q)
+    for sd,leftside in ((L,True),(Rn,False)):
+        xc=(xx<100*S) if leftside else (xx>=100*S)
+        thigh=[f'quad{sd}',f'hamstring{sd}',f'adductor{sd}']
+        lower=[f'calf{sd}',f'shin{sd}']
+        k0,k1=ybot(thigh,97),ytop(lower,3)
+        masks[f'knee{sd}']=free&xc&(yy>=k0-12)&(yy<=k1+12)
+        a0=ybot(lower,99)
+        masks[f'ankle{sd}']=free&xc&(yy>=a0)&(yy<=367*S)
+        armx=(xx<64*S) if leftside else (xx>136*S)
+        w0=ybot([f'forearm{sd}'],98)
+        masks[f'wrist{sd}']=free&armx&(yy>=w0)&(yy<=203*S)
+        # rest of the calf: the open lower leg between knee and ankle
+        FILL_ZONES.append(free&xc&(yy>k1+12)&(yy<a0)&~masks[f'knee{sd}']&~masks[f'ankle{sd}'])
+    # neck: everything in the neck band joins the neck shape
+    FILL_ZONES.append(band&alpha&~head)
+    if side=='back':
+        lat=masks['latLeft']|masks['latRight']
+        lat_low=np.percentile(np.where(lat)[0],99)
+        glute_top=ytop(['gluteLeft','gluteRight'],2)
+        # mid back: the strip along the spine between traps and lats
+        masks['midBack']=free&(np.abs(xx-100*S)<=np.where(yy<118*S,11*S,22*S))&(yy>=72*S)&(yy<lat_low-30)
+        # keep only the strip along the spine (drop fragments by the shoulder blades)
+        n_,l_,st_,_=cv2.connectedComponentsWithStats(masks['midBack'].astype(np.uint8),connectivity=8)
+        if n_>1: masks['midBack']=l_==(1+int(np.argmax(st_[1:,cv2.CC_STAT_AREA])))
+        # back obliques: the flanks between the lats and the glutes
+        torso=(xx>56*S)&(xx<144*S)&(np.abs(xx-100*S)>14*S)
+        fl=free&torso&(yy>=lat_low-80)&(yy<=glute_top+10)&~masks['midBack']
+        masks['obliqueLeft']=fl&(xx<100*S); masks['obliqueRight']=fl&(xx>=100*S)
     # hands / feet: the whole silhouette past the wrist / ankle joint
     L,Rn=('Right','Left') if side=='front' else ('Left','Right')
     H,W=alpha.shape
@@ -114,11 +142,12 @@ def build(side):
         g_top=g[g[:,0]<g[:,0].min()+40]
         hull=cv2.convexHull(np.vstack([lat_low,g_top])[:,::-1].astype(np.int32))
         m=np.zeros(alpha.shape,np.uint8); cv2.fillConvexPoly(m,hull,1)
-        masks['lowerBack']=m.astype(bool)&alpha&~used
+        newused=masks['midBack']|masks['obliqueLeft']|masks['obliqueRight']
+        masks['lowerBack']=m.astype(bool)&alpha&~used&~newused
     return alpha,masks,unmapped
 
 ELL=lambda n: cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(n,n))
-JOINTS=('head','knee','ankle','wrist','elbow','hand','foot','lowerBack')
+JOINTS=('head','elbow','hand','foot')
 
 def clean_piece(m, open_k=13):
     """One painted piece -> smooth shape: open removes frayed tendon
@@ -146,8 +175,8 @@ def pieces_of(mask):
         out=[cv2.morphologyEx(mask.astype(np.uint8),cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))]
     return out
 
-GROW=9   # px: muscles grow into narrow gaps up to this far (full res)
-LINE=3   # px: final separation line width (erode diameter)
+GROW=0   # px: general growth into gaps (0 = keep the painted gaps; approved 'After' look)
+LINE=5   # px: erode diameter -> the even dark gap between shapes
 
 def refine(alpha, masks):
     """Smooth shapes with FINE, EVEN separation lines. After smoothing,
@@ -165,7 +194,9 @@ def refine(alpha, masks):
     for i,(_,p) in enumerate(pieces):
         d=cv2.distanceTransform((1-p).astype(np.uint8),cv2.DIST_L2,5)
         upd=d<best_d; best_d[upd]=d[upd]; best_i[upd]=i
-    zone=alpha&~union&~joints&(best_d<=GROW)
+    fill=np.zeros(alpha.shape,bool)
+    for z in FILL_ZONES: fill|=z
+    zone=alpha&~union&~joints&((best_d<=GROW)|(fill&(best_d<=90)))
     out={}
     for i,(n,p) in enumerate(pieces):
         g=(p.astype(bool)|(zone&(best_i==i))).astype(np.uint8)*255
@@ -195,7 +226,7 @@ for side in ('front','back'):
     for m in masks.values(): cov|=m
     print(side,f'silhouette covered: {100*(cov&alpha).sum()/alpha.sum():.1f}%  overlaps: {sum(m.sum() for m in masks.values())-cov.sum()} px')
     final=refine(alpha,masks)
-    result[side]={k:polys(v,150 if k.startswith(JOINTS) else 700) for k,v in final.items() if v.any()}
+    result[side]={k:polys(v,150 if k.startswith(JOINTS+('outerHip',)) else 700) for k,v in final.items() if v.any()}
     np.save(f'{sys.argv[1]}/cov_{side}.npy',cov)
 json.dump(result,open(f'{sys.argv[1]}/regions.json','w'))
 print({s:sum(len(p) for v in result[s].values() for p in v) for s in result},'points')
