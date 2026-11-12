@@ -2896,21 +2896,21 @@ final class WorkoutStore: ObservableObject {
 
     private func loadProfileAndProgram() {
         if let data = SharedDefaults.store.data(forKey: profileKey),
-           let decoded = try? JSONDecoder().decode(UserProfile.self, from: data) {
+           let decoded = SafeDecode.value(UserProfile.self, from: data, key: profileKey) {
             profile = decoded
         }
         if let data = SharedDefaults.store.data(forKey: programKey),
-           let decoded = try? JSONDecoder().decode(UserProgram.self, from: data) {
+           let decoded = SafeDecode.value(UserProgram.self, from: data, key: programKey) {
             activeProgram = decoded
         }
         if let data = SharedDefaults.store.data(forKey: generatedKey),
-           let decoded = try? JSONDecoder().decode(UserProgram.self, from: data) {
+           let decoded = SafeDecode.value(UserProgram.self, from: data, key: generatedKey) {
             generatedProgram = decoded
         }
         hasCompletedOnboarding = SharedDefaults.store.bool(forKey: onboardingKey)
         isDaronPresetUnlocked = SharedDefaults.store.bool(forKey: Self.daronPresetUnlockKey)
         if let data = SharedDefaults.store.data(forKey: preRetakeProgramKey),
-           let decoded = try? JSONDecoder().decode(UserProgram.self, from: data) {
+           let decoded = SafeDecode.value(UserProgram.self, from: data, key: preRetakeProgramKey) {
             preRetakeProgram = decoded
         }
         let storedSetup = SharedDefaults.store.double(forKey: setupDateKey)
@@ -2962,20 +2962,20 @@ final class WorkoutStore: ObservableObject {
 
     private func loadCustomization() {
         if let data = SharedDefaults.store.data(forKey: customExercisesKey),
-           let decoded = try? JSONDecoder().decode([CustomExercise].self, from: data) {
+           let decoded = SafeDecode.array(CustomExercise.self, from: data, key: customExercisesKey) {
             customExercises = decoded
         }
         if let data = SharedDefaults.store.data(forKey: preferencesKey),
-           let decoded = try? JSONDecoder().decode([String: ExercisePreference].self, from: data) {
+           let decoded = SafeDecode.value([String: ExercisePreference].self, from: data, key: preferencesKey) {
             exercisePreferences = decoded
         }
         if let data = SharedDefaults.store.data(forKey: gymProfilesKey),
-           let decoded = try? JSONDecoder().decode([GymProfile].self, from: data) {
+           let decoded = SafeDecode.array(GymProfile.self, from: data, key: gymProfilesKey) {
             gymProfiles = decoded
         }
         activeGymProfileID = SharedDefaults.store.string(forKey: activeGymProfileKey)
         if let data = SharedDefaults.store.data(forKey: settingsKey),
-           let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) {
+           let decoded = SafeDecode.value(AppSettings.self, from: data, key: settingsKey) {
             settings = decoded
             // OLED migration (2026-11-09): the old default was Auto and the
             // theme picker was Pro-gated, so no user ever deliberately
@@ -2988,11 +2988,11 @@ final class WorkoutStore: ObservableObject {
             }
         }
         if let data = SharedDefaults.store.data(forKey: extraProgramsKey),
-           let decoded = try? JSONDecoder().decode([UserProgram].self, from: data) {
+           let decoded = SafeDecode.array(UserProgram.self, from: data, key: extraProgramsKey) {
             extraPrograms = decoded
         }
         if let data = SharedDefaults.store.data(forKey: favoritesKey),
-           let decoded = try? JSONDecoder().decode(FavoriteIDs.self, from: data) {
+           let decoded = SafeDecode.value(FavoriteIDs.self, from: data, key: favoritesKey) {
             favoriteProgramIDs = Set(decoded.programs)
             favoriteExerciseIDs = Set(decoded.exercises)
         }
@@ -3490,12 +3490,12 @@ final class WorkoutStore: ObservableObject {
 
     private func load() {
         if let data = SharedDefaults.store.data(forKey: sessionsKey),
-           let decoded = try? JSONDecoder().decode([SessionLog].self, from: data) {
+           let decoded = SafeDecode.array(SessionLog.self, from: data, key: sessionsKey) {
             sessions = decoded.sorted { $0.date > $1.date }
         }
         migrateMislabeledLegsSessionIfNeeded()
         if let data = SharedDefaults.store.data(forKey: userNotesKey),
-           let decoded = try? JSONDecoder().decode([UserNote].self, from: data) {
+           let decoded = SafeDecode.array(UserNote.self, from: data, key: userNotesKey) {
             userNotes = decoded.sorted { $0.updatedAt > $1.updatedAt }
         }
         if let saved = SharedDefaults.store.stringArray(forKey: noteCategoriesKey), !saved.isEmpty {
@@ -3503,6 +3503,60 @@ final class WorkoutStore: ObservableObject {
         }
         let stored = SharedDefaults.store.double(forKey: weightKey)
         bodyWeightLb = stored > 0 ? stored : nil
+    }
+}
+
+// MARK: - Safe persistence
+
+/// Loading that can never cost the user their data.
+///
+/// Every blob is JSON in the App Group `UserDefaults`. A plain
+/// `try? JSONDecoder().decode` silently returns nil when *anything* in the
+/// blob fails to decode (one malformed session, or a field added in a later
+/// version), the store starts empty, and the next save overwrites the only
+/// copy. Instead:
+/// - arrays keep every element that still decodes and drop only the bad ones;
+/// - whenever anything is dropped, the original bytes are first copied to a
+///   backup key (`<key>.unreadable.<unix time>`, listed under
+///   `gymtracker.unreadableBackups`) so they can be recovered by a later fix.
+enum SafeDecode {
+    private static let backupIndexKey = "gymtracker.unreadableBackups"
+
+    static func array<T: Decodable>(_ type: T.Type, from data: Data, key: String) -> [T]? {
+        if let all = try? JSONDecoder().decode([T].self, from: data) { return all }
+        backUp(data, forKey: key)
+        guard let items = try? JSONDecoder().decode([LossyElement<T>].self, from: data) else { return nil }
+        return items.compactMap(\.value)
+    }
+
+    static func value<T: Decodable>(_ type: T.Type, from data: Data, key: String) -> T? {
+        if let value = try? JSONDecoder().decode(T.self, from: data) { return value }
+        backUp(data, forKey: key)
+        return nil
+    }
+
+    /// Copy unreadable bytes aside. Skips the copy when the newest backup for
+    /// this key already holds the same bytes, so a blob that stays unreadable
+    /// across launches is backed up once, not on every launch.
+    private static func backUp(_ data: Data, forKey key: String) {
+        let store = SharedDefaults.store
+        var index = store.stringArray(forKey: backupIndexKey) ?? []
+        if let latest = index.last(where: { $0.hasPrefix(key + ".unreadable.") }),
+           store.data(forKey: latest) == data {
+            return
+        }
+        let backupKey = "\(key).unreadable.\(Int(Date().timeIntervalSince1970))"
+        store.set(data, forKey: backupKey)
+        index.append(backupKey)
+        store.set(index, forKey: backupIndexKey)
+    }
+}
+
+/// Decodes one array element, yielding nil instead of failing the whole array.
+private struct LossyElement<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        value = try? decoder.singleValueContainer().decode(T.self)
     }
 }
 

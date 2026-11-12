@@ -73,11 +73,15 @@ final class CalendarSyncManager: ObservableObject {
     func setEnabled(_ enabled: Bool, store: WorkoutStore) async {
         if enabled {
             refreshAuthorization()
-            if authorization == .notDetermined {
+            // Full access, not write-only: updating or removing the app's
+            // own events needs to read them back, and write-only access
+            // can't (every sync used to add a fresh duplicate set).
+            // Asking again while write-only offers the upgrade.
+            if authorization == .notDetermined || authorization == .writeOnly {
                 do {
-                    let granted = try await eventStore.requestWriteOnlyAccessToEvents()
+                    let granted = try await eventStore.requestFullAccessToEvents()
                     refreshAuthorization()
-                    guard granted else {
+                    guard granted || authorization == .writeOnly else {
                         accessDenied = true
                         return
                     }
@@ -145,6 +149,10 @@ final class CalendarSyncManager: ObservableObject {
         refreshAuthorization()
         guard authorization == .writeOnly || authorization == .fullAccess else { return }
         guard let targetCalendar = resolveCalendar() else { return }
+        if authorization == .writeOnly {
+            addOnlySync(store: store, into: targetCalendar)
+            return
+        }
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -214,6 +222,32 @@ final class CalendarSyncManager: ObservableObject {
             }
         }
 
+        saveEventIDs(eventIDs)
+        syncedEventCount = upcomingCount(from: eventIDs)
+        lastSync = Date()
+    }
+
+    /// Write-only fallback: events can be added but never read back, so
+    /// existing ones can't be updated or removed. Add each planned day
+    /// exactly once (by its recorded date key) and never touch the rest,
+    /// so repeated syncs can't pile up duplicates.
+    private func addOnlySync(store: WorkoutStore, into targetCalendar: EKCalendar) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var eventIDs = loadEventIDs()
+        let location = activeGymName(in: store)
+        for offset in 0..<Self.syncWindowDays {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: today),
+                  let plan = store.programDay(for: date) else { continue }
+            let key = Self.dateKey(for: date)
+            guard eventIDs[key] == nil else { continue }
+            let event = EKEvent(eventStore: eventStore)
+            apply(to: event, title: "\(plan.title) — Status", notes: Self.notes(for: plan, store: store),
+                  location: location, calendar: targetCalendar, date: date)
+            if (try? eventStore.save(event, span: .thisEvent)) != nil {
+                eventIDs[key] = event.eventIdentifier ?? "write-only"
+            }
+        }
         saveEventIDs(eventIDs)
         syncedEventCount = upcomingCount(from: eventIDs)
         lastSync = Date()

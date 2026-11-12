@@ -263,6 +263,8 @@ final class MCPServer: ObservableObject {
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
+            // LAN only: never listen on the cellular interface.
+            params.prohibitedInterfaceTypes = [.cellular]
             let listener = try NWListener(using: params, on: NWEndpoint.Port(integerLiteral: port))
             listener.service = NWListener.Service(name: "Status", type: "_gymtracker._tcp")
             listener.stateUpdateHandler = { [weak self] state in
@@ -322,9 +324,56 @@ final class MCPServer: ObservableObject {
         var data = Data()
     }
 
+    /// Hard limits for untrusted LAN input. Requests are tiny JSON-RPC
+    /// calls, so anything past these is refused instead of buffered.
+    private static let maxHeaderBytes = 8 * 1024
+    private static let maxBodyBytes = 64 * 1024
+    private static let maxConnections = 4
+    private static let receiveTimeout: TimeInterval = 10
+    private var openConnections = 0
+
     private func handle(connection: NWConnection) {
+        guard openConnections < Self.maxConnections else {
+            connection.cancel()
+            return
+        }
+        openConnections += 1
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .cancelled, .failed:
+                Task { @MainActor in self?.openConnections -= 1 }
+            default:
+                break
+            }
+        }
         connection.start(queue: .global(qos: .userInitiated))
+        // A client that opens a connection and trickles bytes (or nothing)
+        // can't hold a slot forever.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.receiveTimeout) { [weak connection] in
+            guard let connection, connection.state != .cancelled else { return }
+            connection.cancel()
+        }
         receiveMore(connection: connection, buffer: HTTPBuffer())
+    }
+
+    /// Compare secrets without an early exit, so response timing doesn't
+    /// reveal how many leading bytes of a guessed token were right.
+    private static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
+        let x = Array(a.utf8), y = Array(b.utf8)
+        var diff = UInt8(truncatingIfNeeded: x.count ^ y.count)
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0
+            let r = i < y.count ? y[i] : 0
+            diff |= l ^ r
+        }
+        return diff == 0
+    }
+
+    private func reject(_ status: Int, message: String, on connection: NWConnection) {
+        let response = httpResponse(status: status, json: jsonData(["error": message]))
+        connection.send(content: response, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
     }
 
     private func receiveMore(connection: NWConnection, buffer: HTTPBuffer) {
@@ -334,9 +383,15 @@ final class MCPServer: ObservableObject {
                 buffer.data.append(data)
             }
             Task { @MainActor in
-                if let request = self.parseHTTPRequest(from: buffer.data) {
+                switch self.parseHTTPRequest(from: buffer.data) {
+                case .request(let request):
                     self.respond(to: request, on: connection)
                     return
+                case .invalid(let status, let message):
+                    self.reject(status, message: message, on: connection)
+                    return
+                case .incomplete:
+                    break
                 }
                 if isComplete || error != nil {
                     connection.cancel()
@@ -354,14 +409,29 @@ final class MCPServer: ObservableObject {
         var body: Data
     }
 
-    private func parseHTTPRequest(from data: Data) -> HTTPRequest? {
-        guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+    private enum ParseResult {
+        case incomplete
+        case invalid(status: Int, message: String)
+        case request(HTTPRequest)
+    }
+
+    private func parseHTTPRequest(from data: Data) -> ParseResult {
+        guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)) else {
+            return data.count > Self.maxHeaderBytes
+                ? .invalid(status: 431, message: "Request headers too large.")
+                : .incomplete
+        }
+        guard headerEnd.lowerBound <= Self.maxHeaderBytes else {
+            return .invalid(status: 431, message: "Request headers too large.")
+        }
         let headerData = data.subdata(in: 0..<headerEnd.lowerBound)
-        guard let headerText = String(data: headerData, encoding: .utf8) else { return nil }
+        guard let headerText = String(data: headerData, encoding: .utf8) else {
+            return .invalid(status: 400, message: "Headers are not UTF-8.")
+        }
         let lines = headerText.components(separatedBy: "\r\n")
-        guard let requestLine = lines.first else { return nil }
+        guard let requestLine = lines.first else { return .invalid(status: 400, message: "Missing request line.") }
         let parts = requestLine.components(separatedBy: " ")
-        guard parts.count >= 2 else { return nil }
+        guard parts.count >= 2 else { return .invalid(status: 400, message: "Malformed request line.") }
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             let kv = line.split(separator: ":", maxSplits: 1)
@@ -370,11 +440,19 @@ final class MCPServer: ObservableObject {
                     String(kv[1]).trimmingCharacters(in: .whitespaces)
             }
         }
-        let contentLength = Int(headers["content-length"] ?? "0") ?? 0
+        // Content-Length is untrusted: a negative or huge value used to trap
+        // the range math below and crash the app.
+        guard let contentLength = Int(headers["content-length"] ?? "0"),
+              contentLength >= 0 else {
+            return .invalid(status: 400, message: "Invalid Content-Length.")
+        }
+        guard contentLength <= Self.maxBodyBytes else {
+            return .invalid(status: 413, message: "Request body too large.")
+        }
         let bodyStart = headerEnd.upperBound
-        guard data.count >= bodyStart + contentLength else { return nil }
+        guard data.count >= bodyStart + contentLength else { return .incomplete }
         let body = data.subdata(in: bodyStart..<(bodyStart + contentLength))
-        return HTTPRequest(method: parts[0], path: parts[1], headers: headers, body: body)
+        return .request(HTTPRequest(method: parts[0], path: parts[1], headers: headers, body: body))
     }
 
     private func respond(to request: HTTPRequest, on connection: NWConnection) {
@@ -388,7 +466,16 @@ final class MCPServer: ObservableObject {
     }
 
     private func httpResponse(status: Int, json: Data) -> Data {
-        let statusText = status == 200 ? "OK" : status == 401 ? "Unauthorized" : status == 403 ? "Forbidden" : status == 404 ? "Not Found" : "Bad Request"
+        let statusText: String
+        switch status {
+        case 200: statusText = "OK"
+        case 401: statusText = "Unauthorized"
+        case 403: statusText = "Forbidden"
+        case 404: statusText = "Not Found"
+        case 413: statusText = "Payload Too Large"
+        case 431: statusText = "Request Header Fields Too Large"
+        default: statusText = "Bad Request"
+        }
         var response = "HTTP/1.1 \(status) \(statusText)\r\n"
         response += "Content-Type: application/json\r\n"
         response += "Content-Length: \(json.count)\r\n"
@@ -411,7 +498,7 @@ final class MCPServer: ObservableObject {
         // Bearer token + grant check (P0-3 minimal slice — provisional,
         // NOT full OAuth; the OAuth design still replaces this).
         let auth = request.headers["authorization"] ?? ""
-        guard !token.isEmpty, auth == "Bearer \(token)" else {
+        guard !token.isEmpty, Self.constantTimeEquals(auth, "Bearer \(token)") else {
             return (401, rpcError(id: nil, code: -32001, message: "Unauthorized — missing or invalid bearer token."))
         }
         // HONEST LIMIT: a copied bearer token is still usable by any local
@@ -701,7 +788,7 @@ enum MCPTools {
                 "exercises": next.plan.exercises.map { exerciseJSON($0) },
             ] as [String: Any]), false)
         case "get_workout_history":
-            let limit = arguments["limit"] as? Int ?? 20
+            let limit = min(max(arguments["limit"] as? Int ?? 20, 1), 500)
             var sessions = store.sessions
             if let since = arguments["since"] as? String,
                let date = ISO8601DateFormatter().date(from: since) {
@@ -801,8 +888,10 @@ enum MCPTools {
                 return ("All sets for \(template.name) are already done.", false)
             }
             sets[index].done = true
-            if let weight = arguments["weightLb"] as? Double { sets[index].weightLb = weight }
-            if let reps = arguments["reps"] as? Int { sets[index].reps = reps }
+            if let weight = arguments["weightLb"] as? Double, weight.isFinite, (0...2000).contains(weight) {
+                sets[index].weightLb = weight
+            }
+            if let reps = arguments["reps"] as? Int, (0...1000).contains(reps) { sets[index].reps = reps }
             store.draftLogs[template.id] = sets
             if sets[index].kind != .warmup {
                 store.startRest(for: template)
@@ -867,13 +956,15 @@ enum MCPTools {
             store.swapDraftExercise(id: template.id, with: replacementTemplate)
             return ("Swapped \(template.name) → \(replacementTemplate.name) for today.", false)
         case "set_bodyweight":
-            guard let weight = arguments["weightLb"] as? Double, weight > 0 else {
+            guard let weight = arguments["weightLb"] as? Double, weight.isFinite, weight > 0, weight <= 1500 else {
                 return ("Pass a bodyweight in lb (weightLb).", true)
             }
             store.saveBodyWeight(weight)
             return ("Bodyweight set to \(weight) lb.", false)
         case "start_rest_timer":
-            let seconds = arguments["seconds"] as? Double ?? 90
+            let requested = arguments["seconds"] as? Double ?? 90
+            guard requested.isFinite else { return ("Pass seconds as a number.", true) }
+            let seconds = min(max(requested, 1), 3600)
             store.restEndsAt = Date().addingTimeInterval(seconds)
             return ("Rest timer started for \(Int(seconds)) seconds.", false)
         case "cancel_rest_timer":

@@ -156,10 +156,10 @@ struct PrivacyView: View {
                     privacyRow(icon: "checkmark", text: "No account, no sign-up, no email address.")
                     privacyRow(icon: "checkmark", text: "No analytics, no tracking, no ads, no third-party SDKs.")
                     privacyRow(icon: "checkmark", text: "Subscriptions go through Apple (StoreKit) only — the app itself collects nothing.")
-                    privacyRow(icon: "xmark", text: "Nothing is uploaded, synced, or shared with anyone.")
+                    privacyRow(icon: "xmark", text: "Nothing is uploaded or shared unless you turn on a feature that does it, like Apple Calendar or Export.")
                 }
 
-                Text("The full privacy policy is in the app's App Store listing. If the app ever changes how it handles data, the policy will be updated first.")
+                Text("Read the full privacy policy anytime in Profile. If the app ever changes how it handles data, the policy will be updated first.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
 

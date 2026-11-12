@@ -59,6 +59,13 @@ enum InviteCode {
     static let alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
     /// 8 characters, shown grouped as XXXX-XXXX.
+    /// Off until redemption works end to end. Apple's code sheet only
+    /// accepts Apple-issued offer codes, so a friend's 8-character invite
+    /// code can never grant the promised free week, and the sharer reward
+    /// has no confirmation step yet. Showing it would be a broken feature
+    /// (App Review 2.1). Turn on once codes are real one-time offer codes.
+    static let isEnabled = false
+
     static let codeLength = 8
 
     /// The deep link a shared invite carries. The `gymtracker` scheme is

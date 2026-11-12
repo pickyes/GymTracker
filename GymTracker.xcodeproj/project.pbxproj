@@ -28,6 +28,7 @@
 		B7A2B3C4D5E6F708192A3B40 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A2B3C4D5E6F708192A3B40 /* ProfileView.swift */; };
 		B8A2B3C4D5E6F708192A3B40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F8A2B3C4D5E6F708192A3B40 /* Assets.xcassets */; };
 		S7A2B3C4D5E6F708192A3B75 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = S4A2B3C4D5E6F708192A3B75 /* PrivacyInfo.xcprivacy */; };
+		W7A2B3C4D5E6F708192A3B76 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = W4A2B3C4D5E6F708192A3B76 /* PrivacyInfo.xcprivacy */; };
 		B9A2B3C4D5E6F708192A3B40 /* ExerciseLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2B3C4D5E6F708192A3B40 /* ExerciseLibrary.swift */; };
 		BAA2B3C4D5E6F708192A3B40 /* SubscriptionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA2B3C4D5E6F708192A3B40 /* SubscriptionState.swift */; };
 		BBA2B3C4D5E6F708192A3B40 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBA2B3C4D5E6F708192A3B40 /* OnboardingFlowView.swift */; };
@@ -110,6 +111,7 @@
 		F8A2B3C4D5E6F708192A3C13 /* FlashlightSignal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashlightSignal.swift; sourceTree = "<group>"; };
 		S2A2B3C4D5E6F708192A3B75 /* GymTracker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymTracker.entitlements; sourceTree = "<group>"; };
 		S4A2B3C4D5E6F708192A3B75 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		W4A2B3C4D5E6F708192A3B76 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		F9A2B3C4D5E6F708192A3B40 /* GymTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GymTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAA2B3C4D5E6F708192A3B40 /* SubscriptionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionState.swift; sourceTree = "<group>"; };
 		FBA2B3C4D5E6F708192A3B40 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
@@ -215,6 +217,7 @@
 				A1CE880A38B710BC4E69D498 /* RestTimerLiveActivity.swift */,
 				A1EC94BE6A9690F6DB3E8F9B /* Info.plist */,
 				S3A2B3C4D5E6F708192A3B75 /* GymTrackerWidgetExtension.entitlements */,
+				W4A2B3C4D5E6F708192A3B76 /* PrivacyInfo.xcprivacy */,
 			);
 			path = GymTrackerWidgetExtension;
 			sourceTree = "<group>";
@@ -310,6 +313,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				W7A2B3C4D5E6F708192A3B76 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

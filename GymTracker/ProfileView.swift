@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import StoreKit
 
 struct ProfileView: View {
     @EnvironmentObject var store: WorkoutStore
@@ -9,6 +10,8 @@ struct ProfileView: View {
     @State private var didSetup = false
     @State private var showPaywall = false
     @State private var showInvite = false
+    @State private var showManageSubscription = false
+    @State private var showPrivacyPolicy = false
     @State private var showExport = false
     @State private var showRetakeConfirm = false
     @State private var exportURL: URL?
@@ -310,12 +313,17 @@ struct ProfileView: View {
                                 .font(.subheadline)
                         }
                     }
+                    if subscription.isPro {
+                        Button("Manage Subscription") { showManageSubscription = true }
+                            .font(.subheadline)
+                    }
                     Button("Restore Purchases") {
                         Task { await subscription.restore() }
                     }
                     .font(.subheadline)
                 }
 
+                if InviteCode.isEnabled {
                 Section("Invite friends") {
                     HStack {
                         Text(InviteCodeManager.shared.displayCode)
@@ -328,9 +336,12 @@ struct ProfileView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
+                }
 
                 Section {
                     NavigationLink("Settings") { SettingsView() }
+                    Button("Privacy Policy") { showPrivacyPolicy = true }
+                    Link("Terms of Use (EULA)", destination: PaywallView.termsOfUseURL)
                 }
 
                 Section("About") {
@@ -392,6 +403,10 @@ struct ProfileView: View {
                     onClose: { showPaywall = false },
                     onPurchased: { showPaywall = false }
                 )
+            }
+            .manageSubscriptionsSheet(isPresented: $showManageSubscription)
+            .sheet(isPresented: $showPrivacyPolicy) {
+                PrivacyPolicyView(onClose: { showPrivacyPolicy = false })
             }
             .sheet(isPresented: $showInvite) {
                 InviteView(onClose: { showInvite = false })

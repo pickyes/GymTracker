@@ -90,6 +90,8 @@
 	     sees the first time they turn the integration on in Settings.
 	     The app only adds its own workout events — it never reads the
 	     user's other calendar events and never sends anything anywhere. -->
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Status adds your planned workout days to Apple Calendar and keeps them up to date when your program changes. It only changes or removes the events it created, on this phone, and never sends anything anywhere.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>Status adds your planned workout days to Apple Calendar so you can see them alongside your day. It only adds its own workout events, on this phone — it never reads your other calendar events and never sends anything anywhere.</string>
 	<!-- Camera (flashlight Morse signal, opt-in, off by default): the

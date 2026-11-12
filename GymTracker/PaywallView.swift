@@ -14,6 +14,7 @@ struct PaywallView: View {
     @State private var selectedPlan: ProPlan = .yearly
     @State private var isPurchasing = false
     @State private var showNotConfigured = false
+    @State private var showPrivacyPolicy = false
 
     enum ProPlan: String, CaseIterable, Identifiable {
         case yearly
@@ -93,15 +94,32 @@ struct PaywallView: View {
                     // Outcome-framed features.
                     VStack(alignment: .leading, spacing: 6) {
                         featureRow("Unlimited programs")
-                        featureRow("See your strength curve, all time")
-                        featureRow("Your own exercises")
-                        featureRow("Every future feature")
+                        featureRow("Unlimited custom exercises")
+                        featureRow("Multiple gym profiles")
+                        featureRow("Custom accent colors")
                     }
 
                     if !subscription.hasProducts {
-                        Text("Preview prices — the Pro products still need to be created in App Store Connect before anyone can buy. Closing this keeps the full free plan.")
+                        #if DEBUG
+                        Text("DEBUG: preview prices — StoreKit products didn't load (check the StoreKit configuration or App Store Connect).")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
+                        #else
+                        HStack(spacing: 8) {
+                            if subscription.isLoadingProducts {
+                                ProgressView()
+                            }
+                            Text(subscription.isLoadingProducts
+                                 ? "Loading prices…"
+                                 : "Prices couldn't load. Check your connection.")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                            if !subscription.isLoadingProducts {
+                                Button("Retry") { Task { await subscription.loadProducts() } }
+                                    .font(.caption)
+                            }
+                        }
+                        #endif
                     }
 
                     Button(action: buySelected) {
@@ -135,10 +153,18 @@ struct PaywallView: View {
                             .foregroundStyle(Theme.vividRed)
                     }
 
-                    Text("Cancel anytime in Settings. No account, no email — Apple handles payment.")
+                    VStack(spacing: 8) {
+                        Text("Payment is charged to your Apple Account at confirmation of purchase. Subscriptions renew automatically at the price shown unless cancelled at least 24 hours before the end of the current period; your account is charged for renewal within 24 hours before the period ends. Any unused part of a free trial is forfeited when you buy a subscription. Manage or cancel anytime in your Apple Account settings. Lifetime is a one-time purchase that doesn't renew.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.secondaryText)
+                            .multilineTextAlignment(.center)
+                        HStack(spacing: 16) {
+                            Link("Terms of Use (EULA)", destination: PaywallView.termsOfUseURL)
+                            Button("Privacy Policy") { showPrivacyPolicy = true }
+                        }
                         .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                        .frame(maxWidth: .infinity)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .padding()
             }
@@ -158,13 +184,19 @@ struct PaywallView: View {
                     .font(.subheadline)
                 }
             }
-            .alert("Pro isn't available yet", isPresented: $showNotConfigured) {
+            .alert("Can't reach the App Store", isPresented: $showNotConfigured) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("The Pro products still need to be created in App Store Connect. You can close this and use the free plan — it includes your full program, unlimited logging, and your whole history.")
+                Text("Pro prices haven't loaded yet. Check your connection and try again. The free plan keeps your full program, unlimited logging, and your whole history.")
+            }
+            .sheet(isPresented: $showPrivacyPolicy) {
+                PrivacyPolicyView(onClose: { showPrivacyPolicy = false })
             }
         }
     }
+
+    /// Apple's standard EULA. Swap for a custom one if you publish your own.
+    static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
 
     // MARK: - Pieces
 
@@ -282,6 +314,54 @@ struct PaywallView: View {
         case .yearly: return subscription.yearlyProduct
         case .monthly: return subscription.monthlyProduct
         case .lifetime: return subscription.lifetimeProduct
+        }
+    }
+}
+
+
+/// The in-app privacy policy (guideline 5.1.1 wants it reachable from the
+/// app, not only from the App Store listing). Keep it in sync with what the
+/// app actually does and with the App Store privacy label. App Store
+/// Connect also needs this hosted at a public URL before submission.
+struct PrivacyPolicyView: View {
+    var onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Last updated November 12, 2026")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    section("The short version",
+                            "Status keeps your workouts on your iPhone. The developer doesn't collect, store, sell, or see your data. There are no accounts, ads, analytics, or tracking.")
+                    section("What's stored, and where",
+                            "Your programs, logged sets, notes, bodyweight, profile answers (like goals, experience, and injuries you mention), and settings are stored on this device, shared only with the app's own widget and Live Activity. Deleting the app deletes them. Device backups you make through Apple may include them.")
+                    section("Optional features you turn on",
+                            "Apple Calendar: adds your planned workout days to your calendar (write-only; Status can't read your other events). Flashlight signal: uses the torch to flash when a rest timer ends. Local network access (Muse): when you enable it, a server runs only while the app is open, so your own devices on your Wi-Fi can read and log workouts with your approval; it's never reachable from the internet. Export: creates a file only when you tap Export, and you choose where it goes.")
+                    section("Purchases",
+                            "Subscriptions and purchases are processed by Apple. Status receives only whether you have Pro, never your payment details.")
+                    section("Children",
+                            "Status isn't directed at children under 13 and doesn't knowingly collect anyone's personal information.")
+                    section("Changes and contact",
+                            "If this policy changes, the new version will appear here with a new date. Questions: contact the developer through the App Store listing's support link.")
+                }
+                .padding()
+            }
+            .navigationTitle("Privacy Policy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { onClose() }
+                }
+            }
+        }
+    }
+
+    private func section(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            Text(body).font(.subheadline).foregroundStyle(Theme.secondaryText)
         }
     }
 }
