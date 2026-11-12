@@ -268,53 +268,30 @@ struct TodayView: View {
     /// dismisses back to Today. One presentation for both entry
     /// points — never a second, different calendar.
     private func calendarDropdownOverlay(size: CGSize, kind: TodayLayoutKind) -> some View {
-        // Which part of the screen the Today title is on: the workout
-        // column (the right page on the open Duo unless swapped).
+        // Full-page calendar (DaRon: "full page calendar"): it grows out
+        // of the Today arrow and fills the whole page.
         let columnX: CGFloat = kind == .split && !duoSwapped ? size.width - Self.outerDisplayWidth : 0
-        // Open Duo: a full calendar across both pages (DaRon). Folded:
-        // the screen's width.
-        let wide = kind == .split && size.width > size.height
-        let cardWidth = size.width - 24
-        // The pointer sits under the arrow wherever the title is.
-        let pointerX = columnX + 135 - 12 - 9
-        // Just under the title row (the title sits 30pt down, ~41pt tall).
-        let top: CGFloat = 82
+        let wide = size.width > size.height && size.width > 600
+        let arrowX = (columnX + 135) / max(size.width, 1)
         let close = { withAnimation(AppAnimation.snappy) { showCalendarDropdown = false } }
-        return ZStack(alignment: .topLeading) {
-            // Tap anywhere outside to fold it back up.
-            Color.black.opacity(0.12)
-                .ignoresSafeArea()
-                .onTapGesture(perform: close)
-            VStack(spacing: 0) {
-                // Small pointer up at the arrow, so the card reads as
-                // dropping out of it.
-                Triangle()
-                    .fill(Theme.background)
-                    .overlay(Triangle().stroke(Theme.border, lineWidth: 1))
-                    .frame(width: 18, height: 9)
-                    // Under the arrow: "Today" (~105pt) + 4pt gap + half
-                    // the chevron, from the column's 16pt margin, minus
-                    // the card's 12pt inset and half the pointer.
-                    .padding(.leading, pointerX)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .offset(y: 1)
-                    .zIndex(1)
-                CalendarView(onDone: close, sideBySide: wide)
-                    .frame(maxWidth: .infinity, maxHeight: max(320, size.height - top - (wide ? 8 : 110)))
-                    .background(Theme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.border, lineWidth: 1))
+        return CalendarView(onDone: close, sideBySide: wide)
+            .padding(.top, 34)
+            .frame(width: size.width, height: size.height + 34)
+            // Solid to the very bottom edge (the page under it can measure
+            // shorter than the screen; a background isn't clipped).
+            .background(alignment: .top) {
+                Theme.background.frame(height: size.height + 400)
             }
-            .frame(width: cardWidth)
-            .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-            .padding(.leading, 12)
-            .padding(.top, top)
-            // Unfolds downward out of the arrow.
+            .ignoresSafeArea(edges: .top)
+            // Swipe down to close, like a sheet.
+            .gesture(
+                DragGesture(minimumDistance: 30).onEnded { value in
+                    if value.translation.height > 120, abs(value.translation.width) < value.translation.height { close() }
+                }
+            )
             .transition(reduceMotion
                 ? .opacity
-                : .scale(scale: 0.08, anchor: UnitPoint(x: (pointerX + 9) / max(cardWidth, 1), y: 0)).combined(with: .opacity))
-        }
-        .ignoresSafeArea(edges: .top)
+                : .scale(scale: 0.05, anchor: UnitPoint(x: arrowX, y: 0.03)).combined(with: .opacity))
     }
 
     /// The workout Today shows: the "Train anyway" plan while one is
