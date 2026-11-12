@@ -4,6 +4,7 @@ import UIKit
 
 struct TodayView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
+    @Environment(\.pageContainerSize) private var pageContainerSize
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var saved = false
@@ -118,6 +119,15 @@ struct TodayView: View {
                 // exactly where it was — same scroll, same width — and the
                 // body pane is simply revealed beside it, already waiting.
                 todayContent(kind: rawKind)
+                    // Pin to the real page height (see PageContainerSizeKey):
+                    // on the outer screen held sideways the stack measures
+                    // taller than the display, which pushed the bottom of
+                    // the page (Mark Set Done) off the screen.
+                    // Fixed (non-scrolling) layouts only — pinning the
+                    // scrolling column stopped it short of the home
+                    // indicator and left a black band.
+                    .frame(height: (rawKind == .tent || rawKind == .propped) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
+                    .frame(maxHeight: .infinity, alignment: .top)
                     .transaction { $0.animation = nil }
                     // Calendar dropdown (Item B): the same card ContentView's
                     // menu drops down — scrim + card over the Today page, so
@@ -428,7 +438,16 @@ struct TodayView: View {
         case compact, split, regular, propped, tent
     }
 
-    private func layoutKind(for size: CGSize) -> TodayLayoutKind {
+    private func visibleHeight(_ measured: CGFloat) -> CGFloat {
+        pageContainerSize == .zero ? measured : min(measured, pageContainerSize.height)
+    }
+
+    private func layoutKind(for measured: CGSize) -> TodayLayoutKind {
+        // Trust the page container when ContentView provides it (see
+        // PageContainerSizeKey): never larger than what's really on screen.
+        let size = pageContainerSize == .zero ? measured
+            : CGSize(width: min(measured.width, pageContainerSize.width),
+                     height: min(measured.height, pageContainerSize.height))
         if size.width > size.height * 1.2 {
             // Propped (Seated / Tent): landscape and much wider than tall.
             if size.height < 520 {
@@ -1332,9 +1351,13 @@ struct TodayView: View {
                     // GeometryReader can report a zero width, which
                     // would make paneWidth negative (invalid frame).
                     let paneWidth = max((geo.size.width - 16) / 2, 0)
+                    // Short pane (outer screen held sideways, ~290pt):
+                    // tighter type and button so Mark Set Done stays on
+                    // screen instead of being pushed off the bottom.
+                    let short = geo.size.height < 310
                     HStack(alignment: .top, spacing: 16) {
                         // Left: the current exercise, huge.
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: short ? 6 : 12) {
                             // The name must fit, never clip: smaller base size,
                             // shrink to half if needed, two lines, and it takes
                             // the height its wrapped lines need. (DaRon 21:42:
@@ -1365,7 +1388,7 @@ struct TodayView: View {
                                 // half, then wrap to a second line.
                                 // ("130 lb × 12…" on DaRon's photo.)
                                 Text("\(store.displayWeightLabel(set.weightLb, isPair: current.isPair, for: current)) × \(set.reps) reps")
-                                    .scaledFont(size: 44, weight: .bold)
+                                    .scaledFont(size: short ? 34 : 44, weight: .bold)
                                     .minimumScaleFactor(0.5)
                                     .lineLimit(2)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -1391,14 +1414,14 @@ struct TodayView: View {
                                 Label("Mark Set Done", systemImage: "checkmark.circle.fill")
                                     .font(.title2)
                                     .fontWeight(.bold)
-                                    .frame(maxWidth: .infinity, minHeight: 72)
+                                    .frame(maxWidth: .infinity, minHeight: short ? 52 : 72)
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(nextIndex == nil)
                             .accessibilityLabel("Mark set done")
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(20)
+                        .padding(short ? 14 : 20)
                         .themeCard(cornerRadius: 20)
                         // Swipe left/right to turn the page between exercises,
                         // like standup mode. (DaRon 21:42.) The drag needs 40pt

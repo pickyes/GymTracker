@@ -197,10 +197,23 @@ private struct FabBottomOffsetKey: EnvironmentKey {
     static let defaultValue: CGFloat = 24
 }
 
+/// The page area ContentView actually gives a page (inside the safe
+/// area). Today decides its pose from this, not from the GeometryReader
+/// inside its own NavigationStack: on the Duo's outer screen held
+/// sideways that stack reported ~520–568pt of height on a 466pt screen,
+/// which picked the open-book split layout while folded (Nov 12).
+private struct PageContainerSizeKey: EnvironmentKey {
+    static let defaultValue: CGSize = .zero
+}
+
 extension EnvironmentValues {
     var fabBottomOffset: CGFloat {
         get { self[FabBottomOffsetKey.self] }
         set { self[FabBottomOffsetKey.self] = newValue }
+    }
+    var pageContainerSize: CGSize {
+        get { self[PageContainerSizeKey.self] }
+        set { self[PageContainerSizeKey.self] = newValue }
     }
 }
 

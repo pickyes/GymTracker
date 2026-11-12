@@ -166,10 +166,16 @@ struct HistoryView: View {
             }
         }
         .onAppear {
-            // Open on the latest session (sessions are newest-first).
-            if selectedSessionID == nil {
+            // Open on the latest session (sessions are newest-first) —
+            // only when two-pane. In compact (folded, or kept at the
+            // folded width on the open Duo) a selection pushes the
+            // detail over the list, so the page must open on the list.
+            if horizontalSizeClass == .regular, selectedSessionID == nil {
                 selectedSessionID = store.sessions.first?.id
             }
+        }
+        .onChange(of: horizontalSizeClass) { _, newValue in
+            if newValue == .compact { selectedSessionID = nil }
         }
         // D9: pose flip while the empty detail is showing — restore the
         // latest session when the width becomes regular again.

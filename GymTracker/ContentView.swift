@@ -173,23 +173,84 @@ struct ContentView: View {
     /// VoiceOver tree (opacity 0 + allowsHitTesting false does NOT
     /// prune them) — only the visible page is exposed.
     private var pageStack: some View {
-        ZStack {
-            TodayView()
-                .opacity(selectedPage == .today ? 1 : 0)
-                .allowsHitTesting(selectedPage == .today)
-                .accessibilityHidden(selectedPage != .today)
-            HistoryView()
-                .opacity(selectedPage == .history ? 1 : 0)
-                .allowsHitTesting(selectedPage == .history)
-                .accessibilityHidden(selectedPage != .history)
-            ProfileView()
-                .opacity(selectedPage == .profile ? 1 : 0)
-                .allowsHitTesting(selectedPage == .profile)
-                .accessibilityHidden(selectedPage != .profile)
-            NotesView()
-                .opacity(selectedPage == .notes ? 1 : 0)
-                .allowsHitTesting(selectedPage == .notes)
-                .accessibilityHidden(selectedPage != .notes)
+        GeometryReader { geo in
+            // Open inner display only (669×951 / 951×669) — not the outer
+            // screen held sideways (678×466).
+            let wide = geo.size.width >= TodayView.outerDisplayWidth + 150 && geo.size.height >= 520
+            ZStack {
+                TodayView()
+                    .environment(\.pageContainerSize, geo.size)
+                    .opacity(selectedPage == .today ? 1 : 0)
+                    .allowsHitTesting(selectedPage == .today)
+                    .accessibilityHidden(selectedPage != .today)
+                unfoldPage(.history, wide: wide) { HistoryView() } companion: { historyCompanion }
+                unfoldPage(.profile, wide: wide) { ProfileView() } companion: { profileCompanion }
+                unfoldPage(.notes, wide: wide) { NotesView() } companion: { notesCompanion }
+            }
+        }
+    }
+
+    /// Same unfold as Today (Nov 12): the page keeps the folded screen's
+    /// width (and compact size class, so it lays out exactly as folded)
+    /// on the right; opening the Duo reveals a companion page on the left
+    /// that is already there, waiting. Folded, the companion is absent.
+    @ViewBuilder
+    private func unfoldPage<Main: View, Side: View>(
+        _ page: Page, wide: Bool,
+        @ViewBuilder main: () -> Main,
+        @ViewBuilder companion: () -> Side
+    ) -> some View {
+        HStack(spacing: 0) {
+            if wide {
+                companion()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .hingeReveal()
+            }
+            main()
+                .modifier(CompactWhen(wide))
+                .frame(width: wide ? TodayView.outerDisplayWidth : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+        }
+        .opacity(selectedPage == page ? 1 : 0)
+        .allowsHitTesting(selectedPage == page)
+        .accessibilityHidden(selectedPage != page)
+    }
+
+    /// History's companion: the latest session's details.
+    @ViewBuilder private var historyCompanion: some View {
+        if let latest = store.sessions.first {
+            NavigationStack { SessionDetailView(session: latest) }
+        } else {
+            ContentUnavailableView("No workouts yet", systemImage: "clock.arrow.circlepath",
+                                   description: Text("Finish a workout from Today and it shows up here."))
+        }
+    }
+
+    /// Profile's companion: Settings.
+    private var profileCompanion: some View {
+        NavigationStack { SettingsView() }
+    }
+
+    /// Notes' companion: the most recent note, in full.
+    @ViewBuilder private var notesCompanion: some View {
+        if let note = store.userNotes.first(where: \.isPinned) ?? store.userNotes.first {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(note.isPinned ? "Pinned note" : "Latest note")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                    Text(note.displayTitle).font(.title2.bold())
+                    Text(note.updatedAt, format: .dateTime.month().day().hour().minute())
+                        .font(.caption).foregroundStyle(Theme.secondaryText)
+                    Text(note.body).font(.body)
+                }
+                .padding(24)
+                .padding(.top, 40)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            ContentUnavailableView("No notes yet", systemImage: "note.text",
+                                   description: Text("Your latest note shows here when the phone is open."))
         }
     }
 
@@ -447,5 +508,16 @@ struct DisableVerticalBar: ViewModifier {
 extension View {
     func disableVerticalBar() -> some View {
         modifier(DisableVerticalBar())
+    }
+}
+
+
+/// Forces the compact size class only when `on`, so a page kept at the
+/// folded width on the open Duo lays out exactly as it does folded.
+private struct CompactWhen: ViewModifier {
+    let on: Bool
+    init(_ on: Bool) { self.on = on }
+    func body(content: Content) -> some View {
+        if on { content.environment(\.horizontalSizeClass, .compact) } else { content }
     }
 }
