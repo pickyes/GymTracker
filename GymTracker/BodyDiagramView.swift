@@ -341,6 +341,9 @@ private let muscleSpecs: [MuscleSpec] = [
 /// scales to fit its frame; the canvas is 200×400, the same aspect as
 /// the images, so the overlays land on the muscles in the pictures.
 struct BodyFigureView: View {
+    /// Light mode: the grey painting is lightened to match the light grey
+    /// UI (DaRon, Nov 12); the lit muscles keep their accent color.
+    @Environment(\.colorScheme) private var colorScheme
     let side: BodyDiagramSide
     var highlighted: Set<MuscleID> = []
     var recovery: [MuscleID: MuscleRecovery] = [:]
@@ -443,6 +446,8 @@ struct BodyFigureView: View {
                     Image(anatomyName)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
+                        .brightness(colorScheme == .light ? 0.3 : 0)
+                        .contrast(colorScheme == .light ? 0.85 : 1)
                     // Lit muscles: the painting itself, recoloured to the
                     // highlight colour — its own light and dark kept, so
                     // fibres and tendons stay visible (Nov 12). Prime

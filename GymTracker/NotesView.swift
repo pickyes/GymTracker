@@ -252,6 +252,7 @@ struct NotesView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
+                .infinityTopEdge()
             }
         }
         .withKeyboardDoneToolbar()

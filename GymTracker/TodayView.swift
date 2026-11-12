@@ -1070,6 +1070,7 @@ struct TodayView: View {
                 }
                 // Content starts at the very top (title beside the clock).
                 .ignoresSafeArea(edges: .top)
+                .infinityTopEdge()
                 .onAppear { scrollToCurrent(proxy: proxy, plan: plan, animated: false) }
                 .onChange(of: displayedExerciseID(for: plan)) { _, _ in
                     scrollToCurrent(proxy: proxy, plan: plan, animated: true)
@@ -2139,20 +2140,18 @@ struct RestTimerCard: View {
                             .frame(width: 56, height: 200)
                             // Same material as the swap and menu buttons:
                             // frosted, plain border, soft shadow — no gloss.
+                            // The liquid sits inside real Liquid Glass, like
+                            // the swap and menu buttons below it.
                             .background {
-                                ZStack {
-                                    GlassFill(shape: Capsule())
-                                    LavaLiquidFill(
-                                        endsAt: store.restEndsAt,
-                                        pausedRemaining: store.restPausedRemaining,
-                                        total: restTotal,
-                                        color: pillAccent
-                                    )
-                                }
+                                LavaLiquidFill(
+                                    endsAt: store.restEndsAt,
+                                    pausedRemaining: store.restPausedRemaining,
+                                    total: restTotal,
+                                    color: pillAccent
+                                )
                                 .clipShape(Capsule())
                             }
-                            .controlBorder(Capsule())
-                            .shadow(color: .black.opacity(0.3), radius: 6)
+                            .liquidGlass(Capsule())
                         } else {
                             HStack(spacing: 8) {
                                 Image(systemName: "timer")

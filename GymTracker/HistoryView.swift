@@ -142,6 +142,7 @@ struct HistoryView: View {
             }
             .listStyle(.plain)
             .ignoresSafeArea(edges: .top)
+            .infinityTopEdge()
             .toolbar(.hidden, for: .navigationBar)
         } detail: {
             Group {

@@ -815,23 +815,53 @@ private struct ControlBorder<S: Shape>: ViewModifier {
 /// mode is the LAST modifier so it mixes with the page below instead of
 /// inside its own layer.
 struct StatusBarFade: View {
-    /// Down to the white line DaRon drew: the top of the page titles,
-    /// which sit 30pt down (beside the clock).
-    var height: CGFloat = 30
+    /// A third of the original 30pt strip (DaRon: "cut the black and
+    /// white space in 1/3rd") — just the very top edge.
+    var height: CGFloat = 10
 
     var body: some View {
         Rectangle()
             .fill(Color(white: 0.5))
-            .mask(LinearGradient(stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: 0.75),
-                .init(color: .clear, location: 1),
-            ], startPoint: .top, endPoint: .bottom))
+            // Ombre all the way down — no visible edge where color
+            // comes back.
+            .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
             .frame(height: height)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             .blendMode(.saturation)
+    }
+}
+
+
+extension View {
+    /// Infinity-display top edge (Nov 12): content softly blurs and fades
+    /// as it scrolls off the top of the screen — iOS's own soft scroll
+    /// edge effect (a progressive blur with no tint, so no grey band).
+    @ViewBuilder
+    func infinityTopEdge() -> some View {
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+    }
+}
+
+
+extension View {
+    /// Real Liquid Glass for the floating buttons and the rest pill
+    /// (iOS 26+), so they follow the system's Liquid Glass setting,
+    /// Reduce Transparency and contrast on their own. Older iOS falls
+    /// back to the frosted fill + border.
+    @ViewBuilder
+    func liquidGlass<S: Shape>(_ shape: S) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            self.background { GlassFill(shape: shape) }
+                .controlBorder(shape)
+        }
     }
 }

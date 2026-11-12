@@ -229,6 +229,7 @@ struct ProfileView: View {
         .listStyle(.insetGrouped)
         .oledList()
         .ignoresSafeArea(edges: .top)
+        .infinityTopEdge()
     }
 
     /// Open Duo: the same list as a sidebar; the chosen row is lit and
@@ -266,6 +267,7 @@ struct ProfileView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .ignoresSafeArea(edges: .top)
+        .infinityTopEdge()
     }
 
     /// Apple Account-style card at the top: the plan you're on.

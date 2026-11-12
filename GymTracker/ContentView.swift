@@ -95,7 +95,8 @@ struct ContentView: View {
                             .animation(AppAnimation.snappy, value: navExpanded)
                         // Content scrolling up under the status bar blurs
                         // and greys out, ombre-style (Nov 12).
-                        StatusBarFade()
+                        // Smaller strip on Today and Profile (DaRon).
+                        StatusBarFade(height: selectedPage == .today || selectedPage == .profile ? 10 : 30)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -243,13 +244,11 @@ struct ContentView: View {
         } label: {
             Image(systemName: "arrow.left.arrow.right")
                 .scaledFont(size: 20, weight: .semibold, maxScale: 1.3)
-                .foregroundStyle(.white)
-                // Same 56pt circle, border and shadow as the menu button
-                // below it, so the two line up as one column (DaRon).
+                .foregroundStyle(.primary)
+                // Same 56pt Liquid Glass circle as the menu button below
+                // it, so the two line up as one column (DaRon).
                 .frame(width: 56, height: 56)
-                .background { GlassFill(shape: Circle()) }
-                .controlBorder(Circle())
-                .shadow(color: .black.opacity(0.3), radius: 6)
+                .liquidGlass(Circle())
         }
         .buttonStyle(.plain)
         // Never holds keyboard focus: with a hardware keyboard a focused
@@ -541,25 +540,23 @@ struct ContentView: View {
                 }
             }
         } label: {
-            Image(systemName: navExpanded || showCalendar ? "xmark" : "list.bullet")
+            let open = navExpanded || showCalendar
+            let icon = Image(systemName: open ? "xmark" : "list.bullet")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                // Frosted when closed (Nov 12 UI pass): it sits in the
-                // corner over list rows now, and a flat black disc with a
-                // thin outline either vanished on black or clashed with
-                // the cards under it. Accent when open, as before.
-                .background {
-                    if navExpanded || showCalendar {
-                        effectiveAccent
-                    } else {
-                        GlassFill(shape: Circle())
-                            .overlay(Circle().fill(Color.black.opacity(0.35)))
-                    }
+            Group {
+                if open {
+                    // Accent when open, as before.
+                    icon.foregroundStyle(.white)
+                        .background(effectiveAccent, in: Circle())
+                        .controlBorder(Circle(), tint: effectiveAccent)
+                        .shadow(color: effectiveAccent.opacity(0.55), radius: 14)
+                } else {
+                    // Closed: Liquid Glass, following the system setting.
+                    icon.foregroundStyle(.primary)
+                        .liquidGlass(Circle())
                 }
-                .clipShape(Circle())
-                .controlBorder(Circle(), tint: navExpanded || showCalendar ? effectiveAccent : nil)
-                .shadow(color: navExpanded || showCalendar ? effectiveAccent.opacity(0.55) : .black.opacity(0.3), radius: navExpanded || showCalendar ? 14 : 6)
+            }
         }
         .buttonStyle(.plain)
         .scaleEffect(navExpanded || showCalendar ? 1.25 : 1.0)
