@@ -807,31 +807,31 @@ private struct ControlBorder<S: Shape>: ViewModifier {
 }
 
 
-/// The strip under the status bar (Nov 12): content that scrolls up into
-/// it blurs and goes grey — the same look as the page behind the open
-/// menu — fading in as an ombre, strongest at the very top edge and gone
-/// by the page titles (which sit level with the clock).
+/// The strip under the status bar (Nov 12): whatever scrolls up into it
+/// turns black and white (DaRon: "I just want the top part of the screen
+/// to turn black and white"), fading back to full color just above the
+/// page titles. A grey layer with the .saturation blend mode keeps the
+/// brightness of what's underneath and takes away its color; the blend
+/// mode is the LAST modifier so it mixes with the page below instead of
+/// inside its own layer.
 struct StatusBarFade: View {
-    var height: CGFloat = 34
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    /// Down to the white line DaRon drew: the top of the page titles,
+    /// which sit 30pt down (beside the clock).
+    var height: CGFloat = 30
 
     var body: some View {
-        let ombre = LinearGradient(stops: [
-            .init(color: .black, location: 0),
-            .init(color: .black.opacity(0.85), location: 0.45),
-            .init(color: .clear, location: 1),
-        ], startPoint: .top, endPoint: .bottom)
-        // No frosted material: over the true-black page it showed as a
-        // grey band. Content just loses its color and melts into the
-        // page's own background toward the top, so at rest the strip is
-        // exactly the page color.
-        Theme.background
-            .opacity(reduceTransparency ? 1 : 0.92)
-            .mask(ombre)
-        .frame(height: height)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .ignoresSafeArea(edges: .top)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        Rectangle()
+            .fill(Color(white: 0.5))
+            .mask(LinearGradient(stops: [
+                .init(color: .black, location: 0),
+                .init(color: .black, location: 0.75),
+                .init(color: .clear, location: 1),
+            ], startPoint: .top, endPoint: .bottom))
+            .frame(height: height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .blendMode(.saturation)
     }
 }
