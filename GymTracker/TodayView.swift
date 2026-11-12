@@ -975,6 +975,11 @@ struct TodayView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         calendarTitle(greetingTitle(normal: "Today"))
                             .padding(.leading, 16)
+                            // In the clock's row (DaRon, Nov 12): the Duo's
+                            // status icons sit only at the top-right, so the
+                            // title uses the empty strip beside them instead
+                            // of starting below it.
+                            .padding(.top, 30)
                         // Date directly under "Today". (DaRon 21:20:
                         // Today on top, Monday, Nov 9 under it.)
                         // Hold it down to open the workout calendar.
@@ -1037,6 +1042,8 @@ struct TodayView: View {
                         .padding(.bottom, contentBottomPadding)
                     }
                 }
+                // Content starts at the very top (title beside the clock).
+                .ignoresSafeArea(edges: .top)
                 .onAppear { scrollToCurrent(proxy: proxy, plan: plan, animated: false) }
                 .onChange(of: displayedExerciseID(for: plan)) { _, _ in
                     scrollToCurrent(proxy: proxy, plan: plan, animated: true)
