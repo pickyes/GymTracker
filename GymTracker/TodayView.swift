@@ -440,6 +440,11 @@ struct TodayView: View {
                 // iPad 768pt+) takes the normal propped layout.
                 return .tent
             }
+            // Opening the Duo like a book turns the outer (portrait)
+            // screen into the inner screen held landscape: the outer
+            // screen's column becomes the right page and the body is
+            // revealed on the left page (Nov 12, verified in Device Hub).
+            if size.width >= Self.outerDisplayWidth + 150 { return .split }
             return .propped
         }
         // Open inner display: two-pane list + detail — but only when the
@@ -846,6 +851,9 @@ struct TodayView: View {
                 .padding(.leading, 12)
                 .padding(.top, 60)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // Follows the real hinge: the waiting pane comes up to full
+                // brightness exactly as the phone opens flat.
+                .hingeReveal()
             }
             compactColumn(for: plan, showBody: !split)
                 .frame(width: split ? Self.outerDisplayWidth : nil)

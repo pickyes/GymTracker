@@ -422,3 +422,41 @@ extension View {
         modifier(ScaledFont(size: size, weight: weight, design: design, maxScale: maxScale))
     }
 }
+
+
+// MARK: - Hinge-driven unfold reveal (iPhone Duo, iOS 27.1+)
+
+/// Ties a view to the physical hinge using Apple's `onHingeChange`
+/// (`DeviceHinge.angle`, 180° = flat). While the phone is partly open the
+/// view sits slightly dimmed and recessed; it reaches full brightness and
+/// size exactly as the hinge reaches flat, so the pane revealed by the
+/// unfold looks like it was already there, waiting. No layout changes —
+/// only opacity/scale, so nothing moves or reflows. Devices without a
+/// hinge (or iOS < 27.1) show the view as-is.
+struct HingeReveal: ViewModifier {
+    @State private var openness: Double = 1   // 0 = closed, 1 = flat
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content
+                .opacity(0.25 + 0.75 * openness)
+                .scaleEffect(0.96 + 0.04 * openness, anchor: .trailing)
+                .onHingeChange { _, context in
+                    guard let hinge = context.hinge else { openness = 1; return }
+                    // Map 90°…180° to 0…1: the inner screen is only really
+                    // in view once the phone is past half open.
+                    let t = (hinge.angle.degrees - 90) / 90
+                    let next = min(max(t, 0), 1)
+                    withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 1)) {
+                        openness = next
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func hingeReveal() -> some View { modifier(HingeReveal()) }
+}
