@@ -117,39 +117,73 @@ def build(side):
         masks['lowerBack']=m.astype(bool)&alpha&~used
     return alpha,masks,unmapped
 
-def smooth_mask(mask, open_k=13, erode_k=5):
-    """Clean the raw pixel mask into smooth, illustration-quality shapes.
-    Each painted piece is cleaned ON ITS OWN, so the gaps between pieces
-    of one muscle (the six abs blocks, the quad heads) stay open: open
-    removes frayed tendon spikes and drip tails, close fills small
-    notches, blur + threshold turns pixel stair-steps into smooth edges,
-    and a small erode gives every piece the same even gap."""
-    ell=lambda n: cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(n,n))
+ELL=lambda n: cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(n,n))
+JOINTS=('head','knee','ankle','wrist','elbow','hand','foot','lowerBack')
+
+def clean_piece(m, open_k=13):
+    """One painted piece -> smooth shape: open removes frayed tendon
+    spikes and drip tails, close fills notches, blur + threshold turns
+    pixel stair-steps into smooth edges."""
+    m=m.astype(np.uint8)*255
+    m=cv2.morphologyEx(m,cv2.MORPH_OPEN,ELL(open_k))
+    m=cv2.morphologyEx(m,cv2.MORPH_CLOSE,ELL(7))
+    m=cv2.GaussianBlur(m,(0,0),3)
+    return (m>127).astype(np.uint8)
+
+def pieces_of(mask):
+    """Clean each painted piece ON ITS OWN, so pieces of one muscle (abs
+    blocks, quad heads) never merge. Thin pieces that a full clean-up
+    would erase get a gentler one."""
     n,lab,st,_=cv2.connectedComponentsWithStats(mask.astype(np.uint8),connectivity=8)
-    out=np.zeros(mask.shape,np.uint8)
+    out=[]
     for i in range(1,n):
         if st[i,cv2.CC_STAT_AREA]<300: continue
-        m=(lab==i).astype(np.uint8)*255
-        m=cv2.morphologyEx(m,cv2.MORPH_OPEN,ell(open_k))
-        m=cv2.morphologyEx(m,cv2.MORPH_CLOSE,ell(7))
-        m=cv2.GaussianBlur(m,(0,0),3)
-        m=cv2.erode((m>127).astype(np.uint8),ell(erode_k))
-        out|=m
+        raw=(lab==i)
+        for k in (13,3):
+            m=clean_piece(raw,k)
+            if cv2.countNonZero(m)>=200: out.append(m); break
+    if not out:  # whole area is thin: keep its raw outline
+        out=[cv2.morphologyEx(mask.astype(np.uint8),cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))]
     return out
 
-def polys(mask):
-    m=smooth_mask(mask)
-    if cv2.countNonZero(m)<500:
-        # thin areas (outer hip strip, front elbows) would vanish under
-        # the full clean-up: smooth them gently instead
-        m=smooth_mask(mask,open_k=3,erode_k=3)
-    if cv2.countNonZero(m)<500:
-        m=cv2.morphologyEx(mask.astype(np.uint8),cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))
-    cs,_=cv2.findContours(m,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+GROW=9   # px: muscles grow into narrow gaps up to this far (full res)
+LINE=3   # px: final separation line width (erode diameter)
+
+def refine(alpha, masks):
+    """Smooth shapes with FINE, EVEN separation lines. After smoothing,
+    every muscle piece grows into the gap around it (nearest piece wins,
+    at most GROW px), so painted borders of any width become a thin line;
+    wide non-muscle areas (spine, fascia) stay as they are. A final light
+    smooth + LINE px erode leaves the same hairline between all pieces."""
+    pieces=[(n,p) for n,m in masks.items() if not n.startswith(JOINTS) for p in pieces_of(m)]
+    union=np.zeros(alpha.shape,bool)
+    for _,p in pieces: union|=p.astype(bool)
+    joints=np.zeros(alpha.shape,bool)
+    for n,m in masks.items():
+        if n.startswith(JOINTS): joints|=m
+    best_d=np.full(alpha.shape,1e9,np.float32); best_i=np.full(alpha.shape,-1,np.int32)
+    for i,(_,p) in enumerate(pieces):
+        d=cv2.distanceTransform((1-p).astype(np.uint8),cv2.DIST_L2,5)
+        upd=d<best_d; best_d[upd]=d[upd]; best_i[upd]=i
+    zone=alpha&~union&~joints&(best_d<=GROW)
+    out={}
+    for i,(n,p) in enumerate(pieces):
+        g=(p.astype(bool)|(zone&(best_i==i))).astype(np.uint8)*255
+        g=cv2.GaussianBlur(g,(0,0),2)
+        g=cv2.erode((g>127).astype(np.uint8),ELL(LINE))
+        out[n]=out.get(n,np.zeros(alpha.shape,np.uint8))|g
+    for n,m in masks.items():
+        if n.startswith(JOINTS):
+            j=cv2.GaussianBlur(m.astype(np.uint8)*255,(0,0),2)
+            out[n]=cv2.erode((j>127).astype(np.uint8),ELL(LINE))
+    return out
+
+def polys(m, min_area=700):
+    cs,_=cv2.findContours(m.astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
     out=[]
     for c in cs:
-        if cv2.contourArea(c)<200: continue   # drop slivers
-        a=cv2.approxPolyDP(c,1.2,True)[:,0,:]
+        if cv2.contourArea(c)<min_area: continue   # drop slivers and fragments
+        a=cv2.approxPolyDP(c,1.0,True)[:,0,:]
         out.append([(round(x/S,1),round(y/S,1)) for x,y in a])
     return out
 
@@ -160,7 +194,8 @@ for side in ('front','back'):
     cov=np.zeros_like(alpha)
     for m in masks.values(): cov|=m
     print(side,f'silhouette covered: {100*(cov&alpha).sum()/alpha.sum():.1f}%  overlaps: {sum(m.sum() for m in masks.values())-cov.sum()} px')
-    result[side]={k:polys(v) for k,v in masks.items() if v.any()}
+    final=refine(alpha,masks)
+    result[side]={k:polys(v,150 if k.startswith(JOINTS) else 700) for k,v in final.items() if v.any()}
     np.save(f'{sys.argv[1]}/cov_{side}.npy',cov)
 json.dump(result,open(f'{sys.argv[1]}/regions.json','w'))
 print({s:sum(len(p) for v in result[s].values() for p in v) for s in result},'points')
