@@ -33,6 +33,14 @@ struct ContentView: View {
     @State private var selectedPage: Page = .today
     @State private var navExpanded = false
     @State private var showCalendar = false
+    /// Open Duo: mirror the two pages (swap button, bottom-left). Kept
+    /// across launches.
+    @AppStorage("duoSwapSides") private var swapSides = false
+    /// The page area ignoring the keyboard. Pose decisions (two pages
+    /// or one, Today's layout) use this: with the keyboard up the safe
+    /// area shrinks, which flipped the open Duo to the folded layout
+    /// mid-typing (and closed the note being written).
+    @State private var steadySize: CGSize = .zero
 
     enum Page: String, CaseIterable {
         case today, history, notes, profile
@@ -76,6 +84,14 @@ struct ContentView: View {
                             .blur(radius: navExpanded ? 10 : 0)
                             .saturation(navExpanded ? 0 : 1)
                             .animation(AppAnimation.snappy, value: navExpanded)
+                        // Swap sides (open Duo only): bottom-left corner,
+                        // mirrors the two pages.
+                        if Self.isWide(steadySize == .zero ? proxy.size : steadySize) {
+                            swapSidesButton
+                                .padding(.leading, 20)
+                                .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        }
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -131,6 +147,14 @@ struct ContentView: View {
                     // Dynamic Type sizes) grew the ZStack with it, and the
                     // bottom-trailing menu button rode off the bottom edge.
                     .frame(width: proxy.size.width, height: proxy.size.height)
+                    .background {
+                        GeometryReader { steady in
+                            Color.clear
+                                .onAppear { steadySize = steady.size }
+                                .onChange(of: steady.size) { _, size in steadySize = size }
+                        }
+                        .ignoresSafeArea(.keyboard)
+                    }
                 }
             } else {
                 OnboardingFlowView()
@@ -174,42 +198,87 @@ struct ContentView: View {
     /// prune them) — only the visible page is exposed.
     private var pageStack: some View {
         GeometryReader { geo in
-            // Open inner display only (669×951 / 951×669) — not the outer
-            // screen held sideways (678×466).
-            let wide = geo.size.width >= TodayView.outerDisplayWidth + 150 && geo.size.height >= 520
+            let size = steadySize == .zero ? geo.size : steadySize
+            let wide = Self.isWide(size)
             ZStack {
                 TodayView()
-                    .environment(\.pageContainerSize, geo.size)
+                    .environment(\.pageContainerSize, size)
                     .opacity(selectedPage == .today ? 1 : 0)
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)
                 unfoldPage(.history, wide: wide) { HistoryView() } companion: { historyCompanion }
-                unfoldPage(.profile, wide: wide) { ProfileView() } companion: { profileCompanion }
-                unfoldPage(.notes, wide: wide) { NotesView() } companion: { notesCompanion }
+                // Notes and Profile split themselves when wide, like
+                // Apple's Notes and Settings: list on one page, the
+                // open note / section on the other.
+                fullPage(.profile) { ProfileView() }
+                fullPage(.notes) { NotesView() }
             }
+            .environment(\.duoWide, wide)
+            .environment(\.duoSwapped, wide && swapSides)
         }
+    }
+
+    /// Two pages side by side: the open inner display only (669×951 /
+    /// 951×669), never the outer screen held sideways (678×466).
+    static func isWide(_ size: CGSize) -> Bool {
+        size.width >= TodayView.outerDisplayWidth + 150 && size.height >= 520
+    }
+
+    /// Mirrors the two pages on the open Duo.
+    private var swapSidesButton: some View {
+        Button {
+            withAnimation(AppAnimation.snappy) { swapSides.toggle() }
+        } label: {
+            Image(systemName: "arrow.left.arrow.right")
+                .scaledFont(size: 20, weight: .semibold, maxScale: 1.3)
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        // Never holds keyboard focus: with a hardware keyboard a focused
+        // button takes the space bar, so typing a note flipped the pages.
+        .focusable(false)
+        .accessibilityLabel("Swap sides")
+        .accessibilityHint(swapSides ? "Puts the front-screen page back on the right" : "Puts the front-screen page on the left")
+    }
+
+    @ViewBuilder
+    private func fullPage<Main: View>(_ page: Page, @ViewBuilder main: () -> Main) -> some View {
+        main()
+            .opacity(selectedPage == page ? 1 : 0)
+            .allowsHitTesting(selectedPage == page)
+            .accessibilityHidden(selectedPage != page)
     }
 
     /// Same unfold as Today (Nov 12): the page keeps the folded screen's
     /// width (and compact size class, so it lays out exactly as folded)
     /// on the right; opening the Duo reveals a companion page on the left
     /// that is already there, waiting. Folded, the companion is absent.
+    /// Swapped, the two trade places.
     @ViewBuilder
     private func unfoldPage<Main: View, Side: View>(
         _ page: Page, wide: Bool,
         @ViewBuilder main: () -> Main,
         @ViewBuilder companion: () -> Side
     ) -> some View {
+        let swapped = wide && swapSides
         HStack(spacing: 0) {
-            if wide {
+            if wide && !swapped {
                 companion()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .hingeReveal()
+                    .hingeReveal(anchor: .trailing)
             }
             main()
                 .modifier(CompactWhen(wide))
                 .frame(width: wide ? TodayView.outerDisplayWidth : nil)
                 .frame(maxWidth: wide ? nil : .infinity)
+            if swapped {
+                companion()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .hingeReveal(anchor: .leading)
+            }
         }
         .opacity(selectedPage == page ? 1 : 0)
         .allowsHitTesting(selectedPage == page)
@@ -223,34 +292,6 @@ struct ContentView: View {
         } else {
             ContentUnavailableView("No workouts yet", systemImage: "clock.arrow.circlepath",
                                    description: Text("Finish a workout from Today and it shows up here."))
-        }
-    }
-
-    /// Profile's companion: Settings.
-    private var profileCompanion: some View {
-        NavigationStack { SettingsView() }
-    }
-
-    /// Notes' companion: the most recent note, in full.
-    @ViewBuilder private var notesCompanion: some View {
-        if let note = store.userNotes.first(where: \.isPinned) ?? store.userNotes.first {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(note.isPinned ? "Pinned note" : "Latest note")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                    Text(note.displayTitle).font(.title2.bold())
-                    Text(note.updatedAt, format: .dateTime.month().day().hour().minute())
-                        .font(.caption).foregroundStyle(Theme.secondaryText)
-                    Text(note.body).font(.body)
-                }
-                .padding(24)
-                .padding(.top, 40)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else {
-            ContentUnavailableView("No notes yet", systemImage: "note.text",
-                                   description: Text("Your latest note shows here when the phone is open."))
         }
     }
 

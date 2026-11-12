@@ -2004,6 +2004,39 @@ final class WorkoutStore: ObservableObject {
         persistUserNotes()
     }
 
+    /// Compose (Apple Notes style, Nov 12): a new blank note opens
+    /// straight away and is typed into in place. The Notes page deletes
+    /// it again if it is left blank.
+    @discardableResult
+    func createBlankNote(category: String? = nil) -> UUID {
+        let now = Date()
+        let note = UserNote(id: UUID(), title: "", body: "", createdAt: now, updatedAt: now,
+                            workoutTitle: nil, isPinned: false, category: category)
+        userNotes.insert(note, at: 0)
+        persistUserNotes()
+        return note.id
+    }
+
+    /// Live autosave while typing: stores the text exactly as typed
+    /// (no trimming, so a trailing space or newline is kept) and moves
+    /// the note to the top, like Apple Notes.
+    func editUserNote(id: UUID, title: String, body: String) {
+        guard let index = userNotes.firstIndex(where: { $0.id == id }) else { return }
+        guard userNotes[index].title != title || userNotes[index].body != body else { return }
+        userNotes[index].title = title
+        userNotes[index].body = body
+        userNotes[index].updatedAt = Date()
+        userNotes.sort { $0.updatedAt > $1.updatedAt }
+        persistUserNotes()
+    }
+
+    /// File a note in a category (nil = Uncategorized).
+    func setNoteCategory(id: UUID, category: String?) {
+        guard let index = userNotes.firstIndex(where: { $0.id == id }) else { return }
+        userNotes[index].category = category
+        persistUserNotes()
+    }
+
     func deleteUserNote(id: UUID) {
         userNotes.removeAll { $0.id == id }
         persistUserNotes()

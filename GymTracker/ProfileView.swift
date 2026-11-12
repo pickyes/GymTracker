@@ -2,8 +2,106 @@ import SwiftUI
 import UIKit
 import StoreKit
 
+/// One row on the Profile page, laid out like Apple's Settings app
+/// (Nov 12): an icon tile, a title, and its own page with a header card
+/// (icon, title, one-line description) above the controls.
+enum ProfileSection: String, CaseIterable, Identifiable, Hashable {
+    case program, bodyweight, gyms, exercises, injuries, weights, limits, muse, pro, settings, legal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .program: return "Your Program"
+        case .bodyweight: return "Bodyweight"
+        case .gyms: return "Gym Profiles"
+        case .exercises: return "Custom Exercises"
+        case .injuries: return "Body & Injuries"
+        case .weights: return "Working Weights"
+        case .limits: return "Limits & Swaps"
+        case .muse: return "Muse Access"
+        case .pro: return "Status Pro"
+        case .settings: return "Settings"
+        case .legal: return "Privacy & About"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .program: return "calendar"
+        case .bodyweight: return "scalemass.fill"
+        case .gyms: return "building.2.fill"
+        case .exercises: return "figure.strengthtraining.traditional"
+        case .injuries: return "bandage.fill"
+        case .weights: return "dumbbell.fill"
+        case .limits: return "arrow.triangle.swap"
+        case .muse: return "desktopcomputer"
+        case .pro: return "star.fill"
+        case .settings: return "gearshape.fill"
+        case .legal: return "hand.raised.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .program: return .blue
+        case .bodyweight: return .teal
+        case .gyms: return .indigo
+        case .exercises: return .orange
+        case .injuries: return .red
+        case .weights: return .gray
+        case .limits: return .pink
+        case .muse: return .purple
+        case .pro: return .yellow
+        case .settings: return .gray
+        case .legal: return .blue
+        }
+    }
+
+    var blurb: String {
+        switch self {
+        case .program: return "The plan you're following, every program you've made, and setup."
+        case .bodyweight: return "Your current weight, used for bodyweight exercises and progress."
+        case .gyms: return "The equipment at each place you train — home, gym, travel."
+        case .exercises: return "Exercises you've added that aren't in the built-in library."
+        case .injuries: return "Mark a sore spot and the program swaps exercises around it."
+        case .weights: return "The weight you're working with on each exercise in your program."
+        case .limits: return "What your injuries rule out, and what replaced it."
+        case .muse: return "Let Muse on your Mac read your workouts over your own Wi-Fi."
+        case .pro: return "Your subscription, purchases, and restore."
+        case .settings: return "Units, appearance, rest timer, calendar, and more."
+        case .legal: return "Privacy policy, terms of use, and how your data is kept."
+        }
+    }
+
+    /// Sections that open an existing page directly (it has its own
+    /// title and controls).
+    var opensOwnPage: Bool {
+        switch self {
+        case .gyms, .exercises, .injuries, .settings: return true
+        default: return false
+        }
+    }
+}
+
+/// The colored rounded-square icon tile used in the Profile list.
+struct SectionIconTile: View {
+    let section: ProfileSection
+    var size: CGFloat = 30
+    var body: some View {
+        Image(systemName: section.icon)
+            .font(.system(size: size * 0.52, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(section.tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
 struct ProfileView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
+    @Environment(\.duoWide) private var wide
+    @Environment(\.duoSwapped) private var swapped
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @EnvironmentObject var mcpServer: MCPServer
@@ -18,412 +116,535 @@ struct ProfileView: View {
     @State private var exportURL: URL?
     @State private var isApproving = false
     @State private var grantMessage: String?
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Folded: the pushed section.
+    @State private var path: [ProfileSection] = []
+    /// Open Duo: the section shown beside the list (first one by
+    /// default, like Settings opening on General).
+    @State private var selected: ProfileSection = .program
+    /// True once a section was picked by hand. Folding only carries a
+    /// hand-picked section over; otherwise it lands on the list.
+    @State private var userPicked = false
 
-    /// Same as History: regular width gets a little more title leading so
-    /// the first letter isn't clipped by the open display's rounded corner.
-    private var titleLeading: CGFloat { horizontalSizeClass == .regular ? 24 : 16 }
+    /// Grouped like Settings: you and your plan, your body, the app.
+    private var groups: [[ProfileSection]] {
+        var body: [ProfileSection] = [.bodyweight, .injuries, .weights]
+        if !(store.profile?.limits.isEmpty ?? true) || store.activeProgram?.isPreset == true {
+            body.append(.limits)
+        }
+        return [
+            [.program, .gyms, .exercises],
+            body,
+            [.muse, .pro],
+            [.settings, .legal],
+        ]
+    }
 
     var body: some View {
-        NavigationStack {
-            List {
-                // Title lines up with the section headers and row text
-                // below it (same 16pt leading), not flush to the edge.
-                // Only true with .listStyle(.plain) on this List — see
-                // the note there.
-                PageTitle(text: "Profile")
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
-                    .listRowBackground(Color.clear)
-                Section("Bodyweight") {
-                    HStack {
-                        TextField("Enter your weight", text: $weightText)
-                            .keyboardType(.decimalPad)
-                        Text(store.settings.weightUnit.label)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    if store.bodyWeightLb == nil {
-                        Text("Not set yet. Your weight is never guessed — enter it when you know it.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
+        Group {
+            if wide {
+                GeometryReader { geo in
+                    let listWidth = min(max(geo.size.width * 0.36, 280), 360)
+                    HStack(spacing: 0) {
+                        if swapped { detailPane }
+                        sidebar
+                            .frame(width: listWidth)
+                            .background(Theme.card.opacity(0.45))
+                        if !swapped { detailPane }
                     }
                 }
-
-                Section("Your program") {
-                    if let program = store.activeProgram {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(program.name)
-                                .font(.headline)
-                            if let profile = store.profile {
-                                Text("\(profile.goal.label) · \(daysPerWeekText(program.days.count)) · \(profile.equipmentLabel)")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
+            } else {
+                NavigationStack(path: $path) {
+                    rootList
+                        .toolbar(.hidden, for: .navigationBar)
+                        .navigationDestination(for: ProfileSection.self) { section in
+                            sectionPage(section)
                         }
-                    }
-                    NavigationLink("All programs") { ProgramsView() }
-                    // Switch back to the generated program, if it isn't active.
-                    if let generated = store.generatedProgram, generated.id != store.activeProgram?.id {
-                        Button {
-                            store.useGeneratedProgram()
-                        } label: {
-                            programRow(name: generated.name, active: false)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    // Restore DaRon's preset (Debug Pass 2): only on his
-                    // unlocked device, and only while the preset is NOT the
-                    // active program — never offered to users who never
-                    // unlocked it. Mirrors the row in ProgramsView.
-                    if store.isDaronPresetUnlocked && !store.isPresetActive {
-                        Button("Restore DaRon's 5-Day Split") {
-                            store.restoreDaronPreset()
-                        }
-                        .font(.subheadline)
-                    }
-                    Button("Retake setup") {
-                        showRetakeConfirm = true
-                    }
-                    .font(.subheadline)
-                    .confirmationDialog("Retake setup?", isPresented: $showRetakeConfirm) {
-                        Button("Start setup") { store.resetOnboarding() }
-                        Button("Cancel", role: .cancel) { }
-                    } message: {
-                        Text("This starts the setup quiz again. Your current program and profile stay saved — you can keep them when setup finishes.")
-                    }
-                }
-
-                Section("Gym Profiles") {
-                    NavigationLink("Gym profiles") { GymProfilesView() }
-                    if let id = store.activeGymProfileID,
-                       let profile = store.gymProfiles.first(where: { $0.id == id }) {
-                        Text("Active: \(profile.name) — \(profile.equipment.map { $0.label }.sorted().joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    } else {
-                        Text("Using your quiz equipment. Add a profile per location — home, gym, travel.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-
-                Section("Custom exercises") {
-                    NavigationLink("Custom exercises") { CustomExercisesView() }
-                    if !store.customExercises.isEmpty {
-                        Text("\(store.customExercises.count) custom exercise\(store.customExercises.count == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-
-                Section("Body & injuries") {
-                    NavigationLink("Body & injuries") { InjuryEditorView() }
-                    if let parts = store.profile?.injuredParts, !parts.isEmpty {
-                        Text(parts.map { $0.label }.sorted().joined(separator: ", "))
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    } else {
-                        Text("Tap the body to mark an injury — the program swaps exercises for that spot.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-
-                Section("Working weights") {
-                    if workingWeights.isEmpty {
-                        Text("Log a session and your working weights will show up here.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    ForEach(workingWeights, id: \.name) { item in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(item.name)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                                Spacer()
-                                Text(item.weight)
-                                    .foregroundStyle(Theme.secondaryText)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                            }
-                            if let note = item.note {
-                                Text(note)
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
-                        }
-                    }
-                }
-
-                if let limits = store.profile?.limits, !limits.isEmpty {
-                    Section("Limits & swaps") {
-                        ForEach(Array(limits).sorted { $0.label < $1.label }, id: \.self) { limit in
-                            Text(limit.label)
-                                .font(.subheadline)
-                        }
-                        if let other = store.profile?.otherLimitText, !other.isEmpty {
-                            Text("Other: \(other)")
-                                .font(.subheadline)
-                        }
-                        if let swaps = store.adaptedActiveProgram?.swaps, !swaps.isEmpty {
-                            // Enumerated ids, not `\.from`: a program can
-                            // swap the same exercise on two days (squat on
-                            // Mon and Wed), and duplicate ForEach ids
-                            // break the list. The adapted program's swaps
-                            // cover the preset too — the stored preset has
-                            // none of its own.
-                            ForEach(Array(swaps.enumerated()), id: \.offset) { _, swap in
-                                Text(swap.displayText)
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
-                        }
-                    }
-                }
-
-                if store.activeProgram?.isPreset == true {
-                    Section("Left shoulder") {
-                        Text("Stop and swap anything that pinches the front of the left shoulder. No overhead pressing that hurts. Incline DB press is out — cable chest fly replaces it on push day. No RDLs — DB hip thrust instead. No one-arm rows.")
-                            .font(.subheadline)
-                    }
-                }
-
-                Section("Muse access") {
-                    // MCP server (off by default). LAN-only, foreground-only.
-                    // No cloud, no account, nothing leaves the device except
-                    // to Muse on the user's own Mac, on their own local
-                    // network. Only Muse can connect.
-                    // CONNECT creates a PENDING grant (no token yet) —
-                    // nothing can authenticate until DaRon approves it with
-                    // Face ID. Approve mints the token exactly once;
-                    // Disconnect deletes the grant (the token dies with it).
-                    // Read-only by default; gym:write only on the second
-                    // explicit tap ("Allow logging workouts"). The old path
-                    // (CONNECT straight to isEnabled + start()) bypassed
-                    // the grant flow and is gone — every state below goes
-                    // through requestGrant / approveGrantWithBiometrics /
-                    // disconnect on MCPServer.
-                    if mcpServer.hasActiveGrant {
-                        HStack {
-                            Text("Status")
-                            Spacer()
-                            Text(mcpServer.isRunning ? "Connected" : "Stopped — open the app")
-                                .foregroundStyle(mcpServer.isRunning ? Theme.vividGreen : Theme.secondaryText)
-                        }
-                        if let url = mcpServer.url {
-                            HStack {
-                                Text("URL")
-                                Spacer()
-                                Text(url)
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                                    .lineLimit(1)
-                            }
-                            Button("Copy URL") {
-                                UIPasteboard.general.string = url
-                            }
-                        }
-                        HStack {
-                            Text("Token")
-                            Spacer()
-                            Text(String(mcpServer.token.prefix(8)) + "…")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                            Button("Copy") {
-                                UIPasteboard.general.string = mcpServer.token
-                            }
-                            Button("Regenerate") {
-                                mcpServer.regenerateToken()
-                            }
-                        }
-                        .font(.caption)
-                        Text("Runs only while this app is open. Muse on your Mac connects to it (or to the Mac companion server). Only Muse can connect — no other agent is allowed. The server never sends data to the internet.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                        Button("Disconnect") {
-                            grantMessage = nil
-                            mcpServer.disconnect()
-                        }
-                    } else if mcpServer.grant?.status == .pending {
-                        HStack {
-                            Text("Status")
-                            Spacer()
-                            Text("Waiting for approval")
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        Text("Muse asked to connect. Approve with Face ID to let it in — read-only by default, so Muse can read your workouts but can't log anything.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                        Button("Approve") {
-                            approveGrant(includeWrite: false)
-                        }
-                        .disabled(isApproving)
-                        Button("Allow logging workouts") {
-                            approveGrant(includeWrite: true)
-                        }
-                        .disabled(isApproving)
-                        Text("Allowing logging lets Muse log sets and start workouts. You can disconnect anytime.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                        if let grantMessage {
-                            Text(grantMessage)
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        Button("Cancel") {
-                            grantMessage = nil
-                            mcpServer.disconnect()
-                        }
-                    } else {
-                        if mcpServer.grant != nil {
-                            // An active grant that is no longer usable
-                            // (expired) — hasActiveGrant is false, so this
-                            // is the only way to reach here with a grant.
-                            Text("Your last connection expired. Tap CONNECT to set up a new one.")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        Button("CONNECT") {
-                            grantMessage = nil
-                            mcpServer.requestGrant()
-                        }
-                        Text("Only Muse can connect — no other agent is allowed. The server runs only while this app is open and never sends data to the internet.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    Button("Export workouts (JSON)") {
-                        exportWorkouts()
-                    }
-                    Text("Sends a file you choose (Files, AirDrop). The Mac companion server reads this file when the phone isn't reachable. Never automatic.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-
-                Section("Status Pro") {
-                    HStack {
-                        Text(subscription.isPro ? "Pro" : "Free")
-                            .font(.headline)
-                        Spacer()
-                        if subscription.isPro {
-                            Text("Thanks for supporting the app.")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                        } else {
-                            Button("View Pro") { showPaywall = true }
-                                .font(.subheadline)
-                        }
-                    }
-                    if subscription.isPro {
-                        Button("Manage Subscription") { showManageSubscription = true }
-                            .font(.subheadline)
-                    }
-                    Button("Restore Purchases") {
-                        Task { await subscription.restore() }
-                    }
-                    .font(.subheadline)
-                }
-
-                if InviteCode.isEnabled {
-                Section("Invite friends") {
-                    HStack {
-                        Text(InviteCodeManager.shared.displayCode)
-                            .font(.system(.body, design: .monospaced))
-                        Spacer()
-                        Button("Invite friends") { showInvite = true }
-                            .font(.subheadline)
-                    }
-                    Text("Share your code — a friend gets 7 days of Pro free, and so do you.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                }
-
-                Section {
-                    NavigationLink("Settings") { SettingsView() }
-                    Button("Privacy Policy") { showPrivacyPolicy = true }
-                    Link("Terms of Use (EULA)", destination: PaywallView.termsOfUseURL)
-                }
-
-                Section("About") {
-                    Text("Status v1.0 — your data stays on this device. No account, no network.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-
-                // Bottom breathing room (shared LayoutClearance rule,
-                // Debug Pass 2): the last row must scroll fully into
-                // view clear of the floating menu button — and of the
-                // rest-timer panel above it while a rest runs. The old
-                // 40pt spacer was short of the 96pt menu-button value.
-                Color.clear
-                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            // Keyboard Done (DaRon 2026-11-10 08:49: the Bodyweight
-            // field had NO Done button — typed 160 and the keyboard had
-            // no way out). Native toolbar directly above the keyboard;
-            // Done dismisses, and the value is already saved by then —
-            // weightText saves live on every keystroke (saveWeight via
-            // onChange), so dismissing IS confirming. Drag-to-dismiss
-            // is the second path — tap-outside is NOT used here: an
-            // .onTapGesture on this List swallows the NavigationLink
-            // rows' taps (known SwiftUI pitfall — the List's row
-            // selection loses the gesture arena to the parent tap),
-            // so "All programs" etc. never navigated. (Row-tap
-            // diagnosis, 2026-11-10.)
-            .withKeyboardDoneToolbar()
-            .scrollDismissesKeyboard(.interactively)
-            .onAppear {
-                if !didSetup {
-                    didSetup = true
-                    if let weight = store.bodyWeightLb {
-                        let unit = store.settings.weightUnit
-                        weightText = roundedWeightText(unit.displayValue(for: weight) ?? weight)
-                    }
-                }
-            }
-            // Plain style (same as HistoryView:127): the default
-            // .automatic style renders insetGrouped rows, which inset
-            // the cards AND stack this row's 16pt leading on top of
-            // the grouped margin — that pushed the title and the
-            // section headers ~16pt right of the card edges
-            // (measured Nov 10: title 394, headers 396–397, cards
-            // 379–380). Plain puts title, headers, and row text all
-            // on the same 16pt leading. Do not remove this.
-            .listStyle(.plain)
-            .oledList()
-            .onChange(of: weightText) { _, _ in
-                saveWeight()
-            }
-            .sheet(isPresented: $showPaywall) {
-                PaywallView(
-                    programName: store.activeProgram?.name ?? "Your plan",
-                    onClose: { showPaywall = false },
-                    onPurchased: { showPaywall = false }
-                )
-            }
-            .manageSubscriptionsSheet(isPresented: $showManageSubscription)
-            .sheet(isPresented: $showPrivacyPolicy) {
-                PrivacyPolicyView(onClose: { showPrivacyPolicy = false })
-            }
-            .sheet(isPresented: $showInvite) {
-                InviteView(onClose: { showInvite = false })
-            }
-            .sheet(isPresented: $showExport) {
-                if let exportURL {
-                    ShareSheet(activityItems: [exportURL])
                 }
             }
         }
-        // Fold (Debug Pass 2): the title leading (16↔24pt) flips
-        // discretely on the size class, which used to snap with no
-        // animation. Animate it on the shared fold spring so Profile
-        // glides with the pose instead of popping.
-        .animation(FoldAnimation.morph, value: horizontalSizeClass)
         .disableVerticalBar()
+        .onChange(of: wide) { _, isWide in
+            // Unfold keeps the open section open; fold pushes the one
+            // that was showing beside the list.
+            if isWide {
+                if let open = path.last { selected = open; userPicked = true }
+                path = []
+            } else {
+                path = userPicked ? [selected] : []
+            }
+        }
+        .onAppear {
+            if !didSetup {
+                didSetup = true
+                if let weight = store.bodyWeightLb {
+                    let unit = store.settings.weightUnit
+                    weightText = roundedWeightText(unit.displayValue(for: weight) ?? weight)
+                }
+            }
+        }
+        .onChange(of: weightText) { _, _ in saveWeight() }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(
+                programName: store.activeProgram?.name ?? "Your plan",
+                onClose: { showPaywall = false },
+                onPurchased: { showPaywall = false }
+            )
+        }
+        .manageSubscriptionsSheet(isPresented: $showManageSubscription)
+        .sheet(isPresented: $showPrivacyPolicy) {
+            PrivacyPolicyView(onClose: { showPrivacyPolicy = false })
+        }
+        .sheet(isPresented: $showInvite) {
+            InviteView(onClose: { showInvite = false })
+        }
+        .sheet(isPresented: $showExport) {
+            if let exportURL {
+                ShareSheet(activityItems: [exportURL])
+            }
+        }
+    }
+
+    // MARK: List (folded page / open sidebar)
+
+    /// Folded: the Settings-style list; each row pushes its page.
+    private var rootList: some View {
+        List {
+            PageTitle(text: "Profile")
+                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+                .listRowBackground(Color.clear)
+            Section {
+                NavigationLink(value: ProfileSection.program) { summaryCard }
+            }
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                Section {
+                    ForEach(group.filter { index > 0 || $0 != .program }) { section in
+                        NavigationLink(value: section) { sectionRow(section) }
+                    }
+                }
+            }
+            clearanceRow
+        }
+        .listStyle(.insetGrouped)
+        .oledList()
+    }
+
+    /// Open Duo: the same list as a sidebar; the chosen row is lit and
+    /// its page shows beside it.
+    private var sidebar: some View {
+        List {
+            PageTitle(text: "Profile")
+                .padding(.top, 36)
+                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 4, trailing: 8))
+                .listRowBackground(Color.clear)
+            Button { selected = .program; userPicked = true } label: { summaryCard }
+                .buttonStyle(.plain)
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(selected == .program ? Color.accentColor.opacity(0.3) : Color.clear)
+                        .padding(.horizontal, 6)
+                )
+                .listRowSeparator(.hidden)
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                Section {
+                    ForEach(group.filter { index > 0 || $0 != .program }) { section in
+                        Button { selected = section; userPicked = true } label: { sectionRow(section) }
+                            .buttonStyle(.plain)
+                            .listRowBackground(
+                                Capsule()
+                                    .fill(selected == section ? Color.accentColor.opacity(0.3) : Color.clear)
+                                    .padding(.horizontal, 6)
+                            )
+                            .listRowSeparator(.hidden)
+                    }
+                }
+            }
+            clearanceRow
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    /// Apple Account-style card at the top: the plan you're on.
+    private var summaryCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "figure.strengthtraining.traditional")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 58, height: 58)
+                .background(Color.accentColor.opacity(0.18), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(store.activeProgram?.name ?? "No program yet")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(2)
+                if let program = store.activeProgram, let profile = store.profile {
+                    Text("\(profile.goal.label) · \(daysPerWeekText(program.days.count)) · \(subscription.isPro ? "Pro" : "Free")")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                } else {
+                    Text("Set up your plan, gyms, and body.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
+    private func sectionRow(_ section: ProfileSection) -> some View {
+        HStack(spacing: 14) {
+            SectionIconTile(section: section)
+            Text(section.title)
+                .foregroundStyle(Theme.text)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var clearanceRow: some View {
+        Color.clear
+            .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+
+    // MARK: Section pages
+
+    @ViewBuilder
+    private var detailPane: some View {
+        NavigationStack {
+            sectionPage(selected)
+        }
+        .id(selected)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func sectionPage(_ section: ProfileSection) -> some View {
+        switch section {
+        case .gyms: GymProfilesView()
+        case .exercises: CustomExercisesView()
+        case .injuries: InjuryEditorView()
+        case .settings: SettingsView()
+        default:
+            List {
+                Section { headerCard(section) }
+                sectionContent(section)
+                clearanceRow
+            }
+            .listStyle(.insetGrouped)
+            .oledList()
+            .navigationTitle(section.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .withKeyboardDoneToolbar()
+            .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    /// Settings-style header: big icon tile, title, one-line blurb.
+    private func headerCard(_ section: ProfileSection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionIconTile(section: section, size: 58)
+            Text(section.title)
+                .font(.title2.weight(.bold))
+            Text(section.blurb)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ section: ProfileSection) -> some View {
+        switch section {
+        case .program: programContent
+        case .bodyweight: bodyweightContent
+        case .weights: weightsContent
+        case .limits: limitsContent
+        case .muse: museContent
+        case .pro: proContent
+        case .legal: legalContent
+        case .gyms, .exercises, .injuries, .settings: EmptyView()
+        }
+    }
+
+    @ViewBuilder private var bodyweightContent: some View {
+        Section {
+            HStack {
+                TextField("Enter your weight", text: $weightText)
+                    .keyboardType(.decimalPad)
+                Text(store.settings.weightUnit.label)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        } footer: {
+            if store.bodyWeightLb == nil {
+                Text("Not set yet. Your weight is never guessed — enter it when you know it.")
+            }
+        }
+    }
+
+    @ViewBuilder private var programContent: some View {
+        Section("Current") {
+            if let program = store.activeProgram {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(program.name)
+                        .font(.headline)
+                    if let profile = store.profile {
+                        Text("\(profile.goal.label) · \(daysPerWeekText(program.days.count)) · \(profile.equipmentLabel)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+            NavigationLink("All programs") { ProgramsView() }
+            // Switch back to the generated program, if it isn't active.
+            if let generated = store.generatedProgram, generated.id != store.activeProgram?.id {
+                Button {
+                    store.useGeneratedProgram()
+                } label: {
+                    programRow(name: generated.name, active: false)
+                }
+                .buttonStyle(.plain)
+            }
+            // Restore DaRon's preset: only on his unlocked device, and
+            // only while the preset is NOT the active program.
+            if store.isDaronPresetUnlocked && !store.isPresetActive {
+                Button("Restore DaRon's 5-Day Split") {
+                    store.restoreDaronPreset()
+                }
+            }
+        }
+        Section {
+            Button("Retake setup") {
+                showRetakeConfirm = true
+            }
+            .confirmationDialog("Retake setup?", isPresented: $showRetakeConfirm) {
+                Button("Start setup") { store.resetOnboarding() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This starts the setup quiz again. Your current program and profile stay saved — you can keep them when setup finishes.")
+            }
+        } footer: {
+            if let id = store.activeGymProfileID,
+               let profile = store.gymProfiles.first(where: { $0.id == id }) {
+                Text("Gym: \(profile.name)")
+            }
+        }
+    }
+
+    @ViewBuilder private var weightsContent: some View {
+        Section {
+            if workingWeights.isEmpty {
+                Text("Log a session and your working weights will show up here.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            ForEach(workingWeights, id: \.name) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(item.name)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                        Spacer()
+                        Text(item.weight)
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                    if let note = item.note {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var limitsContent: some View {
+        if let limits = store.profile?.limits, !limits.isEmpty {
+            Section("Limits") {
+                ForEach(Array(limits).sorted { $0.label < $1.label }, id: \.self) { limit in
+                    Text(limit.label)
+                        .font(.subheadline)
+                }
+                if let other = store.profile?.otherLimitText, !other.isEmpty {
+                    Text("Other: \(other)")
+                        .font(.subheadline)
+                }
+            }
+            if let swaps = store.adaptedActiveProgram?.swaps, !swaps.isEmpty {
+                // Enumerated ids: a program can swap the same exercise on
+                // two days, and duplicate ForEach ids break the list.
+                Section("Swaps") {
+                    ForEach(Array(swaps.enumerated()), id: \.offset) { _, swap in
+                        Text(swap.displayText)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+        }
+        if store.activeProgram?.isPreset == true {
+            Section("Left shoulder") {
+                Text("Stop and swap anything that pinches the front of the left shoulder. No overhead pressing that hurts. Incline DB press is out — cable chest fly replaces it on push day. No RDLs — DB hip thrust instead. No one-arm rows.")
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    @ViewBuilder private var museContent: some View {
+        // MCP server (off by default). LAN-only, foreground-only. CONNECT
+        // creates a PENDING grant (no token yet) — nothing can
+        // authenticate until it's approved with Face ID. Approve mints
+        // the token exactly once; Disconnect deletes the grant.
+        // Read-only by default; gym:write only on the second explicit tap.
+        Section {
+            if mcpServer.hasActiveGrant {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(mcpServer.isRunning ? "Connected" : "Stopped — open the app")
+                        .foregroundStyle(mcpServer.isRunning ? Theme.vividGreen : Theme.secondaryText)
+                }
+                if let url = mcpServer.url {
+                    HStack {
+                        Text("URL")
+                        Spacer()
+                        Text(url)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Button("Copy URL") {
+                        UIPasteboard.general.string = url
+                    }
+                }
+                HStack {
+                    Text("Token")
+                    Spacer()
+                    Text(String(mcpServer.token.prefix(8)) + "…")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    Button("Copy") {
+                        UIPasteboard.general.string = mcpServer.token
+                    }
+                    Button("Regenerate") {
+                        mcpServer.regenerateToken()
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+                Text("Runs only while this app is open. Muse on your Mac connects to it (or to the Mac companion server). Only Muse can connect — no other agent is allowed. The server never sends data to the internet.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Button("Disconnect") {
+                    grantMessage = nil
+                    mcpServer.disconnect()
+                }
+            } else if mcpServer.grant?.status == .pending {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text("Waiting for approval")
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Text("Muse asked to connect. Approve with Face ID to let it in — read-only by default, so Muse can read your workouts but can't log anything.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Button("Approve") {
+                    approveGrant(includeWrite: false)
+                }
+                .disabled(isApproving)
+                Button("Allow logging workouts") {
+                    approveGrant(includeWrite: true)
+                }
+                .disabled(isApproving)
+                Text("Allowing logging lets Muse log sets and start workouts. You can disconnect anytime.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                if let grantMessage {
+                    Text(grantMessage)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Button("Cancel") {
+                    grantMessage = nil
+                    mcpServer.disconnect()
+                }
+            } else {
+                if mcpServer.grant != nil {
+                    Text("Your last connection expired. Tap CONNECT to set up a new one.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Button("CONNECT") {
+                    grantMessage = nil
+                    mcpServer.requestGrant()
+                }
+                Text("Only Muse can connect — no other agent is allowed. The server runs only while this app is open and never sends data to the internet.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        Section {
+            Button("Export workouts (JSON)") {
+                exportWorkouts()
+            }
+        } footer: {
+            Text("Sends a file you choose (Files, AirDrop). The Mac companion server reads this file when the phone isn't reachable. Never automatic.")
+        }
+    }
+
+    @ViewBuilder private var proContent: some View {
+        Section {
+            HStack {
+                Text(subscription.isPro ? "Pro" : "Free")
+                    .font(.headline)
+                Spacer()
+                if subscription.isPro {
+                    Text("Thanks for supporting the app.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                } else {
+                    Button("View Pro") { showPaywall = true }
+                }
+            }
+            if subscription.isPro {
+                Button("Manage Subscription") { showManageSubscription = true }
+            }
+            Button("Restore Purchases") {
+                Task { await subscription.restore() }
+            }
+        }
+        if InviteCode.isEnabled {
+            Section("Invite friends") {
+                HStack {
+                    Text(InviteCodeManager.shared.displayCode)
+                        .font(.system(.body, design: .monospaced))
+                    Spacer()
+                    Button("Invite friends") { showInvite = true }
+                }
+                Text("Share your code — a friend gets 7 days of Pro free, and so do you.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+    }
+
+    @ViewBuilder private var legalContent: some View {
+        Section {
+            Button("Privacy Policy") { showPrivacyPolicy = true }
+            Link("Terms of Use (EULA)", destination: PaywallView.termsOfUseURL)
+        }
+        Section("About") {
+            Text("Status v1.0 — your data stays on this device. No account, no network.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
     }
 
     private func programRow(name: String, active: Bool) -> some View {

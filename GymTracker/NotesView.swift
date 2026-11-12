@@ -3,44 +3,46 @@ import SwiftUI
 /// Notes page — the fourth page in the floating menu (Today / History /
 /// Profile / Notes).
 ///
-/// Feels like a notes app, built from scratch with our own styling: a
-/// list of notes (title + preview line + date), tap a note to open it
-/// and edit it, a compose button for a new note, search across notes.
-/// No Apple assets, no copied icons or artwork — the layout language
-/// (title, preview, date) is the familiar notes pattern, the
-/// implementation and styling are ours.
+/// Laid out like Apple's Notes app (Nov 12), built with our own styling
+/// and no Apple assets:
+/// - Folded: the note list (Pinned, then Today / Yesterday / Previous
+///   7 Days / Previous 30 Days / by month). Tap a note and it opens as
+///   its own page that you type straight into; it saves as you type.
+/// - Open Duo: the list on one page, the open note on the other — the
+///   first note is already open, waiting. The swap button mirrors them.
 ///
 /// Where notes come from (all on-device, like everything else):
 /// - Workout notes: written in the per-exercise note field on Today,
 ///   saved with the workout (title = the exercise, subtitle = the day).
 /// - Free notes: written here with the + button.
 ///
-/// Actions (DaRon 22:42): pin a note to the top, edit it, delete it
-/// (asks first), and file it in a category.
+/// Actions (DaRon 22:42): pin a note to the top, delete it (asks
+/// first), and file it in a category.
 struct NotesView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
+    @Environment(\.duoWide) private var wide
+    @Environment(\.duoSwapped) private var swapped
     @EnvironmentObject var store: WorkoutStore
     @State private var searchText = ""
-    @State private var editorTarget: EditorTarget?
     @State private var categoryFilter: CategoryFilter = .all
     @State private var notePendingDelete: UserNote?
+    /// Folded: the pushed note.
+    @State private var path: [UUID] = []
+    /// Open Duo: the note shown beside the list.
+    @State private var selectedID: UUID?
+    /// True once a note was opened by hand (not the first note shown
+    /// automatically). Folding only carries a hand-opened note over.
+    @State private var userPicked = false
 
-    /// A note open in the editor: an existing note, or nil for a new one.
-    private struct EditorTarget: Identifiable {
-        var id = UUID()
-        var note: UserNote?
-        var initialCategory: String?
-    }
-
-    /// Category filter for the list. Nil (All) shows everything.
+    /// Category filter for the list. All shows everything.
     private enum CategoryFilter: Hashable {
         case all
         case uncategorized
         case named(String)
     }
 
-    /// Notes matching the search + category filter, pinned first, then
-    /// most recently edited. Pinned notes stay on top.
+    /// Notes matching the search + category filter, most recently
+    /// edited first.
     private var filteredNotes: [UserNote] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         var notes = store.userNotes
@@ -59,29 +61,116 @@ struct NotesView: View {
                     || (note.workoutTitle?.localizedCaseInsensitiveContains(query) ?? false)
             }
         }
-        return notes.sorted {
-            if $0.isPinned != $1.isPinned { return $0.isPinned }
-            return $0.updatedAt > $1.updatedAt
-        }
+        return notes.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private var pinnedNotes: [UserNote] { filteredNotes.filter { $0.isPinned } }
-    private var otherNotes: [UserNote] { filteredNotes.filter { !$0.isPinned } }
+    /// Pinned first, then date groups, like Apple Notes.
+    private var sections: [(title: String, notes: [UserNote])] {
+        let notes = filteredNotes
+        var result: [(String, [UserNote])] = []
+        let pinned = notes.filter(\.isPinned)
+        if !pinned.isEmpty { result.append(("Pinned", pinned)) }
+        var groups: [(String, [UserNote])] = []
+        for note in notes where !note.isPinned {
+            let key = Self.groupTitle(for: note.updatedAt)
+            if let i = groups.firstIndex(where: { $0.0 == key }) {
+                groups[i].1.append(note)
+            } else {
+                groups.append((key, [note]))
+            }
+        }
+        return result + groups
+    }
 
-    /// The category a new note starts in: the one being filtered on,
-    /// if any — otherwise none.
+    /// The first note in list order (what the open Duo shows first).
+    private var firstNoteID: UUID? { sections.first?.notes.first?.id }
+
+    /// The category a new note starts in: the one being filtered on.
     private var initialCategoryForNewNote: String? {
         if case .named(let name) = categoryFilter { return name }
         return nil
     }
 
     var body: some View {
+        Group {
+            if wide {
+                GeometryReader { geo in
+                    // Apple-style sidebar width: ~40% of the open screen.
+                    let listWidth = min(max(geo.size.width * 0.4, 300), 400)
+                    HStack(spacing: 0) {
+                        if swapped { detailPane; Divider() }
+                        listPane
+                            .frame(width: listWidth)
+                            .background(Theme.card.opacity(0.35))
+                        if !swapped { Divider(); detailPane }
+                    }
+                }
+            } else {
+                NavigationStack(path: $path) {
+                    listPane
+                        .toolbar(.hidden, for: .navigationBar)
+                        .navigationDestination(for: UUID.self) { id in
+                            NoteDetailView(noteID: id)
+                        }
+                }
+            }
+        }
+        .background(Theme.background)
+        .disableVerticalBar()
+        .onAppear(perform: syncSelection)
+        .onChange(of: wide) { _, isWide in
+            // Unfolding with a note open keeps that note open beside
+            // the list; folding with one selected pushes it.
+            if isWide {
+                if let open = path.last { selectedID = open; userPicked = true }
+                path = []
+                syncSelection()
+            } else if userPicked, let selectedID, store.userNotes.contains(where: { $0.id == selectedID }),
+                      !(store.userNotes.first(where: { $0.id == selectedID })?.isBlank ?? true) {
+                path = [selectedID]
+            }
+        }
+        .onChange(of: store.userNotes.map(\.id)) { _, _ in syncSelection() }
+        .alert("Delete this note?", isPresented: Binding(
+            get: { notePendingDelete != nil },
+            set: { if !$0 { notePendingDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let note = notePendingDelete {
+                    store.deleteUserNote(id: note.id)
+                }
+                notePendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { notePendingDelete = nil }
+        } message: {
+            Text("This can't be undone.")
+        }
+    }
+
+    /// Open Duo: keep a note open beside the list (the first one when
+    /// nothing is chosen, or when the chosen one was deleted).
+    private func syncSelection() {
+        guard wide else { return }
+        if let selectedID, store.userNotes.contains(where: { $0.id == selectedID }) { return }
+        selectedID = firstNoteID
+    }
+
+    private func open(_ id: UUID) {
+        userPicked = true
+        if wide { selectedID = id } else { path = [id] }
+    }
+
+    private func compose() {
+        let id = store.createBlankNote(category: initialCategoryForNewNote)
+        open(id)
+    }
+
+    // MARK: List
+
+    private var listPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Title lines up with the content below it (same 16pt
-            // leading), not flush to the edge — like every page.
             // "+" sits beside the title AND count line (bottom-aligned),
-            // so it stays clear of the status bar on the open Duo, where
-            // a title-row button ran into the Wi-Fi/time cluster.
+            // so it stays clear of the status bar on the open Duo.
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     PageTitle(text: "Notes")
@@ -90,10 +179,9 @@ struct NotesView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
                 Spacer()
-                // Compose: same vivid "+" as the workout actions.
-                Button { editorTarget = EditorTarget(note: nil, initialCategory: initialCategoryForNewNote) } label: {
-                    Image(systemName: "plus")
-                        .scaledFont(size: 26, weight: .bold)
+                Button(action: compose) {
+                    Image(systemName: "square.and.pencil")
+                        .scaledFont(size: 22, weight: .semibold)
                         .foregroundStyle(.white)
                         .frame(width: 56, height: 56)
                         .background(Color.accentColor, in: Circle())
@@ -102,40 +190,16 @@ struct NotesView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("New note")
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 16)
-            .padding(.top, 2)
-
-
-            // Search across notes (title + body + workout).
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.secondaryText)
-                TextField("Search notes", text: $searchText)
-                    .autocorrectionDisabled()
-                if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(Theme.secondaryText)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Theme.card)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, wide ? 44 : 2)
 
-            // Category filter chips: All, each category, Uncategorized.
+            searchField
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    categoryChip("All", isSelected: categoryFilter == .all) {
-                        categoryFilter = .all
-                    }
+                    categoryChip("All", isSelected: categoryFilter == .all) { categoryFilter = .all }
                     ForEach(store.noteCategories, id: \.self) { name in
                         categoryChip(name, isSelected: categoryFilter == .named(name)) {
                             categoryFilter = .named(name)
@@ -164,80 +228,51 @@ struct NotesView: View {
                 Spacer()
             } else {
                 List {
-                    if !pinnedNotes.isEmpty {
+                    ForEach(sections, id: \.title) { section in
                         Section {
-                            ForEach(pinnedNotes) { note in
+                            ForEach(section.notes) { note in
                                 noteButton(note)
                             }
                         } header: {
-                            Text("Pinned")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Theme.secondaryText)
+                            Text(section.title)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(Theme.text)
+                                .textCase(nil)
                         }
                     }
-                    ForEach(otherNotes) { note in
-                        noteButton(note)
-                    }
-                    // Bottom breathing room (shared LayoutClearance
-                    // rule, Debug Pass 2): the list had no bottom
-                    // spacer at all, so the last note row sat at the
-                    // safe-area bottom — under the floating menu button
-                    // (and the rest-timer panel while a rest runs) at
-                    // scroll-bottom.
+                    // Bottom breathing room: the last row scrolls clear
+                    // of the floating menu button (and the rest timer).
                     Color.clear
                         .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
-                        .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
             }
         }
-        .background(Theme.background)
-        // Keyboard Done + tap-outside (Debug Pass 2): the "Search
-        // notes" field had no Done — the keyboard had no way out.
-        // Done dismisses; the search filters live as you type, so
-        // there is nothing to save.
         .withKeyboardDoneToolbar()
         .scrollDismissesKeyboard(.interactively)
-        .dismissKeyboardOnTapOutside()
-        .disableVerticalBar()
-        .sheet(item: $editorTarget) { target in
-            NoteEditorView(
-                note: target.note,
-                initialCategory: target.initialCategory,
-                onSave: { title, body, category, isPinned in
-                    if let existing = target.note {
-                        store.updateUserNote(existing, title: title, body: body, category: category, isPinned: isPinned)
-                    } else {
-                        store.addUserNote(title: title, body: body, category: category)
-                    }
-                    editorTarget = nil
-                },
-                onDelete: target.note == nil ? nil : {
-                    if let existing = target.note {
-                        store.deleteUserNote(id: existing.id)
-                    }
-                    editorTarget = nil
-                },
-                isPinned: target.note?.isPinned ?? false,
-                onCancel: { editorTarget = nil }
-            )
-        }
-        .alert("Delete this note?", isPresented: Binding(
-            get: { notePendingDelete != nil },
-            set: { if !$0 { notePendingDelete = nil } }
-        )) {
-            Button("Delete", role: .destructive) {
-                if let note = notePendingDelete {
-                    store.deleteUserNote(id: note.id)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Theme.secondaryText)
+            TextField("Search", text: $searchText)
+                .autocorrectionDisabled()
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.secondaryText)
                 }
-                notePendingDelete = nil
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
-            Button("Cancel", role: .cancel) { notePendingDelete = nil }
-        } message: {
-            Text("This can't be undone.")
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Theme.card, in: Capsule())
+        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
     }
 
     /// One filter chip: selected = filled accent, unselected = card.
@@ -255,16 +290,15 @@ struct NotesView: View {
         .accessibilityLabel("Show \(label) notes")
     }
 
-    /// One row as a button: tap to open the editor. Swipe left to
-    /// delete (asks first), swipe right to pin/unpin; long-press menu
-    /// offers pin, edit, and delete.
+    /// One row: tap to open. Swipe right to pin/unpin, swipe left to
+    /// delete (asks first); long-press for the same actions.
     private func noteButton(_ note: UserNote) -> some View {
-        Button { editorTarget = EditorTarget(note: note, initialCategory: note.category) } label: {
+        let isSelected = wide && note.id == selectedID
+        return Button { open(note.id) } label: {
             noteRow(note)
         }
         .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .listRowBackground(isSelected ? Color.accentColor.opacity(0.35) : Theme.card)
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button { store.setNotePinned(note, pinned: !note.isPinned) } label: {
                 Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
@@ -280,71 +314,65 @@ struct NotesView: View {
             Button { store.setNotePinned(note, pinned: !note.isPinned) } label: {
                 Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
             }
-            Button { editorTarget = EditorTarget(note: note, initialCategory: note.category) } label: {
-                Label("Edit", systemImage: "pencil")
-            }
             Button(role: .destructive) { notePendingDelete = note } label: {
                 Label("Delete", systemImage: "trash")
             }
         }
     }
 
-    /// One row: bold title (with a pin mark when pinned), then
-    /// timestamp + preview on one line, then the category pill and the
-    /// workout it came from (if any).
+    /// Apple Notes row: bold title, then time/date + preview on one
+    /// line, then the category (and the workout it came from).
     private func noteRow(_ note: UserNote) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(note.displayTitle)
+                .font(.headline)
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
             HStack(spacing: 6) {
-                if note.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.caption)
-                        .foregroundStyle(Color.accentColor)
-                        .accessibilityLabel("Pinned")
-                }
-                Text(note.displayTitle)
-                    .font(.headline)
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-            }
-            HStack(spacing: 6) {
-                Text(noteTimestamp(note.updatedAt))
+                Text(Self.rowDate(note.updatedAt))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.text.opacity(0.85))
+                Text(note.previewLine.isEmpty ? "No additional text" : note.previewLine)
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
-                if !note.previewLine.isEmpty {
-                    Text(note.previewLine)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryText)
-                        .lineLimit(1)
-                }
+                    .lineLimit(1)
             }
             if note.category != nil || note.workoutTitle != nil {
-                HStack(spacing: 8) {
-                    if let category = note.category {
-                        Text(category)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                    }
-                    if let workout = note.workoutTitle {
-                        Text(workout)
-                            .font(.caption)
-                            .foregroundStyle(Color.accentColor)
-                    }
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .font(.caption2)
+                    Text([note.category, note.workoutTitle].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption)
+                        .lineLimit(1)
                 }
+                .foregroundStyle(Theme.secondaryText)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: Detail (open Duo)
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if let selectedID, store.userNotes.contains(where: { $0.id == selectedID }) {
+            NavigationStack {
+                NoteDetailView(noteID: selectedID)
+            }
+            // A new view per note, so switching notes saves and closes
+            // the previous one (and drops it if it was left blank).
+            .id(selectedID)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ContentUnavailableView("No note open", systemImage: "note.text",
+                                   description: Text("Tap the compose button to write one."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private var emptyStateView: some View {
-        // D17 (2026-11-10): the old top padding + trailing Spacer
-        // collapsed (the parent VStack has no height to stretch into),
-        // so the content sat top-pinned with ~35% dead black below.
-        // A measured minHeight centres it mid-screen instead — icon +
-        // copy verbatim, no copy change.
         VStack {
             Spacer()
             VStack(spacing: 12) {
@@ -353,7 +381,7 @@ struct NotesView: View {
                     .foregroundStyle(Theme.tertiaryText)
                 Text("No notes yet")
                     .font(.headline)
-                Text("Notes you write on a workout show up here when you save the workout. Tap + to write a free note anytime.")
+                Text("Notes you write on a workout show up here when you save the workout. Tap compose to write a free note anytime.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                     .multilineTextAlignment(.center)
@@ -365,176 +393,197 @@ struct NotesView: View {
         .frame(maxWidth: .infinity, minHeight: 440)
     }
 
-    /// Full timestamp, date + time ("Nov 9, 9:51 PM") — the moment the
-    /// note was typed (or last edited), not a bare "Today". (DaRon
-    /// 21:51: notes must be timestamped correctly.)
-    private static let timestampFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, h:mm a"
-        return formatter
-    }()
+    // MARK: Dates
 
-    private func noteTimestamp(_ date: Date) -> String {
-        Self.timestampFormatter.string(from: date)
+    /// Apple Notes groups: Today, Yesterday, Previous 7 Days, Previous
+    /// 30 Days, then month (and year when it isn't this year).
+    static func groupTitle(for date: Date, now: Date = Date()) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: now)).day ?? 0
+        if days < 7 { return "Previous 7 Days" }
+        if days < 30 { return "Previous 30 Days" }
+        let sameYear = cal.component(.year, from: date) == cal.component(.year, from: now)
+        return date.formatted(sameYear ? .dateTime.month(.wide) : .dateTime.month(.wide).year())
+    }
+
+    /// Row date: time today, weekday this week, otherwise the date.
+    static func rowDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: Date())).day ?? 0
+        if days < 7 { return date.formatted(.dateTime.weekday(.wide)) }
+        return date.formatted(.dateTime.month(.defaultDigits).day().year(.twoDigits))
     }
 }
 
-// MARK: - Note editor (open a note, edit it, new note)
-
-/// Full note editor in a sheet: title field on top, body below, Done
-/// saves, Cancel throws the edits away. A blank note (no title, no
-/// body) is never saved. Existing notes also get Pin and Delete buttons.
-private struct NoteEditorView: View {
-    @EnvironmentObject var store: WorkoutStore
-
-    var note: UserNote?
-    var initialCategory: String?
-    var onSave: (String, String, String?, Bool) -> Void
-    var onDelete: (() -> Void)?
-    @State private var isPinned: Bool
-    var onCancel: () -> Void
-
-    @State private var title: String
-    @State private var bodyText: String
-    @State private var category: String?
-    @State private var newCategoryName = ""
-    @State private var addingCategory = false
-    @State private var showDeleteConfirm = false
-
-    init(note: UserNote?, initialCategory: String? = nil, onSave: @escaping (String, String, String?, Bool) -> Void, onDelete: (() -> Void)? = nil, isPinned: Bool = false, onCancel: @escaping () -> Void) {
-        self.note = note
-        self.initialCategory = initialCategory
-        self.onSave = onSave
-        self.onDelete = onDelete
-        self.onCancel = onCancel
-        _isPinned = State(initialValue: isPinned)
-        _title = State(initialValue: note?.title ?? "")
-        _bodyText = State(initialValue: note?.body ?? "")
-        _category = State(initialValue: note?.category ?? initialCategory)
-    }
-
-    private var isBlank: Bool {
+private extension UserNote {
+    var isBlank: Bool {
         title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+}
+
+// MARK: - Note page (open a note and type in it)
+
+/// One note as its own page, like Apple Notes: the date at the top, the
+/// title, then the body — all editable in place, saved as you type.
+/// Pin, category and delete live in the top-right menu. A note left
+/// blank is removed when you leave it.
+private struct NoteDetailView: View {
+    let noteID: UUID
+    @EnvironmentObject var store: WorkoutStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var bodyText = ""
+    @State private var loaded = false
+    @State private var showDeleteConfirm = false
+    @State private var addingCategory = false
+    @State private var newCategoryName = ""
+    @FocusState private var focus: Field?
+    /// Pending autosave: typing saves after a short pause, not on every
+    /// keystroke (each save re-sorts and writes every note).
+    @State private var saveTask: Task<Void, Never>?
+
+    private enum Field { case title, body }
+
+    private var note: UserNote? { store.userNotes.first { $0.id == noteID } }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                TextField("Title", text: $title)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .autocorrectionDisabled(false)
-                Divider()
-                // Category: pick one, or add a new one.
-                HStack(spacing: 8) {
-                    Text("Category")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                    Spacer()
-                    Menu {
-                        Button("None") { category = nil }
-                        ForEach(store.noteCategories, id: \.self) { name in
-                            Button(name) { category = name }
-                        }
-                        Button("New category…") { addingCategory = true }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(category ?? "None")
-                                .font(.subheadline.weight(.semibold))
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.accentColor.opacity(0.15), in: Capsule())
-                    }
-                }
-                if addingCategory {
-                    HStack(spacing: 8) {
-                        TextField("New category name", text: $newCategoryName)
-                            .autocorrectionDisabled()
-                        Button("Add") {
-                            let name = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !name.isEmpty else { return }
-                            store.addNoteCategory(name)
-                            category = name
-                            newCategoryName = ""
-                            addingCategory = false
-                        }
-                        .fontWeight(.semibold)
-                        .disabled(newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Button("Cancel") {
-                            addingCategory = false
-                            newCategoryName = ""
-                        }
-                        .foregroundStyle(Theme.secondaryText)
-                    }
-                }
-                ZStack(alignment: .topLeading) {
-                    if bodyText.isEmpty {
-                        Text("Write a note…")
-                            .foregroundStyle(Theme.tertiaryText)
-                            .padding(.top, 8)
-                            .padding(.leading, 4)
-                    }
-                    TextEditor(text: $bodyText)
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if let workout = note?.workoutTitle {
+        VStack(alignment: .leading, spacing: 8) {
+            if let note {
+                Text(note.updatedAt.formatted(date: .long, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(maxWidth: .infinity)
+                if let workout = note.workoutTitle {
                     Text("From \(workout)")
                         .font(.caption)
                         .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity)
                 }
             }
-            .padding()
-            .background(Theme.background)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onCancel() }
+            TextField("Title", text: $title, axis: .vertical)
+                .font(.title.weight(.bold))
+                .focused($focus, equals: .title)
+                .submitLabel(.next)
+                .onSubmit { focus = .body }
+            ZStack(alignment: .topLeading) {
+                if bodyText.isEmpty {
+                    Text("Write a note…")
+                        .foregroundStyle(Theme.tertiaryText)
+                        .padding(.top, 8)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { onSave(title, bodyText, category, isPinned) }
-                        .fontWeight(.semibold)
-                        .disabled(isBlank)
-                }
-                // Keyboard Done (Debug Pass 2): the Title / body /
-                // new-category fields had no way out of the keyboard.
-                // This Done only dismisses — the nav-bar Done above
-                // saves (and stays disabled while the note is blank).
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { dismissKeyboard() }
-                }
-                if onDelete != nil {
-                    ToolbarItem(placement: .bottomBar) {
-                        HStack {
-                            // Pin lives in the editor's own state: it
-                            // updates the label immediately and rides
-                            // along with Done, so a pin can no longer be
-                            // silently reverted by the save.
-                            Button { isPinned.toggle() } label: {
-                                Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
-                            }
-                            Spacer()
-                            Button(role: .destructive) { showDeleteConfirm = true } label: {
-                                Label("Delete note", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
+                TextEditor(text: $bodyText)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .focused($focus, equals: .body)
             }
-            .alert("Delete this note?", isPresented: $showDeleteConfirm) {
-                Button("Delete", role: .destructive) { onDelete?() }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This can't be undone.")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        // Top-aligned: the date and title always sit right under the
+        // bar (centered, they slid up under it when the pane's stack
+        // measured taller than the screen).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focus = nil }
             }
         }
+        .onAppear {
+            guard !loaded, let note else { return }
+            loaded = true
+            title = note.title
+            bodyText = note.body
+            // A brand-new note starts with the cursor in the title.
+            if note.title.isEmpty && note.body.isEmpty {
+                // After the push/selection settles, or focus is dropped.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { focus = .title }
+            }
+        }
+        .onChange(of: title) { _, _ in scheduleSave() }
+        .onChange(of: bodyText) { _, _ in scheduleSave() }
+        .onDisappear {
+            saveTask?.cancel()
+            save()
+            // Leaving a blank note removes it (nothing was written).
+            if let note, note.isBlank { store.deleteUserNote(id: note.id) }
+        }
+        .alert("Delete this note?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                store.deleteUserNote(id: noteID)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This can't be undone.")
+        }
+        .alert("New category", isPresented: $addingCategory) {
+            TextField("Name", text: $newCategoryName)
+            Button("Add") {
+                let name = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    store.addNoteCategory(name)
+                    store.setNoteCategory(id: noteID, category: name)
+                }
+                newCategoryName = ""
+            }
+            Button("Cancel", role: .cancel) { newCategoryName = "" }
+        }
+    }
+
+    private func save() {
+        guard loaded else { return }
+        store.editUserNote(id: noteID, title: title, body: bodyText)
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            save()
+        }
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            if let note {
+                Button { store.setNotePinned(note, pinned: !note.isPinned) } label: {
+                    Label(note.isPinned ? "Unpin Note" : "Pin Note", systemImage: note.isPinned ? "pin.slash" : "pin")
+                }
+                Menu {
+                    Picker("Category", selection: Binding(
+                        get: { note.category },
+                        set: { store.setNoteCategory(id: noteID, category: $0) }
+                    )) {
+                        Text("None").tag(String?.none)
+                        ForEach(store.noteCategories, id: \.self) { name in
+                            Text(name).tag(Optional(name))
+                        }
+                    }
+                    Button("New Category…") { addingCategory = true }
+                } label: {
+                    Label(note.category.map { "Category: \($0)" } ?? "Category", systemImage: "folder")
+                }
+                Divider()
+                Button(role: .destructive) { showDeleteConfirm = true } label: {
+                    Label("Delete Note", systemImage: "trash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("Note actions")
     }
 }

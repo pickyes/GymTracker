@@ -206,6 +206,13 @@ private struct PageContainerSizeKey: EnvironmentKey {
     static let defaultValue: CGSize = .zero
 }
 
+/// The open Duo shows two pages side by side. `duoWide` is true while
+/// it does; `duoSwapped` mirrors the two pages (the swap button in the
+/// bottom-left corner, Nov 12) for people who want the front-screen
+/// page on the left instead of the right.
+private struct DuoWideKey: EnvironmentKey { static let defaultValue = false }
+private struct DuoSwappedKey: EnvironmentKey { static let defaultValue = false }
+
 extension EnvironmentValues {
     var fabBottomOffset: CGFloat {
         get { self[FabBottomOffsetKey.self] }
@@ -214,6 +221,14 @@ extension EnvironmentValues {
     var pageContainerSize: CGSize {
         get { self[PageContainerSizeKey.self] }
         set { self[PageContainerSizeKey.self] = newValue }
+    }
+    var duoWide: Bool {
+        get { self[DuoWideKey.self] }
+        set { self[DuoWideKey.self] = newValue }
+    }
+    var duoSwapped: Bool {
+        get { self[DuoSwappedKey.self] }
+        set { self[DuoSwappedKey.self] = newValue }
     }
 }
 
@@ -448,12 +463,14 @@ extension View {
 /// hinge (or iOS < 27.1) show the view as-is.
 struct HingeReveal: ViewModifier {
     @State private var openness: Double = 1   // 0 = closed, 1 = flat
+    /// The edge toward the hinge (the pane grows out from it).
+    var anchor: UnitPoint = .trailing
 
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
             content
                 .opacity(0.25 + 0.75 * openness)
-                .scaleEffect(0.96 + 0.04 * openness, anchor: .trailing)
+                .scaleEffect(0.96 + 0.04 * openness, anchor: anchor)
                 .onHingeChange { _, context in
                     guard let hinge = context.hinge else { openness = 1; return }
                     // Map 90°…180° to 0…1: the inner screen is only really
@@ -471,5 +488,5 @@ struct HingeReveal: ViewModifier {
 }
 
 extension View {
-    func hingeReveal() -> some View { modifier(HingeReveal()) }
+    func hingeReveal(anchor: UnitPoint = .trailing) -> some View { modifier(HingeReveal(anchor: anchor)) }
 }

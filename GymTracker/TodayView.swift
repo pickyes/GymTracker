@@ -5,6 +5,7 @@ import UIKit
 struct TodayView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.pageContainerSize) private var pageContainerSize
+    @Environment(\.duoSwapped) private var duoSwapped
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var saved = false
@@ -857,25 +858,35 @@ struct TodayView: View {
     /// second child, so SwiftUI keeps its identity (and scroll position)
     /// across fold/unfold; only the left pane appears or disappears.
     private func compactLayout(for plan: DayPlan, split: Bool) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            if split, let currentID = displayedExerciseID(for: plan),
-               let current = exercises.first(where: { $0.id == currentID }) {
-                LiveBodyView(
-                    exerciseID: current.id,
-                    nextExerciseID: nextExercise(after: current.id, in: exercises)?.id,
-                    figureHeight: nil,
-                    sideBinding: $liveBodySide,
-                    userFlippedBinding: $liveBodyUserFlipped
-                )
-                .padding(.leading, 12)
-                .padding(.top, 60)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                // Follows the real hinge: the waiting pane comes up to full
-                // brightness exactly as the phone opens flat.
-                .hingeReveal()
-            }
+        // Swapped (open Duo, swap button): the workout column moves to
+        // the left page and the body waits on the right.
+        let swapped = split && duoSwapped
+        return HStack(alignment: .top, spacing: 0) {
+            if split && !swapped { splitBodyPane(for: plan, anchor: .trailing) }
             compactColumn(for: plan, showBody: !split)
                 .frame(width: split ? Self.outerDisplayWidth : nil)
+            if swapped { splitBodyPane(for: plan, anchor: .leading) }
+        }
+    }
+
+    /// The body pane revealed beside the workout column on the open Duo.
+    @ViewBuilder
+    private func splitBodyPane(for plan: DayPlan, anchor: UnitPoint) -> some View {
+        if let currentID = displayedExerciseID(for: plan),
+           let current = exercises.first(where: { $0.id == currentID }) {
+            LiveBodyView(
+                exerciseID: current.id,
+                nextExerciseID: nextExercise(after: current.id, in: exercises)?.id,
+                figureHeight: nil,
+                sideBinding: $liveBodySide,
+                userFlippedBinding: $liveBodyUserFlipped
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 60)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // Follows the real hinge: the waiting pane comes up to full
+            // brightness exactly as the phone opens flat.
+            .hingeReveal(anchor: anchor)
         }
     }
 
