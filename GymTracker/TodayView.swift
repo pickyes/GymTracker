@@ -153,6 +153,7 @@ struct TodayView: View {
                         }
                     }
                     .animation(AppAnimation.snappy, value: showCalendarDropdown)
+                    .onChange(of: showCalendarDropdown) { _, open in store.calendarDropdownOpen = open }
             }
         }
         .disableVerticalBar()
@@ -270,8 +271,12 @@ struct TodayView: View {
         // Which part of the screen the Today title is on: the workout
         // column (the right page on the open Duo unless swapped).
         let columnX: CGFloat = kind == .split && !duoSwapped ? size.width - Self.outerDisplayWidth : 0
-        let columnWidth: CGFloat = kind == .split ? Self.outerDisplayWidth : size.width
-        let cardWidth = min(columnWidth - 24, 460)
+        // Open Duo: a full calendar across both pages (DaRon). Folded:
+        // the screen's width.
+        let wide = kind == .split && size.width > size.height
+        let cardWidth = size.width - 24
+        // The pointer sits under the arrow wherever the title is.
+        let pointerX = columnX + 135 - 12 - 9
         // Just under the title row (the title sits 30pt down, ~41pt tall).
         let top: CGFloat = 82
         let close = { withAnimation(AppAnimation.snappy) { showCalendarDropdown = false } }
@@ -290,24 +295,24 @@ struct TodayView: View {
                     // Under the arrow: "Today" (~105pt) + 4pt gap + half
                     // the chevron, from the column's 16pt margin, minus
                     // the card's 12pt inset and half the pointer.
-                    .padding(.leading, 114)
+                    .padding(.leading, pointerX)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .offset(y: 1)
                     .zIndex(1)
-                CalendarView(onDone: close)
-                    .frame(maxWidth: .infinity, maxHeight: max(320, size.height - top - 110))
+                CalendarView(onDone: close, sideBySide: wide)
+                    .frame(maxWidth: .infinity, maxHeight: max(320, size.height - top - (wide ? 8 : 110)))
                     .background(Theme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.border, lineWidth: 1))
             }
             .frame(width: cardWidth)
             .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-            .padding(.leading, columnX + 12)
+            .padding(.leading, 12)
             .padding(.top, top)
             // Unfolds downward out of the arrow.
             .transition(reduceMotion
                 ? .opacity
-                : .scale(scale: 0.08, anchor: UnitPoint(x: 0.28, y: 0)).combined(with: .opacity))
+                : .scale(scale: 0.08, anchor: UnitPoint(x: (pointerX + 9) / max(cardWidth, 1), y: 0)).combined(with: .opacity))
         }
         .ignoresSafeArea(edges: .top)
     }

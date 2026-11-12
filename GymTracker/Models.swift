@@ -1590,7 +1590,9 @@ final class WorkoutStore: ObservableObject {
     /// GymTrackerApp when the loading screen dismisses; cleared by
     /// TodayView once the greeting starts, so it only ever fires once
     /// per cold start. Not persisted — a fresh process starts false.
-    @Published var showColdStartGreeting = false
+/// Today's calendar dropdown is open (the corner buttons step aside).
+    @Published var calendarDropdownOpen = false
+        @Published var showColdStartGreeting = false
 
     // MARK: - Customization (on-device only)
 

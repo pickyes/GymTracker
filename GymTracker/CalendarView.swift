@@ -34,6 +34,10 @@ struct CalendarView: View {
     /// Just the month grid (header, weekdays, days, legend) — no
     /// scroll view, no day detail. Used inside the Calendar page's list.
     var gridOnly: Bool = false
+    /// Wide dropdown on the open Duo (Nov 12, "I want a full
+    /// calendar"): the whole month on the left, the chosen day's detail
+    /// beside it, so nothing has to scroll.
+    var sideBySide: Bool = false
 
     private var selectedDate: Date {
         get { externalSelection?.wrappedValue ?? localSelectedDate }
@@ -160,13 +164,30 @@ struct CalendarView: View {
     private var calendarContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    monthHeader
-                    weekdayHeader
-                    monthGrid
-                    legend
-                    dayDetail(for: selectedDate)
-                        .id("dayDetail")
+                Group {
+                    if sideBySide {
+                        HStack(alignment: .top, spacing: 20) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                monthHeader
+                                weekdayHeader
+                                monthGrid
+                                legend
+                            }
+                            .frame(maxWidth: .infinity)
+                            dayDetail(for: selectedDate)
+                                .id("dayDetail")
+                                .frame(width: 320)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 16) {
+                            monthHeader
+                            weekdayHeader
+                            monthGrid
+                            legend
+                            dayDetail(for: selectedDate)
+                                .id("dayDetail")
+                        }
+                    }
                 }
                 // Same 16pt sides/top as before. The bottom is the shared
                 // LayoutClearance rule (Debug Pass 2) — but ONLY for the
@@ -183,6 +204,7 @@ struct CalendarView: View {
                 // detail into view — the grid is 42 cells tall and the
                 // detail sits below it, out of reach otherwise.
                 .onChange(of: selectedDate) { _, _ in
+                    guard !sideBySide else { return }
                     withAnimation(AppAnimation.snappy) {
                         proxy.scrollTo("dayDetail", anchor: .top)
                     }

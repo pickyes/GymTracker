@@ -123,6 +123,10 @@ struct ContentView: View {
                                 .accessibilityHidden(true)
                         }
                         bottomStack
+                            // Out of the way while Today's calendar is open.
+                            .opacity(store.calendarDropdownOpen ? 0 : 1)
+                            .allowsHitTesting(!store.calendarDropdownOpen)
+                            .animation(AppAnimation.snappy, value: store.calendarDropdownOpen)
                             // Bottom-right corner, lined up with the
                             // cards' "+" column (see fabTrailingPadding /
                             // fabBottomPadding). The rest-timer panel
