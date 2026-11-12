@@ -95,8 +95,11 @@ struct ContentView: View {
                             .animation(AppAnimation.snappy, value: navExpanded)
                         // Content scrolling up under the status bar blurs
                         // and greys out, ombre-style (Nov 12).
-                        // Smaller strip on Today and Profile (DaRon).
-                        StatusBarFade(height: selectedPage == .today || selectedPage == .profile ? 10 : 30)
+                        // Smaller strip on Today and Profile (DaRon): a hard
+                        // blur, then black and white on top of it.
+                        let stripHeight: CGFloat = selectedPage == .today || selectedPage == .profile ? 10 : 30
+                        StatusBarBlur(height: stripHeight)
+                        StatusBarFade(height: stripHeight)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)

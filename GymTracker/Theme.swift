@@ -865,3 +865,57 @@ extension View {
         }
     }
 }
+
+
+/// A strong backdrop blur with the system material's tint layers removed,
+/// so it blurs what's underneath without lightening the true-black page
+/// into a grey band (the tint was what made the earlier band).
+struct UntintedBlur: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+        view.isUserInteractionEnabled = false
+        clearTint(view)
+        return view
+    }
+
+    func updateUIView(_ view: UIVisualEffectView, context: Context) {
+        clearTint(view)
+    }
+
+    /// The first subview is the backdrop (the blur itself); the rest are
+    /// the material's color overlays.
+    private func clearTint(_ view: UIVisualEffectView) {
+        DispatchQueue.main.async {
+            for overlay in view.subviews.dropFirst() {
+                overlay.backgroundColor = .clear
+                overlay.alpha = 0
+            }
+        }
+    }
+}
+
+/// The hard blur under the status bar (DaRon: "black and white area needs
+/// to be a hard blur"): fully blurred at the top edge, easing out by the
+/// bottom of the strip. Sits under StatusBarFade (the black-and-white).
+struct StatusBarBlur: View {
+    var height: CGFloat = 30
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Group {
+            if !reduceTransparency {
+                UntintedBlur()
+                    .mask(LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.5),
+                        .init(color: .clear, location: 1),
+                    ], startPoint: .top, endPoint: .bottom))
+                    .frame(height: height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea(edges: .top)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
