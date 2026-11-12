@@ -62,7 +62,7 @@ struct ContentView: View {
                         pageStack
                             .environment(\.fabBottomOffset,
                                          fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom,
-                                                          screenHeight: proxy.size.height))
+                                                          size: proxy.size))
                             // Menu backdrop (DaRon 22:36: "blur background
                             // and make black and white when clicked") —
                             // while the menu is open the page behind goes
@@ -96,7 +96,7 @@ struct ContentView: View {
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.
-                            .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, screenHeight: proxy.size.height))
+                            .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
                             // Fold (Debug Pass 2): the bottom safe-area
                             // inset jumps discretely when the pose flips,
                             // which used to snap the button to its new
@@ -122,10 +122,15 @@ struct ContentView: View {
                                 }
                             calendarDropdown(maxHeight: proxy.size.height * 0.68)
                                 .padding(.horizontal, 16)
-                                .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, screenHeight: proxy.size.height) + 56 + 12)
+                                .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size) + 56 + 12)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
+                    // Pin the stack to the window. Without this, a page
+                    // whose content grows taller than the screen (large
+                    // Dynamic Type sizes) grew the ZStack with it, and the
+                    // bottom-trailing menu button rode off the bottom edge.
+                    .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             } else {
                 OnboardingFlowView()
@@ -195,16 +200,14 @@ struct ContentView: View {
     /// When the keyboard is up, the safe area IS the keyboard
     /// (safeAreaBottom > 100): the padding becomes the keyboard height
     /// + 12, so the button sits 12pt above the keyboard.
-    private func fabBottomPadding(safeAreaBottom: CGFloat, screenHeight: CGFloat) -> CGFloat {
+    private func fabBottomPadding(safeAreaBottom: CGFloat, size: CGSize) -> CGFloat {
         if safeAreaBottom > 100 { return safeAreaBottom + 12 }
-        // With a home-indicator safe area (portrait), the safe-area
-        // bottom is already clear of the screen edge: a 16pt gap lands
-        // ~50pt above it. Without one (Duo landscape) the window reaches
-        // ~30pt past the visible display and the rounded corner bites
-        // into anything closer, so 24 clipped the button and 48 is the
-        // measured fit (Nov 12, on screen). Re-measure in every pose
-        // before changing either number.
-        return safeAreaBottom > 0 ? 16 : 48
+        // 16pt above the safe-area bottom in every pose. (An earlier 48pt
+        // landscape value compensated for the root ZStack overflowing the
+        // window — the same overflow that later pushed the button off
+        // screen at large text sizes. With the ZStack pinned to the
+        // window, 16 fits everywhere; measured on screen Nov 12.)
+        return 16
     }
 
     /// Trailing padding for the floating nav button: its center sits 60pt

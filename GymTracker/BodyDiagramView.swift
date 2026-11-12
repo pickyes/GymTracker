@@ -903,7 +903,7 @@ struct BodyView: View {
     private func statCard(value: String, label: String) -> some View {
         VStack(spacing: 4) {
             Text(value)
-                .font(.system(size: 34, weight: .bold))
+                .scaledFont(size: 34, weight: .bold)
             Text(label)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)

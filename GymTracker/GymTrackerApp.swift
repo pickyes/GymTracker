@@ -195,7 +195,7 @@ struct LoadingView: View {
                     .sensoryFeedback(.impact(weight: .medium), trigger: clicked)
 
                     Text("Status")
-                        .font(.system(size: 32, weight: .bold))
+                        .scaledFont(size: 32, weight: .bold)
                         .foregroundStyle(.white)
                         .opacity(showName ? 1 : 0)
                         .offset(y: showName ? 0 : 8)

@@ -327,7 +327,7 @@ struct InviteCodeCard: View {
             Text("Your invite code")
                 .font(.headline)
             Text(manager.displayCode)
-                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                .scaledFont(size: 28, weight: .bold, design: .monospaced)
             HStack(spacing: 12) {
                 Button("Copy code") {
                     UIPasteboard.general.string = manager.displayCode

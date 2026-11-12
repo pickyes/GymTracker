@@ -85,7 +85,7 @@ struct NotesView: View {
                 // Compose: same vivid "+" as the workout actions.
                 Button { editorTarget = EditorTarget(note: nil, initialCategory: initialCategoryForNewNote) } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 26, weight: .bold))
+                        .scaledFont(size: 26, weight: .bold)
                         .foregroundStyle(.white)
                         .frame(width: 56, height: 56)
                         .background(Color.accentColor, in: Circle())
@@ -346,7 +346,7 @@ struct NotesView: View {
             Spacer()
             VStack(spacing: 12) {
                 Image(systemName: "note.text")
-                    .font(.system(size: 44))
+                    .scaledFont(size: 44)
                     .foregroundStyle(Theme.tertiaryText)
                 Text("No notes yet")
                     .font(.headline)

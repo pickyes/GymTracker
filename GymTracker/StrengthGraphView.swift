@@ -163,7 +163,7 @@ struct StrengthGraphView: View {
                 .foregroundStyle(Theme.secondaryText)
             if let current = actualPoints.last?.value {
                 Text(formatted(current))
-                    .font(.system(size: 36, weight: .bold))
+                    .scaledFont(size: 36, weight: .bold)
                 if let change = rangeChange {
                     HStack(spacing: 6) {
                         Text(changeText(change))
@@ -174,7 +174,7 @@ struct StrengthGraphView: View {
                 }
             } else {
                 Text("—")
-                    .font(.system(size: 36, weight: .bold))
+                    .scaledFont(size: 36, weight: .bold)
             }
             Text("Estimated max lift · \(store.settings.weightUnit.label)")
                 .font(.caption)

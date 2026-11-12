@@ -373,7 +373,7 @@ struct RowStepper<Value: Strideable>: View where Value.Stride: Comparable {
     private func stepButton(systemImage: String, label: String, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
+                .scaledFont(size: 16, weight: .semibold)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -381,5 +381,54 @@ struct RowStepper<Value: Strideable>: View where Value.Stride: Comparable {
         .disabled(disabled)
         .opacity(disabled ? 0.35 : 1)
         .accessibilityLabel(label)
+    }
+}
+
+// MARK: - Dynamic Type for fixed point sizes
+
+/// A fixed point size that follows the system text size (Settings →
+/// Display & Brightness → Text Size, and Accessibility → Larger Text),
+/// updating live when it changes. Use instead of `.font(.system(size:))`,
+/// which never scales.
+///
+/// The size scales like the nearest text style (so a 17pt label grows
+/// like Body, a 34pt number like Large Title) and is capped at `maxScale`
+/// so glyphs inside fixed-size controls (56pt round buttons, 32pt circles)
+/// can't overflow them at the largest accessibility sizes.
+struct ScaledFont: ViewModifier {
+    @ScaledMetric private var scaledSize: CGFloat
+    private let size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+    private let maxScale: CGFloat
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, maxScale: CGFloat) {
+        self.size = size
+        self.weight = weight
+        self.design = design
+        self.maxScale = maxScale
+        _scaledSize = ScaledMetric(wrappedValue: size, relativeTo: Self.textStyle(for: size))
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: min(scaledSize, size * maxScale), weight: weight, design: design))
+    }
+
+    private static func textStyle(for size: CGFloat) -> Font.TextStyle {
+        switch size {
+        case ..<13: return .footnote
+        case ..<18: return .body
+        case ..<23: return .title3
+        case ..<29: return .title2
+        default: return .largeTitle
+        }
+    }
+}
+
+extension View {
+    /// `.font(.system(size:weight:design:))` that follows the system text size.
+    func scaledFont(size: CGFloat, weight: Font.Weight = .regular,
+                    design: Font.Design = .default, maxScale: CGFloat = 1.6) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design, maxScale: maxScale))
     }
 }

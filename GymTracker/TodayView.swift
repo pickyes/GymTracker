@@ -352,7 +352,7 @@ struct TodayView: View {
             PageTitle(text: text)
                 .fixedSize(horizontal: true, vertical: false)
             Image(systemName: "chevron.down")
-                .font(.system(size: 20, weight: .bold))
+                .scaledFont(size: 20, weight: .bold)
                 .foregroundStyle(Color.accentColor)
                 .accessibilityLabel("Open calendar")
         }
@@ -1372,13 +1372,13 @@ struct TodayView: View {
                                 // half, then wrap to a second line.
                                 // ("130 lb × 12…" on DaRon's photo.)
                                 Text("\(store.displayWeightLabel(set.weightLb, isPair: current.isPair, for: current)) × \(set.reps) reps")
-                                    .font(.system(size: 44, weight: .bold))
+                                    .scaledFont(size: 44, weight: .bold)
                                     .minimumScaleFactor(0.5)
                                     .lineLimit(2)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else {
                                 Text("All sets done")
-                                    .font(.system(size: 32, weight: .bold))
+                                    .scaledFont(size: 32, weight: .bold)
                                     // Done: faint accent tint, not vivid green.
                                     // (DaRon 22:32.)
                                     .foregroundStyle(CompletedTint.completedGlyph)
@@ -1616,7 +1616,7 @@ struct TodayView: View {
     /// states are the same size, spot and visibility.
     private func actionButtonIcon(_ systemName: String) -> some View {
         Image(systemName: systemName)
-            .font(.system(size: 26, weight: .bold))
+            .scaledFont(size: 26, weight: .bold)
             .foregroundStyle(.white)
             .frame(width: 56, height: 56)
             .background(Color.accentColor, in: Circle())
@@ -1923,7 +1923,7 @@ struct RestTimerCard: View {
                                 Text(paused ? "Paused" : (remaining > 0 ? "Rest" : "Rest over — time to lift"))
                                     .font(.headline)
                                 Text(formatted(max(0, remaining)))
-                                    .font(.system(size: 64, weight: .bold))
+                                    .scaledFont(size: 64, weight: .bold)
                                     .monospacedDigit()
                             }
                         } else {
@@ -2239,7 +2239,7 @@ struct ExerciseCard: View {
                     Button(showOptions ? "Hide options" : "Options") { showOptions.toggle() }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 26, weight: .bold))
+                        .scaledFont(size: 26, weight: .bold)
                         .foregroundStyle(isFullyDone ? CompletedTint.completedGlyph : .white)
                         .frame(width: 56, height: 56)
                         .background(isFullyDone ? CompletedTint.completedFill : Color.accentColor, in: Circle())
@@ -2444,6 +2444,7 @@ struct SetRow: View {
 
     @EnvironmentObject private var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Number fields are fixed narrow (~64pt folded, ~80pt open) and get
     /// layout priority so they never truncate. The grey "previous" text is
@@ -2518,11 +2519,19 @@ struct SetRow: View {
             .contentShape(Rectangle())
             .accessibilityLabel("Mark set \(number) done")
 
-            Text("Set \(number)")
+            // Accessibility text sizes: just the number — "Set" no longer
+            // fits beside the fixed-width fields and truncated to "S…".
+            // VoiceOver still reads "Set N" (accessibilityLabel below).
+            Text(dynamicTypeSize.isAccessibilitySize ? "\(number)" : "Set \(number)")
                 .font(.subheadline)
-                .minimumScaleFactor(0.8)
+                // At large Dynamic Type sizes the fixed-width weight/reps
+                // fields leave little room: shrink the label before it
+                // truncates to "…", and keep it ahead of the Spacer.
+                .minimumScaleFactor(0.5)
                 .lineLimit(1)
+                .layoutPriority(1)
                 .frame(height: 32)
+                .accessibilityLabel("Set \(number)")
 
             // Set-type button: one bright "+" for working sets, the kind
             // letter (W / D / F) for the rest. Tap to change the kind.
@@ -2534,7 +2543,7 @@ struct SetRow: View {
                 }
             } label: {
                 Text(set.kind == .working ? "+" : set.kind.shortLabel)
-                    .font(.system(size: 16, weight: .bold))
+                    .scaledFont(size: 16, weight: .bold)
                     // Done: the vivid accent disc mutes to a faint
                     // accent wash with a faint accent glyph. (DaRon 22:32.)
                     .foregroundStyle(set.done ? CompletedTint.completedGlyph : .white)
@@ -2591,7 +2600,7 @@ struct SetRow: View {
             // VoiceOver label.
             Button { onDelete() } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 17, weight: .semibold))
+                    .scaledFont(size: 17, weight: .semibold)
                     .foregroundStyle(.red)
                     .frame(width: setRowControlHeight, height: setRowControlHeight)
                     .contentShape(Rectangle())
@@ -2932,7 +2941,7 @@ struct AddExerciseSheet: View {
             store.toggleFavoriteExercise(lib.id)
         } label: {
             Image(systemName: store.isFavoriteExercise(lib.id) ? "heart.fill" : "heart")
-                .font(.system(size: 20))
+                .scaledFont(size: 20)
                 .foregroundStyle(store.isFavoriteExercise(lib.id) ? Color.accentColor : Theme.secondaryText)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())

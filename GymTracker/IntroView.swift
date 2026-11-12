@@ -32,7 +32,7 @@ struct WelcomeView: View {
                 VStack(alignment: .leading, spacing: compactWidth ? 12 : 20) {
                 VStack(alignment: .leading, spacing: compactWidth ? 6 : 8) {
                     Image(systemName: "dumbbell.fill")
-                        .font(.system(size: compactWidth ? 40 : 52))
+                        .scaledFont(size: compactWidth ? 40 : 52)
                         .foregroundStyle(Color.accentColor)
                     Text("Status")
                         .font(compactWidth ? .title : .largeTitle)
@@ -140,7 +140,7 @@ struct PrivacyView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Image(systemName: "lock.shield.fill")
-                        .font(.system(size: 52))
+                        .scaledFont(size: 52)
                         .foregroundStyle(Color.accentColor)
                     Text("Your Privacy")
                         .font(.largeTitle)

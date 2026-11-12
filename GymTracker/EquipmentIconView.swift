@@ -11,7 +11,7 @@ struct EquipmentIcon: View {
         Group {
             if let symbol = equipment.sfSymbolName {
                 Image(systemName: symbol)
-                    .font(.system(size: 22, weight: .regular))
+                    .scaledFont(size: 22, weight: .regular)
             } else {
                 EquipmentLineIcon(equipment: equipment)
             }

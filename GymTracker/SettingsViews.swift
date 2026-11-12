@@ -1533,7 +1533,7 @@ struct ProgramLibraryView: View {
                 // itself so the block sits mid-screen.
                 VStack(spacing: 12) {
                     Image(systemName: favoritesOnly ? "heart" : "magnifyingglass")
-                        .font(.system(size: 44))
+                        .scaledFont(size: 44)
                         .foregroundStyle(Theme.tertiaryText)
                     if favoritesOnly {
                         Text("No favorites yet. Tap the heart on a program to save it here.")
@@ -1645,7 +1645,7 @@ struct ProgramLibraryView: View {
             store.toggleFavoriteProgram(catalog.id)
         } label: {
             Image(systemName: store.isFavoriteProgram(catalog.id) ? "heart.fill" : "heart")
-                .font(.system(size: 20))
+                .scaledFont(size: 20)
                 .foregroundStyle(store.isFavoriteProgram(catalog.id) ? Color.accentColor : Theme.secondaryText)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
