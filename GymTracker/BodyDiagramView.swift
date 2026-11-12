@@ -494,10 +494,15 @@ struct BodyFigureView: View {
                     .fill(fill ?? Color.clear)
                     .frame(width: 200 * scale, height: 400 * scale)
                 if lit {
-                    // Hairline edge on every lit shape so neighbouring
-                    // highlighted muscles stay separate (Nov 12).
-                    shape.stroke(Color.white.opacity(secondary ? 0.35 : 0.67), lineWidth: 0.6)
-                        .frame(width: 200 * scale, height: 400 * scale)
+                    // Hairline edge on every lit shape, in a darker shade of
+                    // the highlight colour (Nov 12): the highlight colour
+                    // with black laid over it, so it follows any accent.
+                    ZStack {
+                        shape.stroke(litBase, lineWidth: 0.8)
+                        shape.stroke(Color.black.opacity(0.4), lineWidth: 0.8)
+                    }
+                    .opacity(secondary ? 0.6 : 1)
+                    .frame(width: 200 * scale, height: 400 * scale)
                 } else if recovery[spec.id] == .fresh {
                     // Fresh is never color-only: a dashed white outline
                     // marks it as well as the pink fill (colorblind-safe).
