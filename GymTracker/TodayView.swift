@@ -954,8 +954,11 @@ struct TodayView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            // "Working now" sits in the clock's row, level with the
+            // Today title (same top strip, DaRon Nov 12).
+            .padding(.top, 34)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
             // Follows the real hinge: the waiting pane comes up to full
             // brightness exactly as the phone opens flat.
             .hingeReveal(anchor: anchor)
