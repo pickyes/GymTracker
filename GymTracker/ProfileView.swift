@@ -210,6 +210,8 @@ struct ProfileView: View {
     private var rootList: some View {
         List {
             PageTitle(text: "Profile")
+                // In the clock's row, like Today (Nov 12).
+                .padding(.top, 30)
                 .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
                 .listRowBackground(Color.clear)
             Section {
@@ -226,6 +228,7 @@ struct ProfileView: View {
         }
         .listStyle(.insetGrouped)
         .oledList()
+        .ignoresSafeArea(edges: .top)
     }
 
     /// Open Duo: the same list as a sidebar; the chosen row is lit and
@@ -233,7 +236,7 @@ struct ProfileView: View {
     private var sidebar: some View {
         List {
             PageTitle(text: "Profile")
-                .padding(.top, 36)
+                .padding(.top, 30)
                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 4, trailing: 8))
                 .listRowBackground(Color.clear)
             Button { selected = .program; userPicked = true } label: { summaryCard }
@@ -262,6 +265,7 @@ struct ProfileView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .ignoresSafeArea(edges: .top)
     }
 
     /// Apple Account-style card at the top: the plan you're on.
@@ -339,6 +343,9 @@ struct ProfileView: View {
             .oledList()
             .navigationTitle(section.title)
             .navigationBarTitleDisplayMode(.inline)
+            // Open Duo: the header card is the title, so the page drops
+            // the nav bar and starts at the top (Nov 12).
+            .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
             .withKeyboardDoneToolbar()
             .scrollDismissesKeyboard(.interactively)
         }

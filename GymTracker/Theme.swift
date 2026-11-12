@@ -487,6 +487,34 @@ struct HingeReveal: ViewModifier {
     }
 }
 
+/// Rises out of the dark as the Duo opens (the swap button, Nov 12):
+/// invisible, blurred and a little small while the hinge is folded,
+/// fully there as it reaches flat — tied to the real hinge angle, so it
+/// emerges with the opening instead of popping in afterward.
+struct HingeEmerge: ViewModifier {
+    @State private var openness: Double = 1
+
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content
+                .opacity(openness * openness)
+                .blur(radius: 10 * (1 - openness))
+                .scaleEffect(0.8 + 0.2 * openness)
+                .onHingeChange { _, context in
+                    guard let hinge = context.hinge else { openness = 1; return }
+                    // Starts emerging past half open (120°), clear at flat.
+                    let t = (hinge.angle.degrees - 120) / 60
+                    withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 1)) {
+                        openness = min(max(t, 0), 1)
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
+    func hingeEmerge() -> some View { modifier(HingeEmerge()) }
     func hingeReveal(anchor: UnitPoint = .trailing) -> some View { modifier(HingeReveal(anchor: anchor)) }
 }

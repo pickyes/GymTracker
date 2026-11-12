@@ -35,19 +35,26 @@ struct ContentView: View {
     @State private var showCalendar = false
     /// Open Duo: mirror the two pages (swap button, bottom-left). Kept
     /// across launches.
-    @AppStorage("duoSwapSides") private var swapSides = false
+    /// Kept in the shared App Group store (with the workouts and notes,
+    /// which survive app updates and reinstalls) and flushed to disk on
+    /// every tap — so it stays swapped until tapped again, through
+    /// folding, closing the app, or powering off (DaRon, Nov 12).
+    @AppStorage("duoSwapSides", store: SharedDefaults.store) private var swapSides = false
     /// The page area ignoring the keyboard. Pose decisions (two pages
     /// or one, Today's layout) use this: with the keyboard up the safe
     /// area shrinks, which flipped the open Duo to the folded layout
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
+    /// The day chosen on the Calendar page (also shown on the open
+    /// Duo's other page).
+    @State private var calendarDay: Date = Calendar.current.startOfDay(for: Date())
 
     enum Page: String, CaseIterable {
         case today, history, notes, profile
         var title: String {
             switch self {
             case .today: return "Today"
-            case .history: return "History"
+            case .history: return "Calendar"
             case .profile: return "Profile"
             case .notes: return "Notes"
             }
@@ -55,7 +62,7 @@ struct ContentView: View {
         var systemImage: String {
             switch self {
             case .today: return "dumbbell"
-            case .history: return "clock.arrow.circlepath"
+            case .history: return "calendar"
             case .profile: return "person.fill"
             case .notes: return "note.text"
             }
@@ -93,6 +100,14 @@ struct ContentView: View {
                                         navExpanded = false
                                     }
                                 }
+                        }
+                        // Keeps the end-of-rest sound + haptic running
+                        // while the visible timer is the inline one.
+                        if restActive && restShownInline {
+                            RestTimerCard()
+                                .frame(width: 0, height: 0)
+                                .hidden()
+                                .accessibilityHidden(true)
                         }
                         bottomStack
                             // Bottom-right corner, lined up with the
@@ -198,7 +213,7 @@ struct ContentView: View {
                     .opacity(selectedPage == .today ? 1 : 0)
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)
-                unfoldPage(.history, wide: wide) { HistoryView() } companion: { historyCompanion }
+                unfoldPage(.history, wide: wide) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
                 // Notes and Profile split themselves when wide, like
                 // Apple's Notes and Settings: list on one page, the
                 // open note / section on the other.
@@ -220,6 +235,8 @@ struct ContentView: View {
     private var swapSidesButton: some View {
         Button {
             withAnimation(AppAnimation.snappy) { swapSides.toggle() }
+            // Write it out now, not whenever the system gets to it.
+            SharedDefaults.store.synchronize()
         } label: {
             Image(systemName: "arrow.left.arrow.right")
                 .scaledFont(size: 20, weight: .semibold, maxScale: 1.3)
@@ -277,13 +294,44 @@ struct ContentView: View {
         .accessibilityHidden(selectedPage != page)
     }
 
-    /// History's companion: the latest session's details.
+    /// Calendar's companion (open Duo): the chosen day's workout in
+    /// full, or what was planned that day.
     @ViewBuilder private var historyCompanion: some View {
-        if let latest = store.sessions.first {
-            NavigationStack { SessionDetailView(session: latest) }
+        let cal = Calendar.current
+        if let session = store.sessions.first(where: { cal.isDate($0.date, inSameDayAs: calendarDay) }) {
+            NavigationStack { SessionDetailView(session: session) }
+                .id(session.id)
+                // On the left page (no clock there) it starts at the very
+                // top, level with the Calendar title (Nov 12).
+                .ignoresSafeArea(edges: swapSides ? [] : .top)
+        } else if let plan = store.programDay(for: calendarDay) {
+            let isPast = calendarDay < cal.startOfDay(for: Date())
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(calendarDay, format: .dateTime.weekday(.wide).month().day())
+                        .font(.headline)
+                        .foregroundStyle(Theme.secondaryText)
+                    Text(plan.title).font(.largeTitle.bold())
+                    Text(isPast ? "Missed" : "Planned")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isPast ? Theme.vividOrange : Color.accentColor)
+                    ForEach(plan.exercises) { template in
+                        HStack {
+                            Text(template.name).font(.body.weight(.semibold))
+                            Spacer()
+                            Text("\(template.sets) × \(template.repRange)")
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        .padding(14)
+                        .themeCard(cornerRadius: 14)
+                    }
+                }
+                .padding(24)
+                .padding(.top, 20)
+            }
         } else {
-            ContentUnavailableView("No workouts yet", systemImage: "clock.arrow.circlepath",
-                                   description: Text("Finish a workout from Today and it shows up here."))
+            ContentUnavailableView("Rest day", systemImage: "moon.zzz",
+                                   description: Text("Pick a day on the calendar to see that workout here."))
         }
     }
 
@@ -336,7 +384,10 @@ struct ContentView: View {
             }
             // Tent pose shows its own big countdown on the page, so the
             // floating card would only cover the weight × reps.
-            if restActive && !isTentPose {
+            // On Today the timer lives inside the current exercise card
+            // (and in tent pose, on the right tile), so it only floats on
+            // the other pages.
+            if restActive && !restShownInline {
                 RestTimerCard()
                     .frame(width: 340)
                     .shadow(radius: 12)
@@ -347,6 +398,12 @@ struct ContentView: View {
             if Self.isWide(steadySize) && !navExpanded {
                 swapSidesButton
                     .frame(width: 56)
+                    // Out of the shadows: emerges with the hinge as the
+                    // Duo opens, and fades/blurs in when it appears.
+                    .hingeEmerge()
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
+                        removal: .opacity.animation(.easeIn(duration: 0.15))))
             }
             fabButton
         }
@@ -358,6 +415,9 @@ struct ContentView: View {
     private var isTentPose: Bool {
         selectedPage == .today && steadySize.width > steadySize.height * 1.2 && steadySize.height < 520
     }
+
+    /// Today shows the rest timer in its own layout.
+    private var restShownInline: Bool { selectedPage == .today || isTentPose }
 
     /// A rest is running (counting down) or paused.
     private var restActive: Bool {
@@ -374,10 +434,9 @@ struct ContentView: View {
     /// Notes / Profile) light up when you are on them (DaRon 22:15).
     private var navPills: some View {
         ForEach(Page.allCases, id: \.self) { page in
+            // History and Calendar are one page now (Nov 12), so the
+            // old Calendar action pill is gone.
             pagePill(page)
-            if page == .today {
-                calendarPill
-            }
         }
     }
 

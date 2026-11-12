@@ -1,8 +1,14 @@
 import SwiftUI
 
+/// The Calendar page (History and Calendar merged, Nov 12): the month
+/// grid on top, the chosen day's workouts under it (tap one for its
+/// details), then the strength links, this week's stats, records, and
+/// every session.
 struct HistoryView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
+    /// The day chosen in the grid (shared with the open Duo's other page).
+    @Binding var selectedDay: Date
     @State private var selectedSessionID: UUID?
     @State private var exportRequest: ExportRequest?
     /// D6 (2026-11-10): the session awaiting delete confirmation —
@@ -56,10 +62,21 @@ struct HistoryView: View {
             List(selection: $selectedSessionID) {
                 // Title lines up with the list rows below it (same 16pt
                 // leading), not flush to the edge.
-                PageTitle(text: "History")
+                PageTitle(text: "Calendar")
+                    // In the clock's row, like Today (Nov 12).
+                    .padding(.top, 30)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
                     .listRowBackground(Color.clear)
+                CalendarView(externalSelection: $selectedDay, gridOnly: true)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                Section {
+                    selectedDayRows
+                } header: {
+                    Text(selectedDay, format: .dateTime.weekday(.wide).month().day())
+                }
                 Section {
                     NavigationLink {
                         StrengthGraphView()
@@ -85,9 +102,13 @@ struct HistoryView: View {
                         Label("Export history", systemImage: "square.and.arrow.up")
                     }
                 }
-                // Sessions lead the page now (DaRon, 22:58): past workouts
-                // sit directly under the top links, before the stats.
-                Section("Sessions") {
+                Section("This week") {
+                    historyStatsHeader
+                }
+                Section("Personal records") {
+                    personalRecordsView
+                }
+                Section("All sessions") {
                     if store.sessions.isEmpty {
                         Text("No sessions yet — finish a workout from Today and it will show up here.")
                             .font(.subheadline)
@@ -106,12 +127,6 @@ struct HistoryView: View {
                             }
                     }
                 }
-                Section("This week") {
-                    historyStatsHeader
-                }
-                Section("Personal records") {
-                    personalRecordsView
-                }
                 // Bottom breathing room (shared LayoutClearance rule,
                 // Debug Pass 2): the last row must scroll fully into
                 // view clear of the floating menu button — and of the
@@ -126,6 +141,7 @@ struct HistoryView: View {
                     .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
+            .ignoresSafeArea(edges: .top)
             .toolbar(.hidden, for: .navigationBar)
         } detail: {
             Group {
@@ -200,6 +216,47 @@ struct HistoryView: View {
             Button("Cancel", role: .cancel) { sessionToDelete = nil }
         } message: {
             Text("This removes the saved session and its sets from History. This can't be undone.")
+        }
+    }
+
+    // MARK: - Chosen day
+
+    /// The chosen day's workouts (tap to open), or what was planned.
+    @ViewBuilder
+    private var selectedDayRows: some View {
+        let cal = Calendar.current
+        let daySessions = store.sessions.filter { cal.isDate($0.date, inSameDayAs: selectedDay) }
+        if !daySessions.isEmpty {
+            ForEach(daySessions) { session in
+                SessionRowView(session: session)
+                    .tag(session.id)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { sessionToDelete = session } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+            }
+        } else if let plan = store.programDay(for: selectedDay) {
+            let isPast = selectedDay < cal.startOfDay(for: Date())
+            VStack(alignment: .leading, spacing: 6) {
+                Text(isPast ? "Missed · \(plan.title)" : "Planned · \(plan.title)")
+                    .font(.headline)
+                    .foregroundStyle(isPast ? Theme.vividOrange : Color.accentColor)
+                ForEach(plan.exercises) { template in
+                    HStack {
+                        Text(template.name).font(.subheadline)
+                        Spacer()
+                        Text("\(template.sets) × \(template.repRange)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        } else {
+            Text(selectedDay < cal.startOfDay(for: Date()) ? "Nothing logged that day." : "Rest day.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
         }
     }
 

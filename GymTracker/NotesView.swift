@@ -191,7 +191,8 @@ struct NotesView: View {
                 .accessibilityLabel("New note")
             }
             .padding(.horizontal, 16)
-            .padding(.top, wide ? 44 : 2)
+            // In the clock's row, like Today (Nov 12).
+            .padding(.top, 30)
 
             searchField
                 .padding(.horizontal, 16)
@@ -252,6 +253,7 @@ struct NotesView: View {
         }
         .withKeyboardDoneToolbar()
         .scrollDismissesKeyboard(.interactively)
+        .ignoresSafeArea(edges: .top)
     }
 
     private var searchField: some View {
@@ -435,6 +437,9 @@ private extension UserNote {
 private struct NoteDetailView: View {
     let noteID: UUID
     @EnvironmentObject var store: WorkoutStore
+    /// Open Duo: no nav bar — the note starts at the top of its page with
+    /// its actions inline on the left (clear of the clock, Nov 12).
+    @Environment(\.duoWide) private var wide
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var bodyText = ""
@@ -454,10 +459,14 @@ private struct NoteDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let note {
-                Text(note.updatedAt.formatted(date: .long, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 10) {
+                    if wide { actionsMenu.font(.title2) }
+                    Text(note.updatedAt.formatted(date: .long, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(maxWidth: wide ? nil : .infinity)
+                    if wide { Spacer(minLength: 0) }
+                }
                 if let workout = note.workoutTitle {
                     Text("From \(workout)")
                         .font(.caption)
@@ -493,8 +502,9 @@ private struct NoteDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+            ToolbarItem(placement: .topBarTrailing) { if !wide { actionsMenu } }
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
                 Button("Done") { focus = nil }

@@ -25,7 +25,22 @@ struct CalendarView: View {
     /// The month on screen (any day inside it; normalized to the 1st).
     @State private var displayedMonth: Date = Calendar.current.startOfDay(for: Date())
     /// The day whose detail shows below the grid. Today on open.
-    @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var localSelectedDate: Date = Calendar.current.startOfDay(for: Date())
+
+    /// Calendar page (History + Calendar merged, Nov 12): the page owns
+    /// the selected day so it can list that day's workouts under the
+    /// grid and show it on the open Duo's other page.
+    var externalSelection: Binding<Date>? = nil
+    /// Just the month grid (header, weekdays, days, legend) — no
+    /// scroll view, no day detail. Used inside the Calendar page's list.
+    var gridOnly: Bool = false
+
+    private var selectedDate: Date {
+        get { externalSelection?.wrappedValue ?? localSelectedDate }
+        nonmutating set {
+            if let externalSelection { externalSelection.wrappedValue = newValue } else { localSelectedDate = newValue }
+        }
+    }
 
     private var calendar: Calendar { Calendar.current }
 
@@ -53,7 +68,18 @@ struct CalendarView: View {
     var embeddedInNavigation: Bool = false
 
     var body: some View {
-        if embeddedInNavigation {
+        if gridOnly {
+            VStack(alignment: .leading, spacing: 14) {
+                monthHeader
+                weekdayHeader
+                monthGrid
+                legend
+            }
+            .onAppear {
+                // Show the month of the chosen day.
+                displayedMonth = selectedDate
+            }
+        } else if embeddedInNavigation {
             calendarContent
                 .background(Theme.background)
                 .navigationTitle("Calendar")

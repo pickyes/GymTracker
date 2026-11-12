@@ -951,14 +951,19 @@ struct TodayView: View {
                     Spacer(minLength: 0)
                     sessionProgressCard
                         .padding(.bottom, 16)
+                        // On the right page the swap + menu buttons sit
+                        // in the corner; keep the card clear of them.
+                        .padding(.trailing, anchor == .leading ? 72 : 0)
                 }
             }
             .padding(.horizontal, 16)
             // "Working now" sits in the clock's row, level with the
             // Today title (same top strip, DaRon Nov 12).
-            .padding(.top, 34)
+            // On the right page (sides swapped) the clock is above it, so
+            // it starts below the status bar there instead.
+            .padding(.top, anchor == .trailing ? 34 : 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .ignoresSafeArea(edges: .top)
+            .ignoresSafeArea(edges: anchor == .trailing ? .top : [])
             // Follows the real hinge: the waiting pane comes up to full
             // brightness exactly as the phone opens flat.
             .hingeReveal(anchor: anchor)
@@ -2048,6 +2053,10 @@ struct RestTimerCard: View {
     /// Tent / Seated glanceable mode: giant countdown and 56pt pills,
     /// readable from a distance while the phone stands on a surface.
     var large: Bool = false
+    /// Exactly one mounted RestTimerCard plays the end-of-rest sound and
+    /// haptic. The inline copy in the exercise card turns this off; a
+    /// hidden copy in ContentView keeps it (Nov 12).
+    var playsFeedback: Bool = true
 
     /// D33 (2026-11-10): collapsed to the compact countdown chip.
     /// Per-rest — resets whenever a new rest starts.
@@ -2185,7 +2194,7 @@ struct RestTimerCard: View {
                 // auto-dismiss 5s later. A new set restarts the timer (a new
                 // endsAt cancels this task). Pausing clears endsAt, which
                 // cancels this task — it restarts on resume.
-                guard let endsAt = store.restEndsAt else { return }
+                guard playsFeedback, let endsAt = store.restEndsAt else { return }
                 let untilEnd = endsAt.timeIntervalSinceNow
                 if untilEnd > 0 {
                     try? await Task.sleep(for: .seconds(untilEnd))
@@ -2397,6 +2406,14 @@ struct ExerciseCard: View {
                     onDelete: { store.removeSet(at: index, for: template) },
                     onFieldFocus: onFieldFocus
                 )
+            }
+
+            // Rest timer, in the flow of the page (Nov 12): it opens right
+            // under the sets of the exercise you're on and pushes the rest
+            // of the page down, instead of floating over the set rows.
+            if isCurrent && store.isRestActive {
+                RestTimerCard(playsFeedback: false)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // Set-table actions, one compact row (Nov 12 UI pass): a

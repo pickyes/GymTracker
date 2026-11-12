@@ -25,16 +25,15 @@ import UIKit
 // - No torch (simulator, iPad, no-torch device) is a silent no-op,
 //   never a crash.
 //
-// Timing (standard Morse, 1 unit = 150 ms — chosen so the whole word
-// takes ~6.5 s: long enough to notice across the gym, short enough to
-// be done before the 5 s auto-dismiss clears the rest card):
-// - dot = 1 unit on (150 ms), dash = 3 units on (450 ms)
-// - gap between elements inside one letter = 1 unit off (150 ms)
-// - gap between letters = 3 units off (450 ms)
-// - gap between words = 7 units off (1050 ms; STATUS is one word, so
+// Timing (standard Morse, 1 unit = 100 ms — 50% faster than the
+// original 150 ms, DaRon Nov 12; the whole word now takes ~4.3 s):
+// - dot = 1 unit on (100 ms), dash = 3 units on (300 ms)
+// - gap between elements inside one letter = 1 unit off (100 ms)
+// - gap between letters = 3 units off (300 ms)
+// - gap between words = 7 units off (700 ms; STATUS is one word, so
 //   it never fires here — the table supports it for reuse)
 // - STATUS = S ... / T - / A .- / T - / U ..- / S ...
-//   = 21 on-units + 22 off-units = 43 units = 43 x 150 ms = 6,450 ms.
+//   = 21 on-units + 22 off-units = 43 units = 43 x 100 ms = 4,300 ms.
 
 // MARK: - Pure Morse timeline (no torch, no UIKit — testable anywhere)
 
@@ -46,7 +45,7 @@ struct MorseElement: Equatable {
 
 enum MorseSignal {
     /// One Morse unit, in milliseconds. Dot = 1 unit, dash = 3 units.
-    static let unitMs = 150
+    static let unitMs = 100
 
     /// The word the rest timer flashes. Fixed — the toggle is "flash
     /// STATUS", not a free-text Morse sender.
@@ -98,21 +97,21 @@ enum MorseSignal {
     }
 
     /// Total wall-clock duration of `word`, in milliseconds.
-    /// STATUS = 6,450 ms at 150 ms/unit.
+    /// STATUS = 4,300 ms at 100 ms/unit.
     static func totalDurationMs(for word: String, unitMs: Int = Self.unitMs) -> Int {
         timeline(for: word, unitMs: unitMs).reduce(0) { $0 + $1.durationMs }
     }
 
     /// One-line log of the timeline, for the simulator check (no torch
     /// on the simulator — this is what the coordinator prints instead):
-    /// "ON 150ms, OFF 150ms, ON 150ms, ...".
+    /// "ON 100ms, OFF 100ms, ON 100ms, ...".
     static func timelineDescription(for word: String, unitMs: Int = Self.unitMs) -> String {
         timeline(for: word, unitMs: unitMs)
             .map { "\($0.on ? "ON" : "OFF") \($0.durationMs)ms" }
             .joined(separator: ", ")
     }
 
-    /// "STATUS: 43 units, 6450 ms (ON 3150 ms / OFF 3300 ms)".
+    /// "STATUS: 43 units, 4300 ms (ON 2100 ms / OFF 2200 ms)".
     static func summary(for word: String, unitMs: Int = Self.unitMs) -> String {
         let segments = timeline(for: word, unitMs: unitMs)
         let onMs = segments.filter(\.on).reduce(0) { $0 + $1.durationMs }
