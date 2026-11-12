@@ -951,9 +951,9 @@ struct TodayView: View {
                     Spacer(minLength: 0)
                     sessionProgressCard
                         .padding(.bottom, 16)
-                        // On the right page the swap + menu buttons sit
-                        // in the corner; keep the card clear of them.
-                        .padding(.trailing, anchor == .leading ? 72 : 0)
+                        // Full width on either page (DaRon: it looked cut
+                        // short) — its ring and text sit at the left, so
+                        // the corner buttons only cover empty card.
                 }
             }
             .padding(.horizontal, 16)
@@ -2057,40 +2057,68 @@ struct RestTimerCard: View {
     /// haptic. The inline copy in the exercise card turns this off; a
     /// hidden copy in ContentView keeps it (Nov 12).
     var playsFeedback: Bool = true
+    /// Pill mode (Nov 12): pops up as the compact countdown pill right
+    /// above the menu button; tap it for the full controls, the chevron
+    /// shrinks it back. Every new rest starts as the pill.
+    var pill: Bool = false
 
     /// D33 (2026-11-10): collapsed to the compact countdown chip.
     /// Per-rest — resets whenever a new rest starts.
-    @State private var collapsed = false
+    @State private var collapsed: Bool? = nil
+    private var isCollapsed: Bool { collapsed ?? pill }
 
     var body: some View {
         if store.restEndsAt != nil || store.restPausedRemaining != nil {
             TimelineView(.periodic(from: Date(), by: 1.0)) { context in
                 let remaining = store.restRemainingSeconds ?? 0
                 let paused = store.isRestPaused
-                if collapsed {
+                if isCollapsed {
                     // D33: collapsed countdown chip (~44pt) — covers
                     // almost nothing, so the set rows stay visible and
                     // editable while the rest runs. Tap to re-expand.
                     Button {
                         withAnimation(AppAnimation.snappy) { collapsed = false }
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "timer")
-                                .foregroundStyle(Color.accentColor)
-                            Text(paused ? "Paused" : "Rest")
-                                .font(.subheadline.weight(.semibold))
-                            Text(formatted(max(0, remaining)))
-                                .font(.subheadline.weight(.bold))
-                                .monospacedDigit()
-                            Image(systemName: "chevron.up")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Theme.secondaryText)
+                        if pill {
+                            // Upright pill (DaRon, Nov 12): the same 56pt
+                            // width as the swap and menu buttons below it,
+                            // so the three read as one column.
+                            VStack(spacing: 6) {
+                                Image(systemName: paused ? "pause.fill" : "timer")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                Text(formatted(max(0, remaining)))
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                                Image(systemName: "chevron.up")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            .frame(width: 56)
+                            .padding(.vertical, 14)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(Capsule().stroke(Theme.border, lineWidth: 1.5))
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: "timer")
+                                    .foregroundStyle(Color.accentColor)
+                                Text(paused ? "Paused" : "Rest")
+                                    .font(.subheadline.weight(.semibold))
+                                Text(formatted(max(0, remaining)))
+                                    .font(.subheadline.weight(.bold))
+                                    .monospacedDigit()
+                                Image(systemName: "chevron.up")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Theme.card)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Theme.card)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Expand rest timer")
@@ -2181,6 +2209,8 @@ struct RestTimerCard: View {
                 }
                 .padding(.horizontal, large ? 16 : 12)
                 .padding(.vertical, large ? 16 : 8)
+                // Pill mode, opened: a fixed-width panel above the button.
+                .frame(width: pill ? 340 : nil, alignment: .leading)
                 .background(Theme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
@@ -2188,7 +2218,7 @@ struct RestTimerCard: View {
             }
             // D33: collapsed state is per-rest — a new rest re-expands
             // the full panel.
-            .onChange(of: store.restEndsAt) { _, _ in collapsed = false }
+            .onChange(of: store.restEndsAt) { _, _ in collapsed = nil }
             .task(id: store.restEndsAt) {
                 // Play sound + haptic the moment the timer ends, then
                 // auto-dismiss 5s later. A new set restarts the timer (a new
@@ -2406,14 +2436,6 @@ struct ExerciseCard: View {
                     onDelete: { store.removeSet(at: index, for: template) },
                     onFieldFocus: onFieldFocus
                 )
-            }
-
-            // Rest timer, in the flow of the page (Nov 12): it opens right
-            // under the sets of the exercise you're on and pushes the rest
-            // of the page down, instead of floating over the set rows.
-            if isCurrent && store.isRestActive {
-                RestTimerCard(playsFeedback: false)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // Set-table actions, one compact row (Nov 12 UI pass): a

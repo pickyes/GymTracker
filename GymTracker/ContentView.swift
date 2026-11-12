@@ -103,7 +103,7 @@ struct ContentView: View {
                         }
                         // Keeps the end-of-rest sound + haptic running
                         // while the visible timer is the inline one.
-                        if restActive && restShownInline {
+                        if restActive && (restShownInline || navExpanded) {
                             RestTimerCard()
                                 .frame(width: 0, height: 0)
                                 .hidden()
@@ -241,9 +241,12 @@ struct ContentView: View {
             Image(systemName: "arrow.left.arrow.right")
                 .scaledFont(size: 20, weight: .semibold, maxScale: 1.3)
                 .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
+                // Same 56pt circle, border and shadow as the menu button
+                // below it, so the two line up as one column (DaRon).
+                .frame(width: 56, height: 56)
                 .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 1))
+                .overlay(Circle().stroke(Theme.border, lineWidth: 1.5))
+                .shadow(color: .black.opacity(0.3), radius: 6)
         }
         .buttonStyle(.plain)
         // Never holds keyboard focus: with a hardware keyboard a focused
@@ -357,7 +360,10 @@ struct ContentView: View {
     /// cards' "+" buttons (DaRon 21:23 line-up). The button is 56pt, so
     /// the padding is 60 - 28 = 32.
     private func fabTrailingPadding(screenWidth: CGFloat) -> CGFloat {
-        32
+        // Open Duo: the button column sits directly under the status
+        // bar's Wi-Fi icon, ~47pt from the right edge in both open
+        // orientations (measured Nov 12) → 47 − 28 (half the button).
+        Self.isWide(steadySize) ? 19 : 32
     }
 
     /// Everything anchored to the bottom-right corner, top to bottom:
@@ -384,20 +390,19 @@ struct ContentView: View {
             }
             // Tent pose shows its own big countdown on the page, so the
             // floating card would only cover the weight × reps.
-            // On Today the timer lives inside the current exercise card
-            // (and in tent pose, on the right tile), so it only floats on
-            // the other pages.
-            if restActive && !restShownInline {
-                RestTimerCard()
-                    .frame(width: 340)
-                    .shadow(radius: 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            // Rest timer (Nov 12, DaRon): an upright pill at the top of the
+            // button column (above swap), growing out of the corner. Tap
+            // it for the full controls. Tent pose has its own tile.
+            if restActive && !isTentPose && !navExpanded {
+                RestTimerCard(pill: true)
+                    .shadow(color: .black.opacity(0.5), radius: 12)
+                    .transition(.scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
-            // Swap sides (open Duo only): right above the menu button
-            // (DaRon), centered on it. Hidden while the menu is open.
+            // Swap sides (open Duo only): above the menu button (and
+            // above the rest pill while one runs). Hidden while the menu
+            // is open.
             if Self.isWide(steadySize) && !navExpanded {
                 swapSidesButton
-                    .frame(width: 56)
                     // Out of the shadows: emerges with the hinge as the
                     // Duo opens, and fades/blurs in when it appears.
                     .hingeEmerge()
@@ -407,7 +412,7 @@ struct ContentView: View {
             }
             fabButton
         }
-        .animation(AppAnimation.snappy, value: restActive)
+        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: restActive)
     }
 
     /// Today on the folded screen held sideways / in tent pose (the same
@@ -416,8 +421,8 @@ struct ContentView: View {
         selectedPage == .today && steadySize.width > steadySize.height * 1.2 && steadySize.height < 520
     }
 
-    /// Today shows the rest timer in its own layout.
-    private var restShownInline: Bool { selectedPage == .today || isTentPose }
+    /// Tent pose shows the rest timer in its own tile (no pill there).
+    private var restShownInline: Bool { isTentPose }
 
     /// A rest is running (counting down) or paused.
     private var restActive: Bool {

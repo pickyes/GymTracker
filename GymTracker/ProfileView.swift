@@ -142,15 +142,15 @@ struct ProfileView: View {
     var body: some View {
         Group {
             if wide {
-                GeometryReader { geo in
-                    let listWidth = min(max(geo.size.width * 0.36, 280), 360)
-                    HStack(spacing: 0) {
-                        if swapped { detailPane }
-                        sidebar
-                            .frame(width: listWidth)
-                            .background(Theme.card.opacity(0.45))
-                        if !swapped { detailPane }
-                    }
+                // The list keeps the front screen's exact width and side
+                // (right, like Today) for a seamless unfold; the section
+                // waits on the other page. Swap mirrors it.
+                HStack(spacing: 0) {
+                    if !swapped { detailPane }
+                    sidebar
+                        .frame(width: TodayView.outerDisplayWidth)
+                        .background(Theme.card.opacity(0.45))
+                    if swapped { detailPane }
                 }
             } else {
                 NavigationStack(path: $path) {

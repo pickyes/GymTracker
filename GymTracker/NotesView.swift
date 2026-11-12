@@ -94,16 +94,15 @@ struct NotesView: View {
     var body: some View {
         Group {
             if wide {
-                GeometryReader { geo in
-                    // Apple-style sidebar width: ~40% of the open screen.
-                    let listWidth = min(max(geo.size.width * 0.4, 300), 400)
-                    HStack(spacing: 0) {
-                        if swapped { detailPane; Divider() }
-                        listPane
-                            .frame(width: listWidth)
-                            .background(Theme.card.opacity(0.35))
-                        if !swapped { Divider(); detailPane }
-                    }
+                // The list keeps the front screen's exact width and side
+                // (right, like Today), so opening the Duo is seamless —
+                // the note waits on the other page. Swap mirrors it.
+                HStack(spacing: 0) {
+                    if !swapped { detailPane; Divider() }
+                    listPane
+                        .frame(width: TodayView.outerDisplayWidth)
+                        .background(Theme.card.opacity(0.35))
+                    if swapped { Divider(); detailPane }
                 }
             } else {
                 NavigationStack(path: $path) {
@@ -179,24 +178,28 @@ struct NotesView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
                 Spacer()
-                Button(action: compose) {
-                    Image(systemName: "square.and.pencil")
-                        .scaledFont(size: 22, weight: .semibold)
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(Color.accentColor, in: Circle())
-                        .shadow(color: Color.accentColor.opacity(0.5), radius: 10, x: 0, y: 4)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New note")
             }
             .padding(.horizontal, 16)
             // In the clock's row, like Today (Nov 12).
             .padding(.top, 30)
 
-            searchField
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+            // Compose sits beside the search field, below the status bar
+            // (in the title row it ran into the Wi-Fi icon).
+            HStack(spacing: 10) {
+                searchField
+                Button(action: compose) {
+                    Image(systemName: "square.and.pencil")
+                        .scaledFont(size: 20, weight: .semibold)
+                        .foregroundStyle(.white)
+                        .frame(width: 46, height: 46)
+                        .background(Color.accentColor, in: Circle())
+                        .shadow(color: Color.accentColor.opacity(0.5), radius: 8, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New note")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
