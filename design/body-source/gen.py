@@ -229,4 +229,30 @@ for side in ('front','back'):
     result[side]={k:polys(v,150 if k.startswith(JOINTS+('outerHip',)) else 700) for k,v in final.items() if v.any()}
     np.save(f'{sys.argv[1]}/cov_{side}.npy',cov)
 json.dump(result,open(f'{sys.argv[1]}/regions.json','w'))
+
+# EXACT outlines (used by the app since Nov 12): the painted muscle
+# pixels themselves, full resolution, no smoothing or growth, so a tint
+# cut to them stays inside the painted lines.
+def polys_exact(m):
+    cs,_=cv2.findContours(m.astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+    out=[]
+    for c in cs:
+        if cv2.contourArea(c)<40: continue
+        a=cv2.approxPolyDP(c,0.7,True)[:,0,:]
+        out.append([(round(x/S,2),round(y/S,2)) for x,y in a])
+    return out
+exact={}
+for side in ('front','back'):
+    alpha,masks,_=build(side)
+    _,lab=load(side)
+    painted=lab>0
+    NONMUSCLE=('head','elbow','hand','foot','knee','ankle','wrist','lowerBack','midBack')
+    # muscles: painted muscle pixels only (no filled bands or flank slabs)
+    clipped={k:(v if k.startswith(NONMUSCLE) else v&painted) for k,v in masks.items()}
+    # neck: only its painted neck muscles (the band fill reaches under the chin)
+    clipped['neck']=np.isin(lab,(FRONT if side=='front' else BACK)['neck'])
+    exact[side]={k:polys_exact(v) for k,v in clipped.items() if v.any()}
+    exact[side]={k:v for k,v in exact[side].items() if v}
+json.dump(exact,open(f'{sys.argv[1]}/regions_exact.json','w'))
+print({s:sum(len(p) for v in exact[s].values() for p in v) for s in exact},'exact points')
 print({s:sum(len(p) for v in result[s].values() for p in v) for s in result},'points')
