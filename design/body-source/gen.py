@@ -175,8 +175,8 @@ def pieces_of(mask):
         out=[cv2.morphologyEx(mask.astype(np.uint8),cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))]
     return out
 
-GROW=0   # px: general growth into gaps (0 = keep the painted gaps; approved 'After' look)
-LINE=5   # px: erode diameter -> the even dark gap between shapes
+GROW=0   # px: keep the painted gaps (approved Nov 12 hybrid look: anatomy shows through the gaps)
+LINE=5   # px: erode diameter -> even gap between shapes
 
 def refine(alpha, masks):
     """Smooth shapes with FINE, EVEN separation lines. After smoothing,

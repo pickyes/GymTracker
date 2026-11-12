@@ -11,7 +11,7 @@ import SwiftUI
 /// muscle pixels along those lines yields each muscle's exact outline.
 /// Joints, hands, feet and head are the figure's own silhouette around
 /// them. See `muscleSpecs` for the details and left/right convention.
-/// The silhouettes (BodySilhouetteFront/Back) are the paintings' alpha.
+/// The base image (BodyAnatomyFront/Back) is a grey copy of the paintings.
 ///
 /// Every area is tappable (injury diagram) and has a VoiceOver label.
 /// The live workout figure lights the current exercise's prime movers
@@ -226,10 +226,10 @@ private struct MuscleSpec {
 /// between neighbouring muscles; segmenting the red muscle pixels along
 /// those lines gives each muscle's exact outline (connected components
 /// at full 1120×2240 resolution), each piece cleaned on its own —
-/// tendon frays and drips removed, pixel steps smoothed, an even dark
-/// gap to its neighbours (the approved separated-shape look; a
-/// fine-hairline variant was tried and rejected) — and drawn as smooth
-/// curves on this 200×400 canvas. Joints, hands, feet and head are the
+/// tendon frays and drips removed, pixel steps smoothed, an even gap
+/// to its neighbours — and drawn as smooth curves on this 200×400
+/// canvas, over a grey copy of the anatomy painting (BodyAnatomyFront/
+/// Back) that shows through the gaps and in the head, hands and feet. Joints, hands, feet and head are the
 /// figure's own silhouette around them; lower back is the lumbar area
 /// between the lats and glutes. Areas never overlap.
 ///
@@ -239,7 +239,7 @@ private struct MuscleSpec {
 /// had them swapped.)
 ///
 /// The figure is now drawn from these shapes on a dark silhouette
-/// (BodySilhouetteFront/Back), segmented-muscle style; the red
+/// (BodyAnatomyFront/Back, grey anatomy), segmented-muscle style; the red
 /// anatomical PNGs are only the source the shapes were cut from.
 /// Generator: design/body-source/gen.py (re-run if the images ever change).
 private let muscleSpecs: [MuscleSpec] = [
@@ -357,7 +357,7 @@ struct BodyFigureView: View {
     var primary: Set<MuscleID>? = nil
     var onTap: ((MuscleID) -> Void)? = nil
 
-    private var silhouetteName: String { side == .front ? "BodySilhouetteFront" : "BodySilhouetteBack" }
+    private var anatomyName: String { side == .front ? "BodyAnatomyFront" : "BodyAnatomyBack" }
 
     /// Segmented style (Nov 12, approved preview): a dark body silhouette,
     /// every muscle its own flat grey shape with the gaps between them
@@ -406,11 +406,12 @@ struct BodyFigureView: View {
                 // in light mode — with no white box anywhere (DaRon,
                 // 21:36: "background of body needs to match").
                 ZStack {
-                    Image(silhouetteName)
+                    // Realistic anatomy in grey underneath (Nov 12 hybrid):
+                    // head, hands, feet, elbows and the gaps between the
+                    // muscle shapes show real anatomical detail.
+                    Image(anatomyName)
                         .resizable()
-                        .renderingMode(.template)
                         .aspectRatio(contentMode: .fit)
-                        .foregroundStyle(Self.silhouette)
                     ForEach(muscleSpecs.filter { $0.side == side }, id: \.id) { spec in
                         muscleOverlay(spec, scale: scale)
                     }
