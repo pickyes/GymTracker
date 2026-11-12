@@ -2223,30 +2223,37 @@ struct ExerciseCard: View {
                 )
             }
 
-            // Set-table actions: ONE vivid "+" button opens the menu —
-            // Add Set, History, Replace, Options. (DaRon 21:07: the
-            // Add Set pill goes away, Add Set moves into the menu, the
-            // "..." becomes a "+", bigger and brighter so it reads as
-            // the card's main action.)
-            HStack {
+            // Set-table actions, one compact row (Nov 12 UI pass): a
+            // direct "+ Add set" (the common action, one tap) and a
+            // "•••" menu for History / Replace / Options. Replaces the
+            // 56pt blue "+" that opened all four — it looked identical
+            // to the header "+" and the set-type "+", and its own row
+            // left a large empty gap in the card.
+            HStack(spacing: 12) {
+                Button { store.addSet(to: template) } label: {
+                    Label("Add set", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isFullyDone ? CompletedTint.completedGlyph : Color.accentColor)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 36)
+                        .background((isFullyDone ? CompletedTint.completedFill : Color.accentColor.opacity(0.15)),
+                                    in: Capsule())
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 Menu {
-                    Button { store.addSet(to: template) } label: {
-                        Label("Add Set", systemImage: "plus")
-                    }
                     Button("History") { showHistory = true }
                     Button("Replace") { showSwap = true }
                     Button(showOptions ? "Hide options" : "Options") { showOptions.toggle() }
                 } label: {
-                    Image(systemName: "plus")
-                        .scaledFont(size: 26, weight: .bold)
-                        .foregroundStyle(isFullyDone ? CompletedTint.completedGlyph : .white)
-                        .frame(width: 56, height: 56)
-                        .background(isFullyDone ? CompletedTint.completedFill : Color.accentColor, in: Circle())
-                        .shadow(color: Color.accentColor.opacity(isFullyDone ? 0.1 : 0.5), radius: 10, x: 0, y: 4)
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(width: 44, height: 36)
+                        .background(Theme.border.opacity(0.35), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Exercise actions")
+                .accessibilityLabel("More exercise actions")
             }
 
             if showOptions {
@@ -2542,13 +2549,23 @@ struct SetRow: View {
                     Button(kind.label) { set.kind = kind }
                 }
             } label: {
-                Text(set.kind == .working ? "+" : set.kind.shortLabel)
-                    .scaledFont(size: 16, weight: .bold)
-                    // Done: the vivid accent disc mutes to a faint
-                    // accent wash with a faint accent glyph. (DaRon 22:32.)
-                    .foregroundStyle(set.done ? CompletedTint.completedGlyph : .white)
-                    .frame(width: 32, height: 32)
-                    .background(set.done ? CompletedTint.completedFill : Color.accentColor, in: Circle())
+                // Neutral chip (Nov 12 UI pass): a blue "+" here read as
+                // "add set". Working sets show a small chevron (it's a
+                // picker); warm-up / drop / failure show their letter in
+                // the accent so special sets stand out.
+                Group {
+                    if set.kind == .working {
+                        Image(systemName: "chevron.down")
+                            .scaledFont(size: 11, weight: .bold)
+                    } else {
+                        Text(set.kind.shortLabel)
+                            .scaledFont(size: 14, weight: .bold)
+                    }
+                }
+                .foregroundStyle(set.done ? CompletedTint.completedGlyph
+                                 : set.kind == .working ? Theme.secondaryText : Color.accentColor)
+                .frame(width: 32, height: 32)
+                .background(Theme.border.opacity(set.done ? 0.2 : 0.45), in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Set type: \(set.kind.label)")
@@ -2598,10 +2615,13 @@ struct SetRow: View {
             // vertical center line with the checkbox, "Set N", "+", and
             // the weight/reps boxes. The words survive as the
             // VoiceOver label.
+            // Grey, not red (Nov 12 UI pass): a red can on every row read
+            // as alarming and drew the eye from the numbers. Still one
+            // tap, same place.
             Button { onDelete() } label: {
                 Image(systemName: "trash")
-                    .scaledFont(size: 17, weight: .semibold)
-                    .foregroundStyle(.red)
+                    .scaledFont(size: 15, weight: .regular)
+                    .foregroundStyle(Theme.tertiaryText)
                     .frame(width: setRowControlHeight, height: setRowControlHeight)
                     .contentShape(Rectangle())
             }

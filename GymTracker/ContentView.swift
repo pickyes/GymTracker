@@ -371,7 +371,18 @@ struct ContentView: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                .background(navExpanded || showCalendar ? effectiveAccent : Color.black)
+                // Frosted when closed (Nov 12 UI pass): it sits in the
+                // corner over list rows now, and a flat black disc with a
+                // thin outline either vanished on black or clashed with
+                // the cards under it. Accent when open, as before.
+                .background {
+                    if navExpanded || showCalendar {
+                        effectiveAccent
+                    } else {
+                        Circle().fill(.ultraThinMaterial)
+                            .overlay(Circle().fill(Color.black.opacity(0.35)))
+                    }
+                }
                 .clipShape(Circle())
                 .overlay(Circle().stroke(navExpanded || showCalendar ? effectiveAccent : Theme.border, lineWidth: 1.5))
                 .shadow(color: navExpanded || showCalendar ? effectiveAccent.opacity(0.55) : .black.opacity(0.3), radius: navExpanded || showCalendar ? 14 : 6)
