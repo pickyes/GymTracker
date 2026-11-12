@@ -95,7 +95,9 @@ enum MuscleID: String, CaseIterable, Hashable {
     /// joints, hands, head, and areas whose group would light them for
     /// exercises that don't work them (lower back on a pulldown, hip
     /// flexors on a crunch, serratus on a curl). They stay named and
-    /// tappable for the injury diagram.
+    /// tappable for the injury diagram. Joints (knees, ankles, wrists,
+    /// elbows) are never lit by workouts or recovery — they light only
+    /// when marked on the injury diagram (Nov 12).
     var muscleGroup: MuscleGroup? {
         switch self {
         case .head: return nil
@@ -118,8 +120,8 @@ enum MuscleID: String, CaseIterable, Hashable {
         case .elbowRight: return nil
         case .forearmLeft: return .forearms
         case .forearmRight: return .forearms
-        case .wristLeft: return .wrists
-        case .wristRight: return .wrists
+        case .wristLeft: return nil
+        case .wristRight: return nil
         case .handLeft: return nil
         case .handRight: return nil
         case .abs: return .core
@@ -149,8 +151,8 @@ enum MuscleID: String, CaseIterable, Hashable {
         case .shinRight: return .ankles
         case .calfLeft: return .calves
         case .calfRight: return .calves
-        case .ankleLeft: return .ankles
-        case .ankleRight: return .ankles
+        case .ankleLeft: return nil
+        case .ankleRight: return nil
         case .footLeft: return .feet
         case .footRight: return .feet
         }
