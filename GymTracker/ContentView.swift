@@ -98,8 +98,12 @@ struct ContentView: View {
                         // Smaller strip on Today and Profile (DaRon): a hard
                         // blur, then black and white on top of it.
                         let stripHeight: CGFloat = selectedPage == .today || selectedPage == .profile ? 10 : 30
-                        StatusBarBlur(height: stripHeight)
+                        // Black and white first, straight onto the page (a
+                        // blend can't see through the blur — under it, it
+                        // drew a flat grey band); the blur on top then
+                        // blurs the greyed content.
                         StatusBarFade(height: stripHeight)
+                        StatusBarBlur(height: stripHeight)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)

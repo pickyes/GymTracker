@@ -890,6 +890,15 @@ struct UntintedBlur: UIViewRepresentable {
                 overlay.backgroundColor = .clear
                 overlay.alpha = 0
             }
+            // The backdrop also dims/saturates what it blurs (white came
+            // out 247 grey — a visible band). Keep only its blur filter.
+            if let backdrop = view.subviews.first,
+               let filters = backdrop.layer.filters {
+                let blurOnly = filters.filter { String(describing: $0).lowercased().contains("blur") }
+                if !blurOnly.isEmpty, blurOnly.count != filters.count {
+                    backdrop.layer.filters = blurOnly
+                }
+            }
         }
     }
 }
