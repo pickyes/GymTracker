@@ -22,9 +22,8 @@ enum Program {
     /// His personal program — kept for his device only, never offered to
     /// other users. It does NOT activate on its own: a fresh install
     /// opens to onboarding (quiz or catalog), and the preset only becomes
-    /// active when explicitly claimed on his device — the Welcome card or
-    /// the `gymtracker://preset/daron` deep link (see
-    /// `WorkoutStore.restoreDaronPreset`).
+    /// active when explicitly claimed on a device that is already unlocked
+    /// for it (see `WorkoutStore.restoreDaronPreset`).
     static let daronPreset: UserProgram = {
         let orderedKeys = ["Mon", "Tue", "Wed", "Thu", "Fri"]
         let days = orderedKeys.compactMap { plans[$0] }

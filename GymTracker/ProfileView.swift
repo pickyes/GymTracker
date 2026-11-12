@@ -3,6 +3,7 @@ import UIKit
 import StoreKit
 
 struct ProfileView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @EnvironmentObject var mcpServer: MCPServer
@@ -356,7 +357,7 @@ struct ProfileView: View {
                 // rest-timer panel above it while a rest runs. The old
                 // 40pt spacer was short of the 96pt menu-button value.
                 Color.clear
-                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
@@ -512,6 +513,7 @@ struct ProfileView: View {
 /// taps Save or leaves the screen. A no-op save is skipped so the program
 /// is never regenerated when nothing changed.
 struct InjuryEditorView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @State private var parts: Set<BodyPart> = []
     @State private var otherText: String = ""
@@ -552,7 +554,7 @@ struct InjuryEditorView: View {
             // 16pt padding left the bottom content under the button.
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive))
+            .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
             // Keyboard Done + tap-outside: same as Profile above — the
             // "Something else?" field had no way out either. Done
             // dismisses; the text saves via Save or on leave.

@@ -178,8 +178,29 @@ enum LayoutClearance {
     /// The clearance in effect right now: the timer value while a rest
     /// is running or paused (the panel is on screen), else the
     /// menu-button value.
-    static func bottom(restActive: Bool) -> CGFloat {
-        restActive ? withRestTimer : fab
+    ///
+    /// `fabOffset` is how far the menu button's bottom edge sits above
+    /// the safe-area bottom (ContentView measures it and publishes it as
+    /// `\.fabBottomOffset`). The approved placement puts the button at
+    /// 26% of the screen height, far above the old 24pt rule the fixed
+    /// constants assume, so on tall screens (iPad, Duo landscape) content
+    /// couldn't scroll clear of it and Finish & Save stayed hidden.
+    static func bottom(restActive: Bool, fabOffset: CGFloat = 24) -> CGFloat {
+        let extra = max(0, fabOffset - 24)
+        return (restActive ? withRestTimer : fab) + extra
+    }
+}
+
+/// How far the floating menu button's bottom edge sits above the
+/// safe-area bottom, published by ContentView for scroll clearance.
+private struct FabBottomOffsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 24
+}
+
+extension EnvironmentValues {
+    var fabBottomOffset: CGFloat {
+        get { self[FabBottomOffsetKey.self] }
+        set { self[FabBottomOffsetKey.self] = newValue }
     }
 }
 

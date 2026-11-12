@@ -18,6 +18,7 @@ import SwiftUI
 /// Actions (DaRon 22:42): pin a note to the top, edit it, delete it
 /// (asks first), and file it in a category.
 struct NotesView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @State private var searchText = ""
     @State private var editorTarget: EditorTarget?
@@ -181,7 +182,7 @@ struct NotesView: View {
                     // (and the rest-timer panel while a rest runs) at
                     // scroll-bottom.
                     Color.clear
-                        .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                        .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }

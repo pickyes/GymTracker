@@ -1523,8 +1523,8 @@ final class WorkoutStore: ObservableObject {
     /// Unlock for DaRon's personal 5-day split. False for every other
     /// user: the preset is never seeded, listed, or offered unless this
     /// flag is set, which only happens when it is explicitly claimed on
-    /// his device (Welcome card or the `gymtracker://preset/daron` deep
-    /// link) or when a pre-onboarding install is adopted. Persisted in
+    /// his device (a stored unlock from an earlier claim) or when a
+    /// pre-onboarding install is adopted. Persisted in
     /// UserDefaults so a retake still offers the restore.
     @Published var isDaronPresetUnlocked: Bool = false
     /// The program that was active when setup was retaken, so finishing
@@ -2734,7 +2734,8 @@ final class WorkoutStore: ObservableObject {
     /// card lands straight on Today instead of dropping the user back
     /// into the quiz (which would then overwrite the preset). Never
     /// called for other users — the only callers are the gated Welcome
-    /// card and the `gymtracker://preset/daron` deep link.
+    /// card and the Profile/Settings restore buttons (all shown only once
+    /// the device is already unlocked).
     func restoreDaronPreset() {
         SharedDefaults.store.set(true, forKey: Self.daronPresetUnlockKey)
         isDaronPresetUnlocked = true

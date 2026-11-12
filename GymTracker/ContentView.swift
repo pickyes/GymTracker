@@ -60,6 +60,9 @@ struct ContentView: View {
                 GeometryReader { proxy in
                     ZStack(alignment: .bottomTrailing) {
                         pageStack
+                            .environment(\.fabBottomOffset,
+                                         fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom,
+                                                          screenHeight: proxy.size.height))
                             // Menu backdrop (DaRon 22:36: "blur background
                             // and make black and white when clicked") —
                             // while the menu is open the page behind goes

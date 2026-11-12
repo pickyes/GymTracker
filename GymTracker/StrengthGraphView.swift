@@ -20,6 +20,7 @@ struct GraphPoint: Identifiable, Equatable {
 }
 
 struct StrengthGraphView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @State private var range: TimeRange = .threeMonths
     @State private var selection: LiftSelection = .overall
@@ -116,7 +117,7 @@ struct StrengthGraphView: View {
                 // padding left the last lines under the button.
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
-                .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive))
+                .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
             }
         }
         .navigationTitle("Strength")

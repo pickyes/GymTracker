@@ -4,6 +4,7 @@ import UserNotifications
 // MARK: - Settings (P1/P2 customization, on-device only)
 
 struct SettingsView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @EnvironmentObject var calendarSync: CalendarSyncManager
@@ -165,7 +166,7 @@ struct SettingsView: View {
             // at scroll-bottom.
             Section {
                 Color.clear
-                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
@@ -411,6 +412,7 @@ enum AppIconChoice: String, CaseIterable {
 // MARK: - Gym Profiles (Fitbod pattern: one profile per location)
 
 struct GymProfilesView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @State private var showEditor = false
@@ -484,7 +486,7 @@ struct GymProfilesView: View {
             // Debug Pass 2): no bottom spacer, so the last row sat
             // under the floating menu button at scroll-bottom.
             Color.clear
-                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }
@@ -594,6 +596,7 @@ struct GymProfileEditorView: View {
 // MARK: - Custom exercises
 
 struct CustomExercisesView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @State private var showEditor = false
@@ -646,7 +649,7 @@ struct CustomExercisesView: View {
             // Debug Pass 2): no bottom spacer, so the last row sat
             // under the floating menu button at scroll-bottom.
             Color.clear
-                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }
@@ -753,6 +756,7 @@ struct CustomExerciseEditorView: View {
 // MARK: - Programs (multiple programs, Pro for extras)
 
 struct ProgramsView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @State private var showPaywall = false
@@ -908,7 +912,7 @@ struct ProgramsView: View {
             // Debug Pass 2): no bottom spacer, so the last row sat
             // under the floating menu button at scroll-bottom.
             Color.clear
-                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }
@@ -1410,6 +1414,7 @@ extension View {
 /// pick it as your program. DaRon's preset is NOT in this catalog — his
 /// personal split is never offered to other users.
 struct ProgramLibraryView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @State private var goalFilter: CatalogGoal? = nil
     @State private var levelFilter: CatalogLevel? = nil
@@ -1550,7 +1555,7 @@ struct ProgramLibraryView: View {
             // Debug Pass 2): no bottom spacer, so the last program row
             // sat under the floating menu button at scroll-bottom.
             Color.clear
-                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }
@@ -1656,6 +1661,7 @@ struct ProgramLibraryView: View {
 /// Picking it adds it to your programs (free: one extra program; Pro:
 /// unlimited) and makes it the active program, so Today shows it.
 struct CatalogProgramDetailView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     let catalog: CatalogProgram
@@ -1761,7 +1767,7 @@ struct CatalogProgramDetailView: View {
             // DaRon's photo of Today.
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive))
+            .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
         }
         .navigationTitle("Program")
         .navigationBarTitleDisplayMode(.inline)

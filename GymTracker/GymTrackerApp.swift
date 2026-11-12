@@ -124,7 +124,7 @@ struct GymTrackerApp: App {
     }
 
     /// Deep links: gymtracker://today, gymtracker://workout?day=legs,
-    /// gymtracker://preset/daron (restore DaRon's 5-day split).
+    /// (The old preset/daron unlock link was removed — see below.)
     /// Opens the app to the requested screen. Structured results go back
     /// through the MCP server, not the URL scheme.
     private func handleDeepLink(_ url: URL) {
@@ -139,10 +139,10 @@ struct GymTrackerApp: App {
             SharedDefaults.store.set(code, forKey: InviteCode.deepLinkCodeKey)
             return
         }
-        if url.host == "preset", url.pathComponents.contains("daron") {
-            store.restoreDaronPreset()
-            return
-        }
+        // The old `gymtracker://preset/daron` unlock is gone: any web page
+        // or message could open it and silently replace the active program
+        // (a hidden unlock is an App Review 2.3.1 risk). Devices that
+        // already claimed the preset keep it — the unlock flag is stored.
         // Today is the default landing screen (the TabView opens on Today).
         // A specific day is not directly navigable in v1 — the app opens to
         // Today, which shows that day's plan when it matches.

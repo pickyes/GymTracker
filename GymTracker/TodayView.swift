@@ -3,6 +3,7 @@ import AudioToolbox
 import UIKit
 
 struct TodayView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var saved = false
@@ -297,7 +298,7 @@ struct TodayView: View {
     /// clear of the keyboard — always the largest of the three when up.
     /// One definition: compact, regular, propped, rest-day, and the
     /// tent right pane all read this, so they can never drift apart.
-    private var fabClearance: CGFloat { LayoutClearance.bottom(restActive: store.isRestActive) }
+    private var fabClearance: CGFloat { LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset) }
     private var contentBottomPadding: CGFloat {
         max(keyboardHeight, fabClearance)
     }

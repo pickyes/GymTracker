@@ -828,6 +828,7 @@ private struct LiveBodyFigureHeight: ViewModifier {
 /// a rotate button to flip front/back, and tapping a muscle shows which
 /// one it is (and lights it up).
 struct BodyView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var side: BodyDiagramSide = .front
@@ -884,7 +885,7 @@ struct BodyView: View {
             // padding left it under the button at scroll-bottom.
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive))
+            .padding(.bottom, LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
         }
         .navigationTitle("Body")
         .navigationBarTitleDisplayMode(.inline)

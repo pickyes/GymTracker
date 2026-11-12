@@ -12,6 +12,7 @@ import SwiftUI
 ///   grid: the logged workout (exercises, sets, weights) or the planned
 ///   workout (exercises, sets × reps, finisher).
 struct CalendarView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.dismiss) private var dismiss
 
@@ -151,7 +152,7 @@ struct CalendarView: View {
                 // doesn't grow 96pt taller.
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
-                .padding(.bottom, embeddedInNavigation ? LayoutClearance.bottom(restActive: store.isRestActive) : 16)
+                .padding(.bottom, embeddedInNavigation ? LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset) : 16)
                 // D35 (2026-11-10): after a day is tapped, bring its
                 // detail into view — the grid is 42 cells tall and the
                 // detail sits below it, out of reach otherwise.

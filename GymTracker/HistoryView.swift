@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HistoryView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @State private var selectedSessionID: UUID?
     @State private var exportRequest: ExportRequest?
@@ -120,7 +121,7 @@ struct HistoryView: View {
                 // edge depending on the safe area), so the last row
                 // could sit under the button at scroll-bottom.
                 Color.clear
-                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
@@ -563,6 +564,7 @@ struct WeeklyRing: View {
 }
 
 struct SessionDetailView: View {
+    @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     let session: SessionLog
     @State private var exportRequest: ExportRequest?
@@ -606,7 +608,7 @@ struct SessionDetailView: View {
             // the last set row's trailing weight + checkmark under the
             // button at scroll-bottom.
             Color.clear
-                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive))
+                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }
