@@ -1,115 +1,156 @@
 import SwiftUI
 
-/// The body figure, shown as a REAL anatomical muscle image — front and
-/// back — with overlays that tint or glow the muscle regions. The body
-/// is never drawn in code. The images are the matched pair in the asset
-/// catalog (`BodyFront` / `BodyBack`, 1120×2240, red anatomical muscle
-/// figure on a TRANSPARENT background — the white baked into the
-/// generated PNGs was converted to alpha by body-images/
-/// make_transparent.py, and the converted RGBA files are what the
-/// catalog holds. MUST STAY RGBA: putting the RGB white-background
-/// originals back in the catalog re-opens DaRon's 2026-11-10 defect
-/// ("background of the body needs to match") — a white box exactly the
-/// figure's frame on the true-black theme (seen in rerun-shot 212).
-/// No card sits behind the figure anywhere: the transparent image lets
-/// the app's own background show through — true black #000000 in dark
-/// mode (Theme.background), system background in light mode — on every
-/// surface that shows the body (Today open-pose pane, Body screen,
-/// rest-day recovery view, injury diagram). Every muscle is a tappable
-/// overlay region: in the injury diagram it marks a body part; on the
-/// workout screen it lights up live for the current exercise's muscles; on the Body screen it is
-/// coloured by recovery state from logged history (fresh muscles bright
-/// pink, recently trained muscles purple, the rest the image's own red).
+/// The body figure (Nov 12, 2026 redesign): a dark body silhouette with
+/// every muscle drawn as its own flat shape — segmented style — and
+/// colour only where it means something (lit for the current exercise,
+/// pink/purple for recovery, marked for injuries).
 ///
-/// The overlay geometry is on a 200×400 canvas. The images are 1:2
-/// (1120×2240), the same aspect as the canvas, so the overlay
-/// coordinates map 1:1 onto the image. The polygons were re-derived
-/// off the real images on 2026-11-10 (interior-red segmentation of the
-/// 1120×2240 images, row-wise envelope trace, Douglas–Peucker
-/// simplification, then hand-checked seam lines where two muscles meet
-/// with no drawn boundary — deltopectoral groove, posterior-delt /
-/// triceps border, gluteal fold). The 2026-11-09 polygons were wrong:
-/// they painted white background and fascia and were replaced, not
-/// nudged. Measured on the new set: 0% of any polygon's area falls on
-/// pure-white background (old set: up to 14%), and pairwise overlap
-/// between neighbouring polygons on the same side is ≤0.6% (shared
-/// borders only). Each muscle is a polygon tracing its true outline, so
-/// a lit muscle is FILLED solid with the highlight colour, edge to
-/// edge. A tapped / marked muscle LIGHTS UP: bright orange-red fill, a
-/// white edge, a tight glow, and a quick spring pop. Lit muscles always
-/// match the exercise: the live body lights exactly the muscles the
-/// current exercise trains (see LibraryExercise.trainedMuscles, the
-/// single source of truth shared with exercise detail, program,
-/// recovery, and stretches), and shows the primary muscle's side first
-/// (see LiveBodyView.bestSide).
+/// The shapes are NOT hand-traced. They were cut from the anatomical
+/// paintings (BodyFront / BodyBack, 1120×2240): the paintings draw a
+/// white line between neighbouring muscles, so segmenting the red
+/// muscle pixels along those lines yields each muscle's exact outline.
+/// Joints, hands, feet and head are the figure's own silhouette around
+/// them. See `muscleSpecs` for the details and left/right convention.
+/// The silhouettes (BodySilhouetteFront/Back) are the paintings' alpha.
+///
+/// Every area is tappable (injury diagram) and has a VoiceOver label.
+/// The live workout figure lights the current exercise's prime movers
+/// solid and its synergists as a light wash (see LiveBodyView), in the
+/// app's accent colour.
 
 enum MuscleID: String, CaseIterable, Hashable {
-    case head, neck
-    case trapLeft, trapRight
-    case deltLeft, deltRight
-    case pecLeft, pecRight
-    case bicepsLeft, bicepsRight
-    case tricepsLeft, tricepsRight
-    case forearmLeft, forearmRight
-    case wristLeft, wristRight
-    case abs, obliqueLeft, obliqueRight
-    case latLeft, latRight, lowerBack
-    case gluteLeft, gluteRight
-    case hipLeft, hipRight
-    case quadLeft, quadRight
-    case hamstringLeft, hamstringRight
-    case kneeLeft, kneeRight
-    case calfLeft, calfRight
-    case ankleLeft, ankleRight
-    case footLeft, footRight
+    case head, neck, trapLeft, trapRight, deltLeft, deltRight
+    case rotatorCuffLeft, rotatorCuffRight, pecLeft, pecRight, serratusLeft, serratusRight
+    case bicepsLeft, bicepsRight, tricepsLeft, tricepsRight, elbowLeft, elbowRight
+    case forearmLeft, forearmRight, wristLeft, wristRight, handLeft, handRight
+    case abs, obliqueLeft, obliqueRight, latLeft, latRight, lowerBack
+    case gluteLeft, gluteRight, outerHipLeft, outerHipRight, hipFlexorLeft, hipFlexorRight
+    case adductorLeft, adductorRight, hipLeft, hipRight, quadLeft, quadRight
+    case hamstringLeft, hamstringRight, kneeLeft, kneeRight, shinLeft, shinRight
+    case calfLeft, calfRight, ankleLeft, ankleRight, footLeft, footRight
 
-    /// Which body part this muscle marks in the injury diagram.
+    /// Which body part this area marks in the injury diagram.
     var bodyPart: BodyPart? {
         switch self {
-        case .head, .neck: return .neck
-        case .trapLeft, .trapRight, .latLeft, .latRight: return .upperBack
+        case .head: return .neck
+        case .neck: return .neck
+        case .trapLeft: return .upperBack
+        case .trapRight: return .upperBack
         case .deltLeft: return .shoulderLeft
         case .deltRight: return .shoulderRight
-        case .pecLeft, .pecRight: return .chest
-        case .bicepsLeft, .tricepsLeft: return .elbowLeft
-        case .bicepsRight, .tricepsRight: return .elbowRight
+        case .rotatorCuffLeft: return .upperBack
+        case .rotatorCuffRight: return .upperBack
+        case .pecLeft: return .chest
+        case .pecRight: return .chest
+        case .serratusLeft: return .core
+        case .serratusRight: return .core
+        case .bicepsLeft: return .elbowLeft
+        case .bicepsRight: return .elbowRight
+        case .tricepsLeft: return .elbowLeft
+        case .tricepsRight: return .elbowRight
+        case .elbowLeft: return .elbowLeft
+        case .elbowRight: return .elbowRight
         case .forearmLeft: return .wristLeft
         case .forearmRight: return .wristRight
         case .wristLeft: return .wristLeft
         case .wristRight: return .wristRight
-        case .abs, .obliqueLeft, .obliqueRight: return .core
+        case .handLeft: return .wristLeft
+        case .handRight: return .wristRight
+        case .abs: return .core
+        case .obliqueLeft: return .core
+        case .obliqueRight: return .core
+        case .latLeft: return .upperBack
+        case .latRight: return .upperBack
         case .lowerBack: return .lowerBack
-        case .gluteLeft, .hipLeft: return .hipLeft
-        case .gluteRight, .hipRight: return .hipRight
-        case .quadLeft, .hamstringLeft, .kneeLeft: return .kneeLeft
-        case .quadRight, .hamstringRight, .kneeRight: return .kneeRight
-        case .calfLeft, .ankleLeft, .footLeft: return .ankleLeft
-        case .calfRight, .ankleRight, .footRight: return .ankleRight
+        case .gluteLeft: return .hipLeft
+        case .gluteRight: return .hipRight
+        case .outerHipLeft: return .hipLeft
+        case .outerHipRight: return .hipRight
+        case .hipFlexorLeft: return .hipLeft
+        case .hipFlexorRight: return .hipRight
+        case .adductorLeft: return .hipLeft
+        case .adductorRight: return .hipRight
+        case .hipLeft: return .hipLeft
+        case .hipRight: return .hipRight
+        case .quadLeft: return .kneeLeft
+        case .quadRight: return .kneeRight
+        case .hamstringLeft: return .kneeLeft
+        case .hamstringRight: return .kneeRight
+        case .kneeLeft: return .kneeLeft
+        case .kneeRight: return .kneeRight
+        case .shinLeft: return .ankleLeft
+        case .shinRight: return .ankleRight
+        case .calfLeft: return .ankleLeft
+        case .calfRight: return .ankleRight
+        case .ankleLeft: return .ankleLeft
+        case .ankleRight: return .ankleRight
+        case .footLeft: return .ankleLeft
+        case .footRight: return .ankleRight
         }
     }
 
-    /// Which muscle group this shape belongs to (live workout diagram and
-    /// the recovery-coloured Body screen).
+    /// Which muscle group lights this area (live workout figure and the
+    /// recovery-coloured Body screen). Nil = never lit by an exercise:
+    /// joints, hands, head, and areas whose group would light them for
+    /// exercises that don't work them (lower back on a pulldown, hip
+    /// flexors on a crunch, serratus on a curl). They stay named and
+    /// tappable for the injury diagram.
     var muscleGroup: MuscleGroup? {
         switch self {
-        case .pecLeft, .pecRight: return .chest
-        case .latLeft, .latRight, .trapLeft, .trapRight, .lowerBack: return .back
-        case .deltLeft, .deltRight: return .shoulders
-        case .bicepsLeft, .bicepsRight: return .biceps
-        case .tricepsLeft, .tricepsRight: return .triceps
-        case .forearmLeft, .forearmRight: return .forearms
-        case .wristLeft, .wristRight: return .wrists
-        case .quadLeft, .quadRight: return .quads
-        case .hamstringLeft, .hamstringRight: return .hamstrings
-        case .gluteLeft, .gluteRight, .hipLeft, .hipRight: return .glutes
-        case .calfLeft, .calfRight: return .calves
-        case .abs: return .core
-        case .obliqueLeft, .obliqueRight: return .obliques
+        case .head: return nil
         case .neck: return .neck
-        case .ankleLeft, .ankleRight: return .ankles
-        case .footLeft, .footRight: return .feet
-        case .head, .kneeLeft, .kneeRight:
-            return nil
+        case .trapLeft: return .back
+        case .trapRight: return .back
+        case .deltLeft: return .shoulders
+        case .deltRight: return .shoulders
+        case .rotatorCuffLeft: return .back
+        case .rotatorCuffRight: return .back
+        case .pecLeft: return .chest
+        case .pecRight: return .chest
+        case .serratusLeft: return nil
+        case .serratusRight: return nil
+        case .bicepsLeft: return .biceps
+        case .bicepsRight: return .biceps
+        case .tricepsLeft: return .triceps
+        case .tricepsRight: return .triceps
+        case .elbowLeft: return nil
+        case .elbowRight: return nil
+        case .forearmLeft: return .forearms
+        case .forearmRight: return .forearms
+        case .wristLeft: return .wrists
+        case .wristRight: return .wrists
+        case .handLeft: return nil
+        case .handRight: return nil
+        case .abs: return .core
+        case .obliqueLeft: return .obliques
+        case .obliqueRight: return .obliques
+        case .latLeft: return .back
+        case .latRight: return .back
+        case .lowerBack: return nil
+        case .gluteLeft: return .glutes
+        case .gluteRight: return .glutes
+        case .outerHipLeft: return .glutes
+        case .outerHipRight: return .glutes
+        case .hipFlexorLeft: return nil
+        case .hipFlexorRight: return nil
+        case .adductorLeft: return .glutes
+        case .adductorRight: return .glutes
+        case .hipLeft: return .glutes
+        case .hipRight: return .glutes
+        case .quadLeft: return .quads
+        case .quadRight: return .quads
+        case .hamstringLeft: return .hamstrings
+        case .hamstringRight: return .hamstrings
+        case .kneeLeft: return nil
+        case .kneeRight: return nil
+        case .shinLeft: return .ankles
+        case .shinRight: return .ankles
+        case .calfLeft: return .calves
+        case .calfRight: return .calves
+        case .ankleLeft: return .ankles
+        case .ankleRight: return .ankles
+        case .footLeft: return .feet
+        case .footRight: return .feet
         }
     }
 }
@@ -147,157 +188,136 @@ enum BodyDiagramSide: String, CaseIterable {
     var label: String { rawValue.capitalized }
 }
 
-/// One muscle's overlay region on the 200×400 canvas.
-/// Ellipse center, radii, rotation in degrees.
-/// Polygon instead of an ellipse: a list of canvas points tracing the
-/// muscle's true outline in the image, so the highlight FILLS the whole
-/// muscle edge to edge instead of sitting as a small oval inside it.
+/// One body area on the 200×400 canvas: one or more exact outlines.
 private struct MuscleSpec {
     let id: MuscleID
     let side: BodyDiagramSide
-    let cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, rot: CGFloat
-    let rect: CGRect?
-    let polygon: [CGPoint]?
-
-    init(_ id: MuscleID, _ side: BodyDiagramSide, cx: CGFloat, cy: CGFloat, rx: CGFloat, ry: CGFloat, rot: CGFloat = 0) {
-        self.id = id; self.side = side
-        self.cx = cx; self.cy = cy; self.rx = rx; self.ry = ry; self.rot = rot
-        self.rect = nil
-        self.polygon = nil
+    let polygons: [[CGPoint]]
+    /// Joints, hands, feet and head: drawn in the silhouette colour at
+    /// rest (no muscle shape), still tappable and lit when marked.
+    var isJoint: Bool {
+        switch id {
+        case .head, .elbowLeft, .elbowRight, .wristLeft, .wristRight, .handLeft, .handRight,
+             .kneeLeft, .kneeRight, .ankleLeft, .ankleRight, .footLeft, .footRight, .lowerBack:
+            return true
+        default: return false
+        }
     }
 
-    init(_ id: MuscleID, _ side: BodyDiagramSide, rect: CGRect) {
+    /// `data` is "x,y x,y …" per outline, outlines separated by ";".
+    init(_ id: MuscleID, _ side: BodyDiagramSide, _ data: String) {
         self.id = id; self.side = side
-        self.cx = rect.midX; self.cy = rect.midY; self.rx = rect.width / 2; self.ry = rect.height / 2; self.rot = 0
-        self.rect = rect
-        self.polygon = nil
-    }
-
-    init(_ id: MuscleID, _ side: BodyDiagramSide, polygon: [CGPoint]) {
-        self.id = id; self.side = side
-        self.cx = 0; self.cy = 0; self.rx = 0; self.ry = 0; self.rot = 0
-        self.rect = nil
-        self.polygon = polygon
+        self.polygons = data.split(separator: ";").map { outline in
+            outline.split(separator: " ").compactMap { pair in
+                let xy = pair.split(separator: ",")
+                guard xy.count == 2, let x = Double(xy[0]), let y = Double(xy[1]) else { return nil }
+                return CGPoint(x: x, y: y)
+            }
+        }
     }
 }
 
-/// Every muscle's overlay region, front and back, re-derived off the
-/// real images on 2026-11-10 (see the file header for the method and
-/// the measured results: 0% white-background spill, ≤0.6% pairwise
-/// overlap). Each muscle is a POLYGON tracing that muscle's true
-/// outline in the image, EDGE TO EDGE — so a lit muscle is FILLED
-/// solid with the highlight colour, following the muscle's exact shape
-/// (DaRon, 2026-11-09: "it needs to highlight and fill the muscle" and
-/// "highlighted parts needs to go edge to egde"). Neighbouring fills
-/// meet at their shared border — the white outlines drawn in the image
-/// itself keep two lit muscles visibly separate, never one merged blob.
-/// Right side = mirror of left (x -> 200 - x).
-/// Small parts (head, neck, hips, knees, wrists, ankles, feet) stay
-/// ellipses; abs is an oval polygon following the white lines.
-/// Coordinates are on a 200×400 canvas, center x = 100 — the same
-/// aspect as the images, so the regions land on the muscles in the
-/// pictures.
-/// There is NO lower-back polygon: the lumbar diamond in the back
-/// image is fascia, not muscle — no red muscle exists there — so the
-/// old hexagon (which painted fascia orange) was deleted. The lats
-/// flank the spine down to the diamond and the glutes start at the
-/// fold below it, so back exercises still cover the area.
-/// `MuscleID.lowerBack` keeps its body-part mapping so a tap target
-/// can be added later if wanted.
-private func mirrorPts(_ pts: [CGPoint]) -> [CGPoint] { pts.map { CGPoint(x: 200 - $0.x, y: $0.y) } }
-
-// Traced polygons, left side only (right side = mirrorPts).
-private let trapFrontL: [CGPoint] = [CGPoint(x: 85.7, y: 50.7), CGPoint(x: 86.2, y: 61.4), CGPoint(x: 85, y: 63.6), CGPoint(x: 75, y: 69.3), CGPoint(x: 64.3, y: 73.6), CGPoint(x: 73.2, y: 76.4), CGPoint(x: 90.7, y: 76.4), CGPoint(x: 89.5, y: 68.6), CGPoint(x: 92.7, y: 65.7), CGPoint(x: 92.7, y: 64.3), CGPoint(x: 86.6, y: 50.7)]
-private let deltL: [CGPoint] = [CGPoint(x: 60.9, y: 75.4), CGPoint(x: 55.5, y: 76.1), CGPoint(x: 50, y: 79.6), CGPoint(x: 44.3, y: 90.4), CGPoint(x: 43.4, y: 94.6), CGPoint(x: 47, y: 95.4), CGPoint(x: 48.4, y: 96.8), CGPoint(x: 50, y: 106.8), CGPoint(x: 50.9, y: 106.8), CGPoint(x: 56.1, y: 98.2), CGPoint(x: 59.9, y: 94.6), CGPoint(x: 59.3, y: 93.2), CGPoint(x: 59.6, y: 91.8), CGPoint(x: 71.8, y: 79.6), CGPoint(x: 71.8, y: 77.5), CGPoint(x: 67.1, y: 75.4)]
-private let deltBackL: [CGPoint] = [CGPoint(x: 54.1, y: 75.2), CGPoint(x: 50.2, y: 78), CGPoint(x: 45.5, y: 85.9), CGPoint(x: 43.2, y: 94.5), CGPoint(x: 43.4, y: 101.6), CGPoint(x: 44.5, y: 105.9), CGPoint(x: 60.2, y: 101.8), CGPoint(x: 61.1, y: 101.6), CGPoint(x: 66.6, y: 99.9), CGPoint(x: 61.3, y: 95.2), CGPoint(x: 61.3, y: 93.8), CGPoint(x: 65.4, y: 90.9), CGPoint(x: 64.1, y: 87.3), CGPoint(x: 65.5, y: 83), CGPoint(x: 64.3, y: 81.6), CGPoint(x: 54.8, y: 78.8), CGPoint(x: 54.1, y: 75.2)]
-private let pecL: [CGPoint] = [CGPoint(x: 91.4, y: 71.2), CGPoint(x: 93.8, y: 77.7), CGPoint(x: 75, y: 78.4), CGPoint(x: 65.5, y: 87.7), CGPoint(x: 56.8, y: 99.1), CGPoint(x: 60.5, y: 100.5), CGPoint(x: 70.7, y: 113.4), CGPoint(x: 78.4, y: 119.8), CGPoint(x: 80.2, y: 122.7), CGPoint(x: 86.4, y: 122.7), CGPoint(x: 82.7, y: 120.5), CGPoint(x: 92.5, y: 116.3), CGPoint(x: 96.1, y: 112), CGPoint(x: 97.1, y: 104.8), CGPoint(x: 97, y: 93.4), CGPoint(x: 93.9, y: 79.8), CGPoint(x: 84.8, y: 78.4), CGPoint(x: 97, y: 77.7), CGPoint(x: 95.2, y: 71.2)]
-private let bicL: [CGPoint] = [CGPoint(x: 43.6, y: 105.4), CGPoint(x: 45, y: 111.1), CGPoint(x: 42.5, y: 118.9), CGPoint(x: 42.1, y: 125.4), CGPoint(x: 43.2, y: 128.9), CGPoint(x: 44.5, y: 129.6), CGPoint(x: 44.3, y: 137.5), CGPoint(x: 45.7, y: 143.9), CGPoint(x: 49.1, y: 149.6), CGPoint(x: 50.4, y: 149.6), CGPoint(x: 50.2, y: 147.5), CGPoint(x: 53.8, y: 145.4), CGPoint(x: 56.6, y: 139.6), CGPoint(x: 59.3, y: 130.4), CGPoint(x: 63, y: 129.6), CGPoint(x: 65.9, y: 126.8), CGPoint(x: 63.8, y: 105.4)]
-private let foreL: [CGPoint] = [CGPoint(x: 39.6, y: 146.1), CGPoint(x: 38.6, y: 150.4), CGPoint(x: 38.8, y: 178.9), CGPoint(x: 45.5, y: 181.1), CGPoint(x: 45.4, y: 183.9), CGPoint(x: 41.4, y: 188.9), CGPoint(x: 39.8, y: 193.9), CGPoint(x: 40.5, y: 193.9), CGPoint(x: 41.6, y: 188.9), CGPoint(x: 50.7, y: 183.9), CGPoint(x: 54.8, y: 173.9), CGPoint(x: 57.1, y: 162.5), CGPoint(x: 56.8, y: 160.4), CGPoint(x: 53.4, y: 159.6), CGPoint(x: 52.7, y: 156.1), CGPoint(x: 46.8, y: 155.4), CGPoint(x: 44.8, y: 146.1)]
-private let foreBackL: [CGPoint] = [CGPoint(x: 41.1, y: 154.3), CGPoint(x: 37.1, y: 162.1), CGPoint(x: 35.9, y: 169.3), CGPoint(x: 35.9, y: 175.7), CGPoint(x: 37.7, y: 177.1), CGPoint(x: 38.4, y: 193.6), CGPoint(x: 47, y: 193.6), CGPoint(x: 47, y: 185.7), CGPoint(x: 48.8, y: 185), CGPoint(x: 54.1, y: 175), CGPoint(x: 57.3, y: 158.6), CGPoint(x: 40.9, y: 156.4), CGPoint(x: 41.1, y: 154.3)]
-private let oblL: [CGPoint] = [CGPoint(x: 66.6, y: 120), CGPoint(x: 68, y: 150.7), CGPoint(x: 67, y: 170), CGPoint(x: 68.4, y: 174.3), CGPoint(x: 73, y: 180), CGPoint(x: 79.5, y: 180), CGPoint(x: 82.5, y: 175.7), CGPoint(x: 83.2, y: 170.7), CGPoint(x: 81.6, y: 155), CGPoint(x: 82.5, y: 137.1), CGPoint(x: 81.4, y: 134.3), CGPoint(x: 85.9, y: 123.6), CGPoint(x: 68.4, y: 120)]
-private let quadL: [CGPoint] = [CGPoint(x: 66.8, y: 180.2), CGPoint(x: 62, y: 196.6), CGPoint(x: 61.3, y: 203), CGPoint(x: 61.1, y: 221.6), CGPoint(x: 63.2, y: 223), CGPoint(x: 62.5, y: 244.5), CGPoint(x: 64.6, y: 260.2), CGPoint(x: 68.4, y: 273), CGPoint(x: 70.5, y: 274.5), CGPoint(x: 82, y: 275.2), CGPoint(x: 83.8, y: 280.2), CGPoint(x: 90.5, y: 281.6), CGPoint(x: 90.7, y: 288.8), CGPoint(x: 91.1, y: 288.8), CGPoint(x: 93.4, y: 276.6), CGPoint(x: 93.4, y: 260.2), CGPoint(x: 94.8, y: 255.9), CGPoint(x: 97.1, y: 237.3), CGPoint(x: 97.7, y: 210.2), CGPoint(x: 92.9, y: 208.8), CGPoint(x: 92.7, y: 203), CGPoint(x: 82.1, y: 193.8), CGPoint(x: 75.4, y: 193), CGPoint(x: 70.4, y: 180.2)]
-private let calfFrontL: [CGPoint] = [CGPoint(x: 74.3, y: 296.1), CGPoint(x: 72.5, y: 296.8), CGPoint(x: 72, y: 299.6), CGPoint(x: 69.6, y: 301.8), CGPoint(x: 69.1, y: 313.2), CGPoint(x: 69.6, y: 326.1), CGPoint(x: 73.9, y: 349.6), CGPoint(x: 85.9, y: 349.6), CGPoint(x: 88.6, y: 329.6), CGPoint(x: 90, y: 327.5), CGPoint(x: 91.2, y: 321.1), CGPoint(x: 89.5, y: 303.2), CGPoint(x: 88.9, y: 301.1), CGPoint(x: 76.4, y: 300.4), CGPoint(x: 75.2, y: 296.1)]
-private let trapBackL: [CGPoint] = [CGPoint(x: 85.5, y: 47.9), CGPoint(x: 85.7, y: 60), CGPoint(x: 77.5, y: 66.4), CGPoint(x: 64.3, y: 72.1), CGPoint(x: 67, y: 75), CGPoint(x: 80, y: 81.4), CGPoint(x: 80, y: 82.9), CGPoint(x: 65.4, y: 84.3), CGPoint(x: 64.3, y: 87.9), CGPoint(x: 66.2, y: 91.4), CGPoint(x: 62.5, y: 95), CGPoint(x: 76.6, y: 110), CGPoint(x: 79.1, y: 110.7), CGPoint(x: 79.1, y: 112.1), CGPoint(x: 81.6, y: 115), CGPoint(x: 81.8, y: 120), CGPoint(x: 86.1, y: 124.3), CGPoint(x: 92.9, y: 125), CGPoint(x: 96.6, y: 131.4), CGPoint(x: 96.8, y: 131.4), CGPoint(x: 97.3, y: 95), CGPoint(x: 95.9, y: 84.3), CGPoint(x: 94.3, y: 82.1), CGPoint(x: 91.1, y: 81.4), CGPoint(x: 91.2, y: 78.6), CGPoint(x: 92.5, y: 77.1), CGPoint(x: 91.2, y: 75.7), CGPoint(x: 91.4, y: 72.9), CGPoint(x: 94.8, y: 62.9), CGPoint(x: 86.8, y: 56.4), CGPoint(x: 87, y: 54.3), CGPoint(x: 89.8, y: 52.9), CGPoint(x: 88, y: 50), CGPoint(x: 88, y: 47.9)]
-private let triL: [CGPoint] = [CGPoint(x: 57.3, y: 102.7), CGPoint(x: 51.4, y: 104.5), CGPoint(x: 46.4, y: 107.1), CGPoint(x: 44.1, y: 112.1), CGPoint(x: 42.5, y: 120.7), CGPoint(x: 42.9, y: 136.4), CGPoint(x: 44.8, y: 145.7), CGPoint(x: 47.3, y: 150), CGPoint(x: 53, y: 151.4), CGPoint(x: 53.9, y: 151.4), CGPoint(x: 60.4, y: 135), CGPoint(x: 61.8, y: 127.1), CGPoint(x: 57.3, y: 102.7)]
-private let latL: [CGPoint] = [CGPoint(x: 66.8, y: 100.2), CGPoint(x: 59.6, y: 108), CGPoint(x: 59.6, y: 109.5), CGPoint(x: 63.4, y: 129.5), CGPoint(x: 68.2, y: 143), CGPoint(x: 68.6, y: 152.3), CGPoint(x: 67, y: 170.2), CGPoint(x: 77.9, y: 173), CGPoint(x: 78.4, y: 173), CGPoint(x: 82.9, y: 166.6), CGPoint(x: 83.6, y: 157.3), CGPoint(x: 93.4, y: 140.2), CGPoint(x: 95.2, y: 132.3), CGPoint(x: 92, y: 125.2), CGPoint(x: 86.1, y: 124.5), CGPoint(x: 81.8, y: 120.2), CGPoint(x: 81.1, y: 114.5), CGPoint(x: 78.9, y: 111.6), CGPoint(x: 75.5, y: 110.9), CGPoint(x: 67.5, y: 100.2)]
-// Abs: an oval polygon following the white linea semilunaris on each
-// side, from the sternum (y 123) to the pubis (y 182).
-private let absPoly: [CGPoint] = [CGPoint(x: 89.5, y: 122.7), CGPoint(x: 86.1, y: 128.4), CGPoint(x: 84.6, y: 134.1), CGPoint(x: 84.6, y: 135.5), CGPoint(x: 86.2, y: 136.2), CGPoint(x: 84.8, y: 143.4), CGPoint(x: 86.6, y: 147.7), CGPoint(x: 85.7, y: 150.5), CGPoint(x: 85.9, y: 158.4), CGPoint(x: 87.3, y: 163.4), CGPoint(x: 86.4, y: 170.5), CGPoint(x: 88.4, y: 182), CGPoint(x: 111.6, y: 182), CGPoint(x: 113.6, y: 172.7), CGPoint(x: 112.7, y: 163.4), CGPoint(x: 113.9, y: 159.1), CGPoint(x: 114.1, y: 149.8), CGPoint(x: 113.2, y: 147.7), CGPoint(x: 115, y: 144.1), CGPoint(x: 113.6, y: 136.2), CGPoint(x: 115.4, y: 134.8), CGPoint(x: 114.1, y: 129.1), CGPoint(x: 111.1, y: 122.7)]
-private let gluteL: [CGPoint] = [CGPoint(x: 68.2, y: 174.3), CGPoint(x: 65.9, y: 175), CGPoint(x: 65, y: 182.1), CGPoint(x: 65.2, y: 197.1), CGPoint(x: 67.7, y: 197.9), CGPoint(x: 66.1, y: 204.3), CGPoint(x: 67.1, y: 222.1), CGPoint(x: 68.2, y: 225.7), CGPoint(x: 69.5, y: 226.4), CGPoint(x: 80.7, y: 227.9), CGPoint(x: 94.6, y: 227.9), CGPoint(x: 93.4, y: 215.7), CGPoint(x: 98, y: 210), CGPoint(x: 97.3, y: 192.9), CGPoint(x: 94.3, y: 187.1), CGPoint(x: 76.2, y: 174.3)]
-private let hamL: [CGPoint] = [CGPoint(x: 72.3, y: 228), CGPoint(x: 68.8, y: 243.8), CGPoint(x: 70.9, y: 274.5), CGPoint(x: 77.3, y: 277.3), CGPoint(x: 79.8, y: 281.6), CGPoint(x: 82.5, y: 281.6), CGPoint(x: 81.8, y: 278), CGPoint(x: 88, y: 277.3), CGPoint(x: 89.8, y: 275.2), CGPoint(x: 91.1, y: 269.5), CGPoint(x: 93.8, y: 268.8), CGPoint(x: 95, y: 250.2), CGPoint(x: 94.8, y: 230.9), CGPoint(x: 90.2, y: 230.2), CGPoint(x: 88.8, y: 228)]
-private let calfBackL: [CGPoint] = [CGPoint(x: 72.9, y: 290), CGPoint(x: 70.5, y: 290.7), CGPoint(x: 67.9, y: 302.9), CGPoint(x: 66.4, y: 314.3), CGPoint(x: 66.8, y: 321.4), CGPoint(x: 70.5, y: 330.7), CGPoint(x: 72.1, y: 332.1), CGPoint(x: 82.5, y: 332.9), CGPoint(x: 83.4, y: 338.6), CGPoint(x: 87.3, y: 338.6), CGPoint(x: 87.3, y: 333.6), CGPoint(x: 90.9, y: 323.6), CGPoint(x: 91.1, y: 315.7), CGPoint(x: 88.6, y: 300), CGPoint(x: 87, y: 297.1), CGPoint(x: 83.4, y: 296.4), CGPoint(x: 83.2, y: 290)]
+/// Every body area, front and back — CUT FROM THE PAINTED IMAGES, not
+/// hand-traced (Nov 12, 2026). The anatomical PNGs paint a white line
+/// between neighbouring muscles; segmenting the red muscle pixels along
+/// those lines gives each muscle's exact outline (connected components
+/// at full 1120×2240 resolution, outlines simplified to ≤1 px, then
+/// scaled to this 200×400 canvas). Joints, hands, feet and head are the
+/// figure's own silhouette around them; lower back is the lumbar area
+/// between the lats and glutes. Areas never overlap.
+///
+/// LEFT/RIGHT ARE THE PERSON'S SIDES: on the FRONT view the person's
+/// right is on the viewer's left (canvas x < 100); on the BACK view the
+/// person's left is on the viewer's left. (Before Nov 12 the front view
+/// had them swapped.)
+///
+/// The figure is now drawn from these shapes on a dark silhouette
+/// (BodySilhouetteFront/Back), segmented-muscle style; the red
+/// anatomical PNGs are only the source the shapes were cut from.
+/// Generator: design/body-source/gen.py (re-run if the images ever change).
 private let muscleSpecs: [MuscleSpec] = [
-    // Head + neck (both sides).
-    MuscleSpec(.head, .front, cx: 100, cy: 29, rx: 21, ry: 25),
-    MuscleSpec(.head, .back, cx: 100, cy: 28, rx: 21, ry: 23),
-    MuscleSpec(.neck, .front, cx: 100, cy: 62, rx: 9, ry: 8),
-    MuscleSpec(.neck, .back, cx: 100, cy: 59, rx: 11, ry: 8),
-    // Traps (both sides — the upper trapezius shows from the front too).
-    MuscleSpec(.trapLeft, .front, polygon: trapFrontL),
-    MuscleSpec(.trapRight, .front, polygon: mirrorPts(trapFrontL)),
-    MuscleSpec(.trapLeft, .back, polygon: trapBackL),
-    MuscleSpec(.trapRight, .back, polygon: mirrorPts(trapBackL)),
-    // Delts (both sides).
-    MuscleSpec(.deltLeft, .front, polygon: deltL),
-    MuscleSpec(.deltRight, .front, polygon: mirrorPts(deltL)),
-    MuscleSpec(.deltLeft, .back, polygon: deltBackL),
-    MuscleSpec(.deltRight, .back, polygon: mirrorPts(deltBackL)),
-    // Chest (front only).
-    MuscleSpec(.pecLeft, .front, polygon: pecL),
-    MuscleSpec(.pecRight, .front, polygon: mirrorPts(pecL)),
-    // Arms: biceps front, triceps back, forearms both. The arms hang
-    // away from the body on the real figure, so the regions sit wide.
-    MuscleSpec(.bicepsLeft, .front, polygon: bicL),
-    MuscleSpec(.bicepsRight, .front, polygon: mirrorPts(bicL)),
-    MuscleSpec(.tricepsLeft, .back, polygon: triL),
-    MuscleSpec(.tricepsRight, .back, polygon: mirrorPts(triL)),
-    MuscleSpec(.forearmLeft, .front, polygon: foreL),
-    MuscleSpec(.forearmRight, .front, polygon: mirrorPts(foreL)),
-    MuscleSpec(.forearmLeft, .back, polygon: foreBackL),
-    MuscleSpec(.forearmRight, .back, polygon: mirrorPts(foreBackL)),
-    // Wrists (both sides): a small ellipse on the wrist joint, just below
-    // the forearm — the forearm polygon ends at y 194 and the ellipse
-    // tops at y 194, so the two meet at the wrist joint without ever
-    // overlapping. Same spot front and back: the arms hang the same way
-    // in both images.
-    MuscleSpec(.wristLeft, .front, cx: 46, cy: 200, rx: 7, ry: 6),
-    MuscleSpec(.wristRight, .front, cx: 154, cy: 200, rx: 7, ry: 6),
-    MuscleSpec(.wristLeft, .back, cx: 46, cy: 200, rx: 7, ry: 6),
-    MuscleSpec(.wristRight, .back, cx: 154, cy: 200, rx: 7, ry: 6),
-    // Core (front only): abs as a trapezoid following the white lines +
-    // obliques.
-    MuscleSpec(.abs, .front, polygon: absPoly),
-    MuscleSpec(.obliqueLeft, .front, polygon: oblL),
-    MuscleSpec(.obliqueRight, .front, polygon: mirrorPts(oblL)),
-    // Back (back only): lats + glutes.
-    MuscleSpec(.latLeft, .back, polygon: latL),
-    MuscleSpec(.latRight, .back, polygon: mirrorPts(latL)),
-    MuscleSpec(.gluteLeft, .back, polygon: gluteL),
-    MuscleSpec(.gluteRight, .back, polygon: mirrorPts(gluteL)),
-    // Hips (front only, small — the hip joint).
-    MuscleSpec(.hipLeft, .front, cx: 85, cy: 190, rx: 9, ry: 8),
-    MuscleSpec(.hipRight, .front, cx: 115, cy: 190, rx: 9, ry: 8),
-    // Legs: quads front, hamstrings back, knees/calves/ankles/feet both.
-    MuscleSpec(.quadLeft, .front, polygon: quadL),
-    MuscleSpec(.quadRight, .front, polygon: mirrorPts(quadL)),
-    MuscleSpec(.hamstringLeft, .back, polygon: hamL),
-    MuscleSpec(.hamstringRight, .back, polygon: mirrorPts(hamL)),
-    MuscleSpec(.kneeLeft, .front, cx: 82, cy: 285, rx: 10, ry: 10),
-    MuscleSpec(.kneeRight, .front, cx: 118, cy: 285, rx: 10, ry: 10),
-    MuscleSpec(.kneeLeft, .back, cx: 82, cy: 288, rx: 10, ry: 9),
-    MuscleSpec(.kneeRight, .back, cx: 118, cy: 288, rx: 10, ry: 9),
-    MuscleSpec(.calfLeft, .front, polygon: calfFrontL),
-    MuscleSpec(.calfRight, .front, polygon: mirrorPts(calfFrontL)),
-    MuscleSpec(.calfLeft, .back, polygon: calfBackL),
-    MuscleSpec(.calfRight, .back, polygon: mirrorPts(calfBackL)),
-    MuscleSpec(.ankleLeft, .front, cx: 82, cy: 360, rx: 9, ry: 10),
-    MuscleSpec(.ankleRight, .front, cx: 118, cy: 360, rx: 9, ry: 10),
-    MuscleSpec(.ankleLeft, .back, cx: 82, cy: 360, rx: 9, ry: 10),
-    MuscleSpec(.ankleRight, .back, cx: 118, cy: 360, rx: 9, ry: 10),
-    MuscleSpec(.footLeft, .front, cx: 82, cy: 381, rx: 11, ry: 11),
-    MuscleSpec(.footRight, .front, cx: 118, cy: 381, rx: 11, ry: 11),
-    MuscleSpec(.footLeft, .back, cx: 82, cy: 381, rx: 11, ry: 11),
-    MuscleSpec(.footRight, .back, cx: 118, cy: 381, rx: 11, ry: 11),
+    MuscleSpec(.neck, .front, "85.5,50.5 86.4,62.9 86.2,70.4 85.4,76.1 85.9,76.4 85.9,77 86.2,77 86.6,76.4 87,76.4 87.1,77 87.5,77 87.9,76.2 88.2,76.2 88.6,76.8 89.5,76.4 89.8,77 90.2,77 90.7,76.4 90.9,75.7 93,75.7 93.6,76.6 94.5,77.3 96.2,77.7 96.6,78 97.1,78 97.1,77 96.8,76.2 97,75.7 97.3,75.7 97.7,76.4 98,76.4 98.2,75.7 101.8,75.7 102,76.2 102.9,75.9 102.9,78.2 103.2,78.2 103.8,77.7 106.1,77.1 107,75.7 109.1,75.7 109.8,77 110.2,77 110.4,76.4 111.4,76.8 111.8,76.2 112.1,76.2 112.5,77 112.9,77 113,76.4 114.1,77 114.1,76.4 114.6,76.2 114.1,73.8 113.6,69.5 113.6,60.5 114.5,51.1 113.4,51.2 113,52 87,52 86.1,50.5"),
+    MuscleSpec(.trapRight, .front, "85.5,69.6 85.2,69.6 82.5,72.1 78.8,75 78,74.8 79.8,70 82.5,65 82.5,64.6 82.1,64.6 77.7,67.9 73.6,70 68.9,71.8 62.9,73.8 62.9,74.1 65.4,74.5 69.6,75.7 77.1,77.1 77.3,76.4 77.9,76.2 78,76.6 83.8,77.1 84.3,76.8 84.8,75.2 84.5,74.1 85.2,73.2"),
+    MuscleSpec(.trapLeft, .front, "114.5,69.6 114.8,73.4 115.5,74.3 115.2,75.2 115.7,77 119.8,77 122.5,76.4 122.7,77.1 123.4,77.1 129.5,75.9 134.6,74.5 137.1,74.1 137.1,73.6 130,71.4 124.8,69.3 120.2,66.4 118,64.6 117.5,64.6 117.5,65 120.7,71.4 121.8,74.1 121.8,74.8 121.3,75 117,71.8 114.8,69.6"),
+    MuscleSpec(.deltRight, .front, "71.8,77.3 71.2,77.3 70.5,76.8 68.9,76.4 67.7,76.6 67.3,76.1 63,75.5 62.3,75.2 60.2,75.5 60,75.9 56.3,78 56.1,77.5 56.6,76.4 56.3,76.1 55.4,76.1 51.2,78.6 48.2,81.6 46.1,85.5 44.6,89.1 43.6,92.5 42.7,97.5 42.7,101.6 43.2,105.2 44.3,108.9 46.8,114.5 47.3,114.5 48.6,110.4 49.6,108.2 49.6,107.3 50.4,107.1 52.1,103.9 55.4,99.5 60.2,91.1 63,87.5 65.7,84.8 71.8,80 72.3,78.6 72.3,78 71.8,77.9"),
+    MuscleSpec(.deltLeft, .front, "128.2,77.3 128.2,77.7 127.5,78 128,79.8 134.8,85.4 138,88.8 141.1,93 144.3,98.9 147.5,103.4 149.3,106.6 150,106.8 150.2,106.2 150.7,106.4 150.4,108.2 151.6,110.9 152.7,114.6 153,114.6 155.2,110.2 156.2,107 157.3,101.8 157.3,97.9 156.6,93.6 155.5,89.6 154.3,86.4 152,82 149.6,79.3 144.6,76.1 143.8,76.1 143.8,76.4 143.2,76.6 143,77.5 140.4,76.1 139.6,75.4 134.1,75.7"),
+    MuscleSpec(.pecRight, .front, "93.8,79.5 86.6,79.3 75.2,78.2 67.9,83.9 62.9,88.8 60,92.7 55.7,100.2 55.7,100.7 56.1,100.7 58.8,98.8 59.1,98.8 59.3,99.3 58.6,99.8 58.6,100.2 61.1,102 64.1,105 68.8,111.2 71.2,114.1 73.9,116.6 80,121.3 80.7,121.3 81.1,120.9 82.3,120.9 83.2,120.4 84.1,120.4 84.5,119.1 86.4,119.5 87.7,118.4 89.1,118.2 90.7,117 91.2,117 91.8,116.4 92.5,116.4 92.9,115.9 93.4,115.7 93.4,115.4 90.9,114.6 90.4,114.3 90.4,113.9 90.9,113.8 93.6,114.6 95,114.5 96.1,112.1 96.2,110.9 96.8,110.2 97,105.5 97.3,103.6 97,102.7 97.1,98.4 97,97.1 96.4,96.2 97,94.5 96.8,89.6 96.2,88.9 96.4,87 95.4,86.2 95.2,83.9 94.8,83.8 95,82.9 94.5,82.9 93.8,82.1 93.8,81.6 94.3,81.2 94.3,80.2"),
+    MuscleSpec(.pecLeft, .front, "106.1,79.5 105.7,79.8 105.9,82.3 105.5,82.9 105,82.9 105,83.8 104.6,83.9 104.5,86.2 103.9,86.4 103.6,87 103.6,88.9 103,89.6 103.2,90.9 102.9,94.5 103.6,96.2 103,97 103,98 102.7,98.6 102.7,104.8 103,106.2 102.9,107.5 103.2,108 103.2,110.2 103.8,111.1 103.8,112.1 104.5,112.5 104.8,114.5 106.4,114.6 109.6,113.6 110.2,113.8 110,114.3 106.6,115.4 106.6,115.7 107.1,115.9 107.5,116.4 108.4,116.4 108.8,117 109.5,117 110.7,118.2 112.3,118.2 112.5,118.8 113.8,119.5 115.7,118.9 115.7,120 116.1,120.5 118,120.5 118.2,120.9 120.2,121.1 126.8,115.9 130.4,112.3 135.9,105 138.6,102.3 141.4,100.4 141.4,99.6 140.4,99.1 140.5,98.6 140.9,98.6 141.6,99.3 142.3,99.5 144.1,100.9 144.5,100.9 144.3,100.2 140.2,93 136.8,88.4 132.5,84.3 126.4,79.6 124.8,78 120,78.8 114.8,79.1 114.6,79.5 114.3,79.5 114.1,79.1"),
+    MuscleSpec(.serratusRight, .front, "60.9,125 60.5,125 60,131.1 58.9,135.4 58.8,145 59.1,145 60.2,139.8 61.6,130.5 61.6,128.4 60.9,125.9;65.7,112.5 66.4,118.8 67,119.3 69.3,120.4 71.4,120.9 75.5,120.9 77.1,120.4 77.1,119.8 73,116.8 70.2,113.9 67.9,112.9;60,102.3 59.6,103.6 59.6,110.5 61.3,123.8 63.2,131.6 65.9,139.3 66.2,139.3 66.2,124.8 65.9,119.3 64.8,110.9 63.6,105.5 61.1,102.9"),
+    MuscleSpec(.serratusLeft, .front, "138.9,125.7 138.4,128 138.4,130.9 140.7,144.5 141.1,144.5 141.1,135.7 140,131.6 139.3,125.7;134.1,112.5 131.1,113.2 129.6,114.1 126.4,117.1 122.9,119.8 122.9,120.4 124.6,120.9 128.4,120.9 131.6,120 133.2,119.1 133.6,118.4 133.6,116.3 133.9,115.7;140,102.3 139.6,102.3 136.4,105.5 135.4,109.8 134.3,117.3 133.8,124.6 133.8,138.9 134.1,138.9 137,130.9 139.1,121.6 140.4,109.5 140.4,103.8"),
+    MuscleSpec(.bicepsRight, .front, "57,103.9 55.9,103.9 55.7,105.5 54.8,105.7 54.8,106.1 54.5,106.2 53.9,108.4 52.5,118.9 51.1,133.8 50.5,133.6 50.9,127.1 52,116.8 53.8,105.5 52.7,105.5 52.3,106.1 51.8,106.1 49.3,110.7 46.8,118.2 45,126.1 44.3,131.2 44.3,138.2 44.6,140.5 46.4,145.7 48.2,148.9 49.1,149.8 49.5,149.8 49.3,148.6 49.8,148.4 50,148.8 50.4,148.8 50.2,147.3 50.9,147.1 50.7,145.7 50.4,145.2 50.5,144.1 51.2,144.3 51.4,145.9 52.1,145.9 52.3,146.4 52.7,146.4 53,145.9 53.8,145.5 57.3,138 58.8,133.6 59.5,130.2 60,124.1 59.8,118.4 58.4,106.2 57.9,105.9 57.9,105.4 57.3,105.4 57,105"),
+    MuscleSpec(.bicepsLeft, .front, "143,103.9 142.9,105 142.1,105.2 142,106.2 141.4,107 140,119.6 140,125.5 140.7,131.6 141.4,134.5 143.6,140.4 145.7,144.5 147.3,146.6 147.7,146.6 147.9,146.1 148.6,146.1 148.6,145 149.1,143 149.1,137.9 149.8,137.9 149.8,143.6 149.5,146.2 149.8,146.4 149.6,148.8 150.4,148.8 150.4,149.8 150.7,149.8 151.8,148.9 152.3,147.5 153.4,145.9 155,141.8 155.5,139.3 155.7,132.9 154.8,125.4 152.7,116.6 150.4,110 148.6,106.6 148,106.1 147.7,106.1 147.1,105.2 146.1,105.2 147.1,110.5 148.6,122.1 149.6,134.3 149.6,137.5 149.1,137.7 147.7,121.1 146.2,109.8 145.2,105.2 144.1,105 144.1,103.9"),
+    MuscleSpec(.tricepsRight, .front, "44.8,111.8 44.5,111.8 43.6,114.1 42.1,120.5 42.1,126.3 42.5,128.4 43,128.6 43.2,129.3 43.9,129.1 44.8,123.2 46.6,116.6 46.6,115.5"),
+    MuscleSpec(.tricepsLeft, .front, "155.2,111.8 153.2,115.7 153.2,116.3 155,122.7 156.1,128.8 156.8,128.9 157.3,128.2 157.7,126.8 157.9,121.4 157,116.3 155.5,111.8"),
+    MuscleSpec(.abs, .front, "112.5,165.2 110.9,165.2 108.9,165.7 107.9,165.7 107.1,166.2 105,166.1 104.8,166.4 102.9,166.4 102,167.7 101.2,167.7 100.7,168.2 100.7,172.7 101.1,172.9 101.1,179.5 100.7,179.6 100.5,187.9 100.9,188 100.9,188.4 100.5,188.6 100.5,189.6 100.9,189.8 100.9,193 100.4,193.6 100.4,199.3 100.7,202.9 103,201.8 104.5,200.7 104.5,199.8 106.2,198 107.7,195.4 108.4,193.6 108.6,192.1 110,188.9 109.8,187.7 110.9,185.2 111.2,182.7 111.8,181.8 111.4,181.1 111.4,179.8 112.5,178 113.2,173.4 113.8,172 113.4,171.8 113.8,168.2 112.9,167 113.2,165.7;88.4,165 87.1,165.7 87.3,167 86.6,167.5 86.2,168.2 86.2,170 86.6,171.1 86.4,174.1 86.8,174.3 87.1,175.4 87.5,178.4 88.4,179.8 88.2,181.8 88.8,182.7 89.1,185.2 90.2,187.9 90,189.1 91.4,192.1 91.4,193.2 93.8,198.2 94.1,198.2 95.4,199.8 95.5,200.9 98,202.3 98.2,202.7 99.3,202.9 99.6,201.8 99.6,200.4 99.3,200.2 99.3,197.9 99.6,197.7 99.5,195.2 99.1,195 99.1,192.1 99.5,192 99.3,186.4 98.9,186.2 98.9,182.1 99.3,182 99.3,168.6 98.9,168.4 98.9,167.7 98.2,167.5 97.3,165.9 95.5,165.9 95.4,165.5;102.3,147.9 102.3,148.4 101.8,148.9 101.4,150.2 101.1,150.4 101.1,157 100.7,157.1 100.5,160.5 101.1,161.1 101.2,162 102,162.9 102,163.4 102.7,163.9 102.9,165 103.6,165.2 104.1,164.6 107.3,164.8 110.2,164.5 110.5,163.9 112.7,163.6 113.2,162.7 113.8,160.4 114.1,160.2 113.9,158.8 114.5,158 114.5,157.1 114.1,157 114.1,154.6 114.5,154.5 114.6,152.9 114.3,152.7 114.3,149.8 113.9,148.6 109.6,148.6 105.2,147.7;97,147.7 94.8,147.7 89.3,148.6 86.1,148.6 85.7,149.6 85.7,150.9 85.4,151.1 85.5,157.7 85.9,157.9 85.7,160.4 86.1,161.4 86.4,161.6 86.8,163 87.7,163.9 88.6,163.8 88.8,164.1 90.4,164.3 90.5,163.9 90.9,163.9 91.1,164.3 91.8,164.5 96.1,164.3 96.2,164.6 97,164.6 97.3,163.8 98.4,163 98.4,162.5 98.9,161.6 99.1,154.3 98.8,154.1 98.8,152.9 99.1,152.7 99.1,151.8 98.6,151.2 98.8,149.8;102.1,130.9 100.7,132.3 100.4,134.1 100.5,137.7 100.9,137.9 100.9,141.6 100.5,141.8 100.5,142.3 101.1,142.7 101.1,144.1 101.8,145.7 102.7,146.4 104.1,146.6 107.9,146.4 108,146.8 109.3,147 111.1,146.6 111.2,147 112.5,147.1 114.1,146.6 114.6,145.9 115,144.6 115.2,140.9 113.9,137.1 112.5,135.9 108.9,133.8 105.2,132 105,131.6;97.7,130.9 96.8,130.7 96.6,131.1 94.1,132.3 93.6,132.3 93.4,132.7 89.1,134.8 85.9,137.3 85.2,138.8 84.8,141.2 84.5,141.4 84.5,144.1 85,144.6 85.4,146.1 85.9,146.6 87.5,147.1 88.9,147 89.1,146.6 91.4,146.8 91.6,146.4 92.7,146.4 92.9,146.8 97.3,146.4 98,145.9 98.9,143.9 98.9,139.5 99.5,139.3 99.5,136.6 99.1,136.4 99.1,135 99.5,134.8 99.5,133;101.8,117.7 101.2,118.6 101.4,120.2 101.1,120.4 101.4,125 101.2,126.1 101.8,128.2 102.7,129.3 103.9,129.5 106.8,130.7 111.4,133.2 114.1,135.4 115.4,135.9 115.5,133.2 115.2,131.6 114.8,131.4 113.6,127.5 110.7,122.5 109.6,121.6 108.8,120.2 108.2,120.2 107.7,119.5 106.2,118.9 105.7,118.4 104.8,118.4 104.1,117.9;98.2,117.7 95.7,117.9 94.8,118.6 93.2,118.9 91.6,120.2 90.9,120.4 90.9,120.9 87.9,124.5 86.2,127.7 85,131.8 84.6,132 84.6,134.6 84.3,134.8 84.3,135.5 85.2,135.7 87.3,133.9 90.4,132.1 94.6,130 97.1,129.3 97.7,128.8 98.4,126.1 98.8,125.9 98.6,124.6 99.1,123.9 99.1,123.6 98.8,123.4 98.8,118.9"),
+    MuscleSpec(.forearmRight, .front, "43.9,176.2 43.6,176.2 40.5,184.6 40.4,186.2 39.3,188.6 37.5,195.4 37,198.8 37.9,198.6 38.4,194.8 40.2,188 40.7,187.3 40.9,186.2 41.6,186.1 41.6,185.5 42.3,185.4 42.3,185 42.7,184.8 43.4,181.2;57,160.5 56.3,160.7 55.4,161.8 53.6,164.8 52.9,168.4 51.8,171.4 51.1,176.2 50,180.5 50,184.1 50.7,183.9 53.8,177.3 55.2,173 57,165.2 57.3,160.7;56.3,147.3 53.9,150 53.9,150.5 55.5,153.8 56.8,155.2 57.5,155.4 57.7,151.4 57,149.5 56.6,147.3;44.6,143.9 45,145.4 46.8,149.5 47.3,152.5 48,152.7 48,153.2 47.7,153.6 47.7,158.8 48,158.8 48.8,157.5 49.8,156.4 50.4,156.6 50.4,157 48.9,158.6 47.7,160.7 45.4,171.1 44.1,180.7 45.7,180.9 45.4,182.9 45.7,182.9 47.7,180 50,174.5 52.3,167.7 53.2,163 53.6,157 53.4,156.4 52.3,155.7 51.4,155.9 51.1,156.4 50.4,156.2 50.7,155 46.2,147 45,143.9;42.9,137 42.5,137 38.9,147.9 38.6,149.6 38.6,154.6 37.9,154.6 37.9,153 37.5,153 36.6,156.8 36.1,160.7 35.9,167.1 36.6,179.1 38,179.1 38,177.9 38.6,177.7 38.8,179.6 39.1,180.4 40.4,179.8 41.6,179.8 45,169.6 46.2,163.9 47,159.1 47,154.6 46.6,152 43.6,143.2 42.9,139.3"),
+    MuscleSpec(.forearmLeft, .front, "155.9,176.1 157,184.1 157.7,185 157.7,185.5 158.2,185.5 158.4,186.1 159.1,186.2 159.3,187.5 160,188.9 161.2,193.6 162.1,198.8 163,198.8 162.9,197 160.7,188.6 159.5,185.5 159.5,184.8 158.4,181.6 157,178.4 156.6,176.8 156.2,176.1;142.9,160.4 142.7,162.9 143,165.9 145,173.9 148.2,182.1 149.1,183.8 149.8,183.8 150,180.7 149.5,179.3 148.4,172.7 147,168 146.4,164.8 144.5,161.6 143.6,160.5;143.6,147 143.2,147 143.2,148 142.3,151.1 142.5,155.4 142.9,155.4 144.3,153.9 145.9,151.1 145.9,149.8;155.5,143.2 155.2,143.2 153.6,147.1 150,153.4 149.3,155.2 149.6,156.4 149.1,156.6 148.6,155.9 147.7,155.7 146.4,156.6 146.4,160.2 146.8,163.2 148.2,169.6 152.1,179.8 154.3,183.2 154.6,183.2 154.3,180.9 155.7,180.9 154.8,172.3 152.7,162 151.2,158.6 151.8,158.4 152,158.8 152.3,158.8 152.3,153.8 152,152.7 152.7,152.5 153.2,149.6;157.1,137.3 157.1,139.3 156.4,143.2 155.2,147 154.3,148.8 153.2,152.7 153,159.3 154.3,167 155.7,172.3 158.2,179.6 158.8,179.6 158.9,180 160,180.4 160.9,180.2 160.9,179.8 161.2,179.6 161.4,178.4 162,178.6 162,179.1 163.2,179.3 163.8,173.8 164.1,163.9 163.8,159.3 162.5,153.2 162.1,153.2 162.1,154.1 161.6,154.3 161.4,150.4 160.9,147.5 157.5,137.3"),
+    MuscleSpec(.handRight, .front, "45.7,204.6 43.9,205 40.5,204.8 38.6,204.1 37,203 33.6,203 33.4,202.3 32.1,202.7 32,202 31.6,202 30.5,203 29.6,203 25.9,205.9 23.8,208 21.8,211.1 16.1,217.3 16.1,218.2 17,219.1 19.3,219.1 21.2,218.2 25.7,214.3 26.8,214.3 26.4,220.7 23.6,231.8 23,235.7 23.4,236.8 23.9,237.3 24.8,237.5 26.1,236.8 27.5,233.4 30.4,225 30.9,224.8 31.1,225.7 29.5,237 29.5,239.5 30,240.5 30.5,240.9 32,240.7 33,239.3 35,230.5 35.5,230.7 35,235.4 35,238.6 35.4,239.3 36.1,239.8 37.1,239.8 37.7,239.5 38.8,236.4 40.7,226.3 41.2,226.4 41.8,232 42.3,234.6 43,235.7 44.1,235.7 44.8,234.8 45.4,231.8 45.2,224.3 45.5,222.3 45.5,220 46.6,213.8 46.6,211.1 45.7,206.4"),
+    MuscleSpec(.handLeft, .front, "154.3,204.6 154.3,206.2 153.4,210.2 153.4,214.5 154.3,219.1 154.6,223.4 154.5,229.1 154.6,233 155,234.8 155.7,235.7 156.2,235.9 157.3,235.2 158,232.9 158.6,226.8 159.1,226.6 159.5,227 161.2,236.8 162.1,239.3 162.9,239.8 163.8,239.8 164.8,238.8 165,237 164.5,231.3 165,231.1 167,239.5 168,240.7 169.3,240.9 170.4,239.8 170.5,237.7 168.9,226.1 169.1,225 169.6,225.2 173.6,236.4 174.5,237.3 175.9,237.3 176.6,236.8 177,235.5 176.6,232.7 173.6,220.9 173.2,214.3 173.9,214.1 174.8,214.6 178.4,218 180,218.9 182.9,219.1 183.8,218.4 183.9,217.5 183.6,216.8 178.8,211.8 176.1,207.9 170.4,203 169.5,203 168.6,202.1 168.2,202.1 168,202.9 167.7,202.9 167.1,202.3 166.6,202.3 166.4,203 162.9,203 161.6,203.9 159.3,204.8 155.7,205"),
+    MuscleSpec(.outerHipRight, .front, "67.5,176.8 67.1,176.8 66.8,180.2 65.7,185.4 62.7,193.6 61.4,199.3 61.1,222.1 61.6,222.1 62.1,221.6 62.9,218.2 63.9,215 66.6,208.8 68,204.6 69.8,197.3 70.4,190.5 70.5,180.7 70.4,180"),
+    MuscleSpec(.outerHipLeft, .front, "132.5,176.8 129.5,180.2 129.5,188.4 130.2,197.7 132.5,206.4 136.1,215.2 137.1,218.6 137.7,221.4 138.2,222 138.2,222.3 138.6,222.3 138.9,222 138.6,200 137.5,194.6 134.3,185.7 133,179.8 132.9,176.8"),
+    MuscleSpec(.hipFlexorRight, .front, "72.9,182.5 74.1,187.7 76.1,193 76.4,193 76.2,191.1 77,191.1 77.7,197.1 78.9,199.5 79.3,201.2 81.6,207 82,207 82.1,206.6 82.7,206.8 82.9,209.8 83.6,212.3 84.1,212.5 87.1,208.2 88.8,205.2 89.8,201.6 89.8,200.4 85.7,197.1 82.3,193.9 82,193.9 82.5,199.5 82.5,205.9 81.8,205.9 81.8,200.4 81.1,192.7 76.8,187.7 76.4,187.7 76.8,190.7 76.1,190.7 75.4,185.9 73.4,182.7"),
+    MuscleSpec(.hipFlexorLeft, .front, "117.9,193.9 117.5,193.9 115.4,196.1 110,200.5 110.4,202.9 111.8,206.4 115.9,212.5 116.3,212.5 117.3,208.8 117.5,198.6;127,182.5 126.6,182.5 124.6,185.7 123.8,191.4 123,191.4 123.6,187.5 123.2,187.5 118.9,192.5 118.2,199.3 118,207 118.4,207 120.9,200.7 121.1,199.3 121.6,198.8 122.3,197 122.9,192.1 123.6,192.1 123.4,193.4 123.8,193.4 126.6,185.2"),
+    MuscleSpec(.adductorRight, .front, "97.7,209.5 94.1,209.5 93.8,209.6 93.6,210.7 93.6,225 92.9,242.5 92.3,242.3 92.7,227.1 92.3,227.1 90.4,235.9 91.8,243.2 92.9,243.2 92.9,249.5 93.6,253.4 93.9,258.8 94.5,258.8 94.8,255 95.9,249.1 97.3,236.4 97.9,225.7;90.4,201.8 89.6,204.8 88.4,207.5 84.3,213.6 84.3,214.3 87.1,222.9 89.8,233.6 90.2,233.6 92.1,224.8 92.9,218.2 92.9,203 91.6,202"),
+    MuscleSpec(.adductorLeft, .front, "102.3,209.5 102,224.5 102.5,235.9 102.9,237.5 103.6,246.1 103.9,247.1 105.5,259.3 105.9,259.3 106.2,254.5 107.1,248.8 107,240.9 107.7,240.9 107.7,243.6 108,243.6 109.5,237 109.5,235.4 107.5,226.8 107.1,226.8 107,227.9 106.4,227.7 106.2,209.6 104.8,209.8;108.4,202 107.1,203 107.1,218.9 108.2,227 109.8,233.8 110.2,233.8 112.3,224.5 114.3,217.9 115.5,214.8 115.7,213.6 111.6,207.5 110.2,204.5 109.6,202.3 108.9,202.3 108.8,202"),
+    MuscleSpec(.quadRight, .front, "83.9,240.9 83.2,247.5 81.1,258.9 81.1,259.8 81.4,260 80.7,262 80.9,264.3 80.5,265.2 80.5,267.5 81.1,267.7 80.7,268.6 80.9,271.2 81.2,271.6 81.2,273 81.8,274.3 81.8,275.2 82.5,276.8 83.2,279.8 84.3,280 84.5,280.7 85.2,281.1 87.3,281.2 89.3,280.4 90.5,278.8 91.6,274.6 91.8,268.8 91.2,263.8 90.9,263.2 90.9,262.1 89.8,257.5 84.3,240.9;67.3,208.8 64.3,216.6 62.9,222.9 62.5,225.7 62.5,229.8 62.1,231.3 62.3,242.9 63,248.6 63,250.5 63.6,252.5 63.6,254.6 64.1,256.2 64.6,260.5 65.5,263.2 66.4,267.7 68.4,273 70.7,274.6 71.1,274.6 70.9,273.8 71.2,273.6 71.2,273 73.4,273 73.6,272.1 74.5,272.3 73.9,271.2 74.8,271.1 74.8,270.7 73.8,270.2 73.8,269.8 74.3,269.6 73.8,267.1 71.6,261.4 70.5,259.3 70.5,258.8 70,258 68,247.9 67,238 66.6,231.4 66.6,220.9 67,215 67.7,208.8;69.5,203.4 69.5,203.8 69.1,203.9 68.6,206.8 67.7,216.1 67.7,219.5 67.3,221.4 67.3,231.3 67.7,232.7 68,241.6 68.6,246.3 70,254.5 72.1,261.1 74.1,264.3 74.1,264.6 73.8,264.8 73.9,265.7 74.5,265.9 75.4,267.5 76.6,267.5 76.6,267.1 77.1,267 77.3,267.5 77.9,267.7 78,267.1 78.6,267.1 78.6,266.1 79.5,265.9 79.8,265.5 80,261.4 80.7,257.3 80.7,254.8 81.2,254.1 81.2,251.8 81.8,251.3 82.3,248.4 82.1,245.9 82.7,245.7 82.9,242.3 83.2,241.4 83.2,238.4 76.4,218.8 75.5,218.4 75.7,219.5 75.2,219.6 74.6,218 74.1,217.9 73.9,220.5 73.2,220.5 72.9,216.1 72.1,215.9 72.1,213.8 71.4,213.6 71.4,210.5 70.7,210.4 70.7,205.2 70.4,204.8 70.4,203.9 70,203.9 69.8,203.4;71.1,182 71.1,194.1 71.8,198.9 73.6,207 75,212.1 75.4,212.7 75.7,214.6 78.9,224.1 83.9,237.3 88.9,251.8 91.8,262.7 92.5,268.6 92.5,273.4 91.8,277.3 90.9,279.6 90.2,283 90.2,285 89.8,285.9 89.8,286.6 90.2,286.6 90.4,286.1 90.9,286.2 90.2,289.8 90.5,289.8 91.1,287.9 91.8,286.8 92.7,282.9 93.8,272.5 93.8,264.3 93.4,261.6 93.4,258.8 92,247.3 89.1,233.6 85.9,221.2 80.9,207 74.1,190 72.7,185.5 72.1,182.5"),
+    MuscleSpec(.quadLeft, .front, "130.2,203.6 129.8,203.6 129.8,203.9 129.5,204.1 129.5,205 128.9,205.5 129.1,210.4 128.4,210.5 128.4,213 128.2,213.6 127.7,213.8 127.7,215.9 127,216.1 126.6,221.1 125.9,221.1 125.7,217.7 125.4,217.7 124.8,219.3 124.3,219.1 124.3,218.2 123.6,218.6 116.8,237.9 117.1,245.2 117.7,245.7 117.5,247.7 118,250.5 118.6,251.3 118.6,253.6 118.8,254.3 119.3,254.6 119.1,256.8 119.6,259.3 120.2,265.9 121.1,266.1 121.3,267.3 121.8,267.3 122,267.7 122.3,267.7 122.7,267 123.2,267.1 123.2,267.7 124.6,267.5 125.4,266.2 125.9,265.9 125.9,263.9 127.5,261.6 128.2,260 128.4,258.8 129.6,255.2 131.2,247 131.8,242.1 132,235.2 132.5,231.4 132.5,227.9 132.1,224.6 132.5,224.5 132.5,221.6 132.1,220 132.3,217 131.6,210.7 131.6,209.3 132.1,209.1 132.9,214.3 133.4,224.6 133.2,233 132.5,242.7 131.1,253 130,257.1 130,258.2 128.2,261.6 125.5,269.1 125.5,269.8 126.1,270 126.1,270.4 125.5,270.7 125.5,271.1 126.1,271.2 125.5,272.3 126.4,272.1 126.6,273 128.6,272.9 128.8,273.6 129.1,273.8 129.1,274.5 131.6,273 134.1,265.5 134.3,263.6 135.2,260.9 135.9,255.9 136.4,254.3 136.1,253.2 136.6,252.1 137,250.4 137,247.9 137.3,246.4 137.7,241.3 137.5,227.1 137.1,223.6 136.6,221.6 136.6,220.2 135.5,216.2 135,215.4 134.5,213.2 132.5,208.6 132.1,208.6 132,209.1 131.4,208.9 130.9,205;128.8,182 127.9,182.1 127.5,184.5 125.7,190.4 118.9,207.3 114.6,219.3 111.8,229.5 108.2,246.1 106.4,259.8 106.1,269.8 106.8,280.4 108.2,287.1 108.9,288 109.3,289.5 109.6,289.5 108.9,286.1 109.5,285.9 109.6,286.4 110,286.4 109.6,284.6 109.8,283.4 108.9,279.1 107.9,276.1 107.7,273.9 108.4,273.9 108.9,277.3 110,279.6 111.4,280.9 112.7,281.2 114.1,281.2 115.2,280.9 115.5,280.2 116.3,280.2 116.6,279.8 116.6,279.1 117,278.9 117.3,277.5 117.1,276.6 117.7,276.4 119.1,270.7 118.9,267.7 119.3,267.5 119.3,264.8 118.9,264.1 119.1,261.4 118.6,260.5 118.9,259.5 116.6,246.8 115.9,240.9 115.5,240.9 112.1,250.7 112.1,251.4 111.8,251.8 111.4,253.8 111.1,254.3 109.6,259.5 108.2,268.2 108.2,273.4 107.5,273.4 107.5,268 107.9,264.6 109.6,256.4 114.1,242.5 115.2,240.2 116.3,236.6 119.6,227.9 123.9,215.4 127.3,202.9 128.9,193.4 128.6,184.8"),
+    MuscleSpec(.shinRight, .front, "68,312.3 67.7,316.6 67.9,327.5 68.9,331.4 69.3,333.8 69.1,335.4 69.5,335.5 69.3,336.8 70.4,342.3 72,348.8 72.3,348.8 72.5,346.2 70.5,337.1 68.8,325.5 68.4,321.2 68.4,312.3;69.1,298.2 68.6,298.4 66.6,308.8 66.2,314.1 66.6,321.1 67,321.1 67,315.9 67.3,312 69.1,300.9;74.1,295.9 73.2,296.6 72.5,296.6 72.3,297.5 72,297.7 71.4,305 70.9,304.8 70.9,301.6 70.5,300.4 70.2,300.4 70,301.2 69.6,301.4 69.1,310.9 69.1,320 69.3,323.4 70.4,331.6 73.9,350 75.4,361.2 75.9,361.2 75.9,359.3 76.2,359.1 75.9,356.4 77,356.2 77,353.4 76.4,348.4 76.6,347 72.7,330.9 70.9,321.1 70.5,317.5 70.7,305.5 71.4,305.5 71.2,317 71.8,322.1 72.9,328 76.1,342 76.4,342 76.6,342.5 77.9,342.5 78.2,343 78.6,343 78.8,342 78.8,335.4 79.5,322.9 79.5,314.1 79.1,310 78,305 75.2,296.6 74.5,295.9"),
+    MuscleSpec(.shinLeft, .front, "131.8,311.8 131.4,311.8 131.6,317.7 130.9,327.7 129.3,337.5 127.5,345.9 127.5,348.6 127.9,348.6 129.5,342.7 130.7,336.2 130.5,334.5 131.1,330.9 131.6,330.2 132,327.7 132.3,319.1;130.9,298.4 130.7,299.8 132.9,314.6 133,320.5 133.4,320.5 133.6,312.5 133,307.3 131.2,298.4;125.9,295.9 124.6,296.6 122.3,303.4 121.1,308.2 120.4,315.7 120.5,326.6 121.1,333.9 121.1,343.2 123.2,342.7 123.8,342.1 127.1,327.7 128.2,320.2 128.9,320.2 128.6,324.3 123.4,346.6 123.6,347.7 123,351.8 123,356.4 123.9,356.6 123.9,361.2 124.5,361.2 125.9,350.2 129.3,333.4 130.7,321.4 130.7,310.4 130.2,301.2 129.8,301.1 129.6,300.4 129.3,300.4 129.3,301.4 128.9,301.6 129.3,311.2 128.8,311.4 128,298.6 127.5,297.5 127.5,296.6 126.8,296.6"),
+    MuscleSpec(.calfRight, .front, "83,337.3 83.2,346.8 83.8,347 84.1,348 84.6,348.4 85,349.1 85,350 85.9,350 86.6,345 83.4,337.3;83.4,320.4 83,325.7 83,334.8 85.7,340.5 86.6,343 87.1,343 88.4,336.1 88.8,330.5 85,322.3 84.6,322.1 83.9,320.5;88.6,300.5 88.6,301.4 87.7,301.8 87.1,303.4 86.4,303.6 86.2,304.3 85.4,304.8 83.9,311.1 83.6,314.6 83.6,318.4 85.4,322.1 85.7,322.3 87.1,325 88.9,329.1 89.5,329.3 90.9,324.3 91.4,317.5 91.1,313.4 89.8,306.4 89.1,300.9 88.9,300.5"),
+    MuscleSpec(.calfLeft, .front, "117,337.3 116.6,337.3 115.7,339.1 113.4,345 114.1,350 114.8,350 114.8,348.9 115.5,348.4 116.1,347.3 116.6,347.3;110.9,300.5 108.9,312.9 108.6,320 108.9,323.8 110.5,329.6 110.9,329.6 112.3,325.9 114.1,322.5 114.8,322.5 111.8,328.9 111.1,331.1 112.9,343.4 113.2,343.4 117,334.5 116.6,320.4 115.9,320.5 115.4,321.8 114.8,321.6 116.3,318.8 116.4,316.4 115.9,310.5 114.5,304.6 113.8,304.3 113.6,303.6 112.7,303.4 112.3,302 111.8,301.8 111.4,300.7"),
+    MuscleSpec(.footRight, .front, "73,367.1 72.5,371.2 73.2,374.1 72.9,375 72.3,379.1 69.3,384.5 66.6,388.2 66.2,389.6 66.2,392 67,392.9 67.7,393.2 69.8,393 71.1,393.8 72.3,393.8 73.2,393.4 74.3,394.1 77,393.9 78.4,394.8 79.5,394.8 80.4,394.3 81.1,394.3 81.8,395 83.2,395.5 85.5,395.4 87.3,393.9 87.9,392.5 87.9,388.8 86.8,386.2 86.8,384.6 87.5,382.9 88,379.8 88,377.1 87.7,375.7 87.7,372.9 88.2,369.1 88,367.1"),
+    MuscleSpec(.footLeft, .front, "112,367.1 111.8,370.5 112.3,374.1 112,376.6 112,380.7 112.5,383 113.2,384.6 113,386.6 112,389.1 112.1,393 112.9,394.3 113.9,395.2 115.2,395.5 116.6,395.5 118,395 118.9,394.3 121.6,394.8 123.2,393.8 124.1,394.1 125.7,394.1 126.6,393.4 127.7,393.8 129.1,393.8 130.2,393 132.3,393.2 133,392.9 133.8,391.8 133.6,388.9 127.7,379.3 126.8,374.3 126.8,373.4 127.3,372 127.3,369.3 127,367.3"),
+    MuscleSpec(.obliqueRight, .front, "66.6,120 66.8,125.5 68.2,126.3 68,126.8 67,126.6 67,131.1 67.9,131.6 70.4,131.8 70.2,132.3 68.9,132.3 68.9,132.9 71.4,135.7 71.2,136.4 70,136.2 68.8,136.8 67.7,136.8 67.5,137.3 67,137.5 67.1,143 67.5,143.8 67.5,146.8 67.9,149.3 67.7,159.5 66.8,164.6 67,170.5 68.6,174.8 73.2,180.4 77.7,180.4 78.8,179.3 79.5,179.3 79.8,178.6 80.5,178.6 81.4,177 82.5,176.2 82.7,173.9 83.2,173.4 83,171.2 83.4,170.9 83.2,169.6 82.7,169.3 83,166.4 82.5,165 82.9,163.8 82.5,163.2 82.5,161.6 82.1,161.1 82.1,160.7 82.7,160.4 82.7,159.6 82,158.4 82.3,157.7 82.1,155.7 81.6,155 81.6,154.1 82.3,153.4 81.8,151.1 82.1,150.9 82.1,147.1 82.7,146.8 82.1,145.2 82.3,144.3 81.6,143.2 81.6,142.5 82,142.3 82,140.7 82.7,137.3 81.4,134.5 82,133.9 82.3,132.7 83,132 83,131.2 83.4,130.9 83.6,128.9 83.2,128.2 83.6,127.9 84.1,127.9 84.1,127.1 85.2,126.4 85.5,125 86.2,123.9 86.4,122.3 85.2,121.6 83.4,121.8 83.2,122.3 82.1,122.3 81.1,121.4 79.8,121.4 78.8,120.9 77.5,120.9 75.5,121.6 74.5,121.6 74.3,122.9 73.6,123 72,121.6 69.1,121.1"),
+    MuscleSpec(.obliqueLeft, .front, "133.4,120 130.2,121.3 128,121.6 127,122.1 126.1,123.2 125.5,123 125.4,121.6 123.8,121.4 122.5,120.9 119.3,121.3 117.9,122.3 116.8,122.3 116.6,121.8 114.6,121.6 113.4,122.3 113.6,123.8 114.5,125.2 114.6,126.1 115.7,127.1 115.7,127.9 116.6,128.2 116.6,130.9 117.1,131.6 117.1,132.1 117.7,132.7 118,133.9 118.6,134.5 117.1,137.5 118,140.7 118,142.3 118.6,142.7 118.6,143 117.5,144.3 117.5,147 117.9,147.1 117.7,148.6 118,148.9 117.9,150.9 118.2,151.2 117.7,152.5 117.7,153.8 118.4,154.1 118.4,154.8 117.7,156.1 117.7,157.7 118,158.4 117.3,159.8 117.3,160.4 117.9,160.5 117.9,161.1 117.3,162 117.3,165.4 117,166.4 117,167.9 117.5,168.4 117.5,168.9 117.1,169.6 116.6,170 116.4,170.7 117,171.2 117,173.6 117.3,173.9 117.3,175.5 117.7,176.4 118.4,176.6 118.4,177.3 118.9,177.5 119.5,178.6 120.2,178.6 120.5,179.5 121.3,179.5 121.4,180 122,180 122.1,180.4 123.6,180.2 123.8,180.5 125,180.4 126.8,180.7 127.3,179.5 131.4,174.6 132.1,173.2 133,170 133,164.3 132.3,160.4 132.3,157.9 132,155.9 132,150.5 132.5,145.4 132.3,144.1 132.7,143.4 133,137.5 132.7,136.8 131.2,136.8 129.8,136.2 128.8,136.4 128.4,136.1 128.4,135.7 130.9,133 131.1,132.3 126.6,132 125.9,131.4 125.9,130.9 127.3,130.5 128.4,131.2 129.6,131.6 132,131.6 133,131.1 133,126.6 130.2,127.1 128.9,128.4 128.4,128.2 128,126.6 131.6,126.3 133,125.7"),
+    MuscleSpec(.head, .front, "88.9,7.5 85.7,10.2 83.2,13.8 81.8,17.3 80.9,22.1 80.9,27.1 81.8,35.4 83,43 84.3,47.3 84.8,51.8 85.4,51.8 85.5,50.4 86.1,50.4 87,51.8 113,51.8 113.2,51.2 113.9,50.9 114.5,50.9 114.6,51.8 115.2,51.8 115.7,47.3 116.8,43.6 117.9,37.7 119.1,27 119.1,22.7 118.6,18.9 116.6,13.6 114.8,10.9 112.5,8.6 109.8,6.8 105.7,5.2 102.7,4.6 97.1,4.6 92.1,5.9"),
+    MuscleSpec(.kneeRight, .front, "77.9,272.5 75.7,273.4 73.6,274.8 71.6,276.8 69.8,279.8 69.1,282.7 69.1,285.2 69.8,288 71.2,290.7 73.6,293 77,295 80.5,295.9 83.4,295.9 86.6,295.2 89.1,293.9 91.4,292 93,285.4 93.9,279.5 93.4,278.4 92.9,282.9 92,286.8 91.2,287.9 90.7,289.8 90.2,290 90,289.5 91.1,284.1 90.2,286.8 89.6,286.6 89.6,285.9 90,285 90,283 90.7,279.6 91.8,276.2 91.4,275.9 90.7,278.8 89.3,280.5 87.3,281.4 85.2,281.2 84.5,280.9 84.3,280.4 87,278.9 89.6,276.8 86.6,278.9 84.1,280.2 83.4,280.2 82.7,278.9 82.3,277.1 86.2,274.6 83.4,276.4 82.3,276.8 81.6,275.2 81.1,272"),
+    MuscleSpec(.kneeLeft, .front, "120.5,272.1 118.9,272 118.8,273.4 117.7,276.6 116.6,276.4 114.5,275.2 117.5,277.1 117.1,278.9 116.6,279.1 116.8,279.8 116.3,280.4 115.2,280 112.1,278.2 112.9,278.9 115.5,280.4 115.2,281.1 114.1,281.4 112.7,281.4 110.9,280.7 109.5,279.1 108.8,277.3 108.6,276.1 108.2,276.1 110,283.4 110,286.6 109.5,286.4 108.8,283.8 109.1,286.4 109.8,288.9 109.6,289.6 109.1,289.5 108.8,288 108,287.1 107,282.5 106.4,278.4 106.1,279.1 106.8,285 108.6,292.1 110.7,293.9 113.8,295.4 116.4,295.9 119.3,295.9 122.5,295.2 125,293.9 128.6,290.7 130.4,287 130.7,285.2 130.7,282.7 130.4,280.9 129.3,278.4 128.2,276.8 125.5,274.3 122.5,272.7"),
+    MuscleSpec(.ankleRight, .front, "76.6,347.7 77.1,356.2 76.2,356.2 75.9,354.3 76.1,357 76.4,358.2 76.4,359.1 76.1,359.3 76.2,360.5 75.9,361.4 75.4,361.4 75,360.7 74.8,357.7 73.6,349.5 71.8,351.4 72.9,356.6 73.4,364.3 76.6,366.2 79.5,367 83.4,366.8 87,365.4 87.3,364.6 86.4,362.5 85.7,359.3 86.8,348.6 86.2,348.4 85.9,350.2 85,350.2 84.5,348.4 83.4,347.1 79.5,347"),
+    MuscleSpec(.ankleLeft, .front, "117.5,347 116.8,347.1 116.6,347.5 116.1,347.3 115.7,348.4 115,348.9 114.8,350.2 113.9,350 113.6,348.4 113,348.6 113.9,354.3 114.3,358.8 113.6,362.1 112.5,365 114.6,366.2 116.6,366.8 121.4,366.8 125,365.4 126.6,364.1 126.8,358.8 128,351.4 126.3,349.5 124.8,360.7 124.5,361.4 123.9,361.4 123.6,360.7 123.6,357.3 124.1,353.9 123.6,356.4 122.9,356.4 122.9,351.8 123.2,347.9 121.4,347.1"),
+    MuscleSpec(.wristRight, .front, "38.6,190 37.1,190.9 35.2,192.9 34.5,194.1 33.9,195.9 33.9,198 35,200.9 37.1,203 38.6,203.9 41.6,204.8 43.9,204.8 45.7,204.5 45.9,201.2 46.4,199.1 49.1,191.4 47.5,190.2 45.2,189.3 41.6,189.1 40,189.5 38.6,194.8 38,198.6 37,198.9 37,197 38.8,190.4"),
+    MuscleSpec(.wristLeft, .front, "152.7,190 151.2,190.9 150.7,191.6 152.9,197 153.8,200 154.3,204.5 155.7,204.8 159.3,204.6 162.5,203.2 164.8,200.9 165.9,198 165.9,195.9 165.4,194.1 164.6,192.9 162.5,190.7 161.2,190 163.2,197.9 163.2,198.8 162.1,198.9 161.1,193.6 159.8,189.5 158,189.1 155.7,189.1"),
+    MuscleSpec(.elbowRight, .front, "50.9,132 50.4,136.6 50.4,143.8 51.1,147.1 50.5,147.3 50.2,146.4 50.5,148.2 52.7,147 53.9,145.7 55.7,142.1 55.7,141.8 53.9,145.5 53.4,146.1 52.3,146.6 52,145.4 51.8,146.1 51.2,145.9 51.1,144.3 50.7,144.1 50.7,136.4 51.1,133.6;43.8,131.6 42,132.5 41.2,133.2 40.9,139.8 39.3,144.6 39.6,145.2 42.3,137 42.9,136.8 43.6,142.5 45.7,148.8 46.2,148.9 44.5,144.3 44.6,143.8 45.2,143.9 45.7,145.5 47.5,148.9 48,148.9 45.5,144.1 44.5,140.5 44.1,138.2 44.1,131.6"),
+    MuscleSpec(.elbowLeft, .front, "148.9,132 148.8,132.1 149.3,137.7 149.3,143 148.8,145 148.8,146.1 148.2,146.2 147.9,145.7 147.9,146.6 147.3,146.8 147,146.1 146.1,145.4 144.1,141.6 144.1,142.1 145.9,145.7 147.9,147.5 149.5,148.2 149.8,146.6 149.3,146.2 149.6,143.6 149.6,137.9 149.3,132.1;156.1,131.6 155.7,131.6 155.9,137.7 155.4,141.1 154.3,144.3 152,148.9 152.3,148.9 153.4,147.1 155,143.2 155.5,143 155.7,143.6 153.8,148.9 154.5,148.2 156.6,141.8 157.1,137.1 157.5,137.1 157.9,137.7 160.2,145 160.7,144.3 158.9,139.1 158.8,133.4 158.6,133"),
+    MuscleSpec(.neck, .back, "96.1,37.1 97,37.1 98,37.9 98.4,40 98.4,43.8 98,44.3 98,44.6 98.4,44.8 97.5,52.9 97.7,53.4 97.1,54.8 102.9,54.8 102.1,53 102.3,51.8 102,50.4 102,48 101.4,44.3 101.6,39.5 102,37.7 102.3,37.3 103,37.5 103.2,37.1 103.9,37.1;115.9,35.9 114.6,36.1 114.1,38.2 113.2,38 113.2,37.1 106.6,37.1 106.4,37.9 106.4,41.6 106.8,44.3 108.2,49.8 110.5,54.8 111.2,54.8 111.8,55.4 112.5,56.8 113.4,57.7 113.8,57.7 113.8,54.1 114.6,47.3 114.8,40.7 115.2,39.5 115.5,39.3;84.1,35.9 84.5,39.3 84.1,39.5 84.1,39.8 84.8,40 85.2,41.6 85.4,48.2 86.2,56.1 86.1,58 86.4,58 88.6,55 89.5,54.8 91.4,50.7 93.2,43.8 93.6,38 93.4,37.1 86.6,37.1 86.6,37.7 85.9,37.9 85.2,35.7"),
+    MuscleSpec(.trapLeft, .back, "93.6,36.8 93.6,42.7 92.1,49.1 90.2,53.9 87.5,57.9 85.2,60.5 82.5,63 77.9,66.2 73.9,68.2 69.8,69.8 63.4,71.8 63.4,72.1 65,72.1 65,72.5 63.8,73 63.8,73.4 65.9,73.8 65.9,75 67.1,75 67.3,75.5 68,75.5 68.4,76.2 69.8,76.2 71.2,77.3 72.3,77.7 73.4,77.5 73.6,78.2 76.2,78.9 76.4,79.6 77.7,79.8 78.6,80.7 79.6,80.9 80.2,81.4 80,82.3 80.4,82.7 80.4,83.6 81.1,84.5 81.1,85.4 81.4,85.7 81.1,87.9 80.7,88 81.1,88.9 81.1,89.5 80.7,89.6 81.1,90.9 80.5,91.2 81.1,93.8 80.9,95.7 81.2,96.4 81.2,98.9 82.9,103.9 86.8,114.5 88.9,118.8 96.2,130.9 96.8,130.9 96.8,128.8 96.4,128 96.4,127.1 97,127 96.4,124.1 97,123.9 97.1,115.9 96.8,114.5 97.3,114.3 97.1,110.4 97.5,110.2 97.1,106.8 97.3,103.2 97,102.5 97,100 97.5,99.5 97.5,98.4 97,96.8 97.3,96.1 97.3,95 97,94.5 97,93.8 96.6,93.4 97,92.3 96.2,91.8 96.2,91.4 96.8,91.2 96.8,90.9 96.2,90.4 96.2,90 96.8,89.8 96.6,88.2 95.7,87.5 95.9,87 96.4,87 96.1,86.2 96.4,85.4 94.8,84.1 95,83.6 96.1,83.8 96.1,83.4 95.2,82.9 95.2,82.5 95.7,82.3 95.7,81.6 95.2,81.4 95.2,79.8 93,78.9 93,78.2 93.6,78 93.6,77.7 92.5,77.5 93,76.4 92.1,76.4 91.8,74.8 92.7,74.5 92.7,74.1 91.8,74.1 91.6,73.6 92.3,73.2 92.1,72.3 92.7,71.8 92.7,71.4 92,71.2 92,70.9 92.7,70.4 92.7,70 92.3,69.8 92.3,68.4 93.4,67.3 93.6,66.1 94.6,64.6 94.6,63.9 95,63.8 95,61.4 95.9,60 95.5,58.9 96.2,57.7 96.1,56.3 97.5,53.4 98.2,44.8 97.9,44.6 98.2,43.8 98,38.2 97.7,37.7 97,37.3 96.1,37.3 95.7,37 94.3,37.1"),
+    MuscleSpec(.trapRight, .back, "106.4,36.8 105.7,37.1 104.3,37 103.9,37.3 102.1,37.7 101.8,39.5 101.6,43.2 102.1,50.4 102.5,51.8 102.3,53 103.9,56.4 103.8,57.7 104.5,58.9 104.1,60 105,61.4 105.2,62.9 104.8,63.8 105.2,63.9 105.2,64.5 106.4,66.1 106.2,67 107.3,68 107.3,69.6 107,69.8 107,70.2 107.9,70.9 107.9,71.2 107.3,71.4 107.3,71.8 107.7,72.1 107.7,73.2 108.4,73.6 108.2,74.1 107.3,74.1 107.3,74.5 108.2,74.6 108.2,75.7 108.8,75.9 108.6,76.4 107,76.4 107.3,77.1 107.1,77.7 106.1,77.7 106.1,78 107.3,78.2 107.1,78.9 104.6,79.8 104.8,81.4 104.3,81.6 104.3,82.3 104.6,82.3 104.8,82.9 103.9,83.4 103.9,83.8 104.8,83.8 105,84.3 103.6,85.4 103.6,85.7 103.9,85.9 103.6,87 104.1,87.1 104.1,87.7 103.4,88.4 103.9,90.2 103.2,90.9 103.2,91.2 103.6,91.2 103.8,91.8 103,92.3 103.4,93.4 102.5,95.2 102.9,97.1 102.3,99.1 103,100 103,102.3 102.7,103.2 102.5,105.2 102.9,106.2 102.5,107.5 102.5,110.2 102.9,110.4 102.7,114.1 103.2,114.3 102.9,115.9 102.9,123.9 103.4,124.1 103.4,125.2 103,126.1 103.4,128.2 102.9,130.7 103.2,131.1 103.8,130.9 111.6,117.7 114.1,112.3 115,109.3 117.7,102.3 118.8,98.9 118.6,96.8 119.1,95.2 118.9,93.2 119.3,92.3 119.3,89.6 118.9,89.3 119.3,88 118.9,87.7 118.6,85.7 119.3,85 119.3,84.1 119.6,83.6 119.5,82.7 120.2,82.1 120,81.2 120.4,80.9 121.4,80.7 122,80 123.4,79.6 123.6,78.9 126.3,78.4 126.4,77.9 128.8,77.3 128.9,77 129.5,77 130.4,76.2 131.4,76.2 131.4,75.9 131.8,75.5 132.5,75.5 132.7,75 134.3,75 134.3,74.3 134.8,73.6 136.1,73.4 136.1,73 135.5,72.9 135.4,72.3 136.2,72.1 136.2,71.8 127.3,68.8 121.6,65.9 116.4,62.1 112.9,58.4 110,54.3 107.7,48.8 106.2,41.6"),
+    MuscleSpec(.deltLeft, .back, "74.5,84.5 74.1,84.5 73.9,83.9 71.1,83.6 69.5,83.9 69.3,83.4 68.4,83.6 68.2,83.2 67,83 65.7,83.2 65.5,82.7 64.5,82.1 64.3,81.4 63.9,81.4 63.4,82 62.7,82 62.5,81.1 60,81.1 59.5,80.5 58.6,80.5 58.4,80 56.8,79.6 56.6,79.1 54.8,79.1 54.8,77.9 54.1,77.9 53.9,77.1 53.4,77 53.9,75.4 53.2,75.5 51.6,76.6 49.5,78.8 47.5,81.6 45,87.1 43.6,92 43,95.4 43,99.3 43.9,104.5 45,107.5 45.4,107.5 46.6,105.5 49.3,102.9 52.7,100 64.8,91.2 74.5,84.8"),
+    MuscleSpec(.deltRight, .back, "125.4,84.3 125.4,84.6 136.4,92.1 147.5,100.2 150.9,103 153.2,105.4 154.6,107.5 155,107.5 156.2,103.4 157,99.1 157,95.5 156.4,92.1 155.2,87.9 152.3,81.4 150.4,78.6 148.4,76.6 146.1,75.4 146.4,76.4 146.1,77.7 145.2,77.9 145,78.8 143.6,79.1 143.4,79.8 142.5,79.6 142.3,80.2 141.4,80 141.2,80.5 140,80.5 139.8,81.1 138.6,80.9 138.4,81.2 137.7,81.2 137.5,82 136.6,82 136.4,81.4 135.5,81.4 135.4,82.1 134.8,82.7 134.1,82.7 133.9,83 130.5,83.4 130.4,83.8 127.3,83.6 127,83.9 126.1,83.9 125.9,84.3"),
+    MuscleSpec(.rotatorCuffLeft, .back, "57.9,97.1 57.9,98.9 58.9,106.1 59.6,107.1 63.2,108.8 67.3,109.8 72,110.5 75.7,110.5 75.7,110.2 74.3,108.2 70.9,104.3 61.3,95.2 60.5,95.2 58.8,96.8;74.6,85.5 68,90 67.9,90.4 67,90.7 64.8,92.5 62.1,94.1 62,94.6 64.8,97.1 71.4,103.8 75,107.9 76.8,110.5 77.3,110.5 80.4,107 81.4,104.8 81.8,103.2 76.8,88.4 75.7,86.1 75.2,85.5"),
+    MuscleSpec(.rotatorCuffRight, .back, "124.6,85.5 122.5,90 122.1,91.8 121.6,92.7 121.1,95 118.2,102.9 118.2,103.8 118.9,105.7 120.7,108.6 122.7,110.5 123,110.5 124.5,108.6 125.5,107.7 125.5,107.3 126.6,106.4 126.6,106.1 129.1,103.4 129.5,103.4 129.6,103.9 125.9,107.9 125.9,108.2 124.3,110.2 124.3,110.5 128,110.5 131.6,109.8 132.9,109.8 133.9,109.3 134.8,109.3 137.7,108.4 140.9,106.8 142,100.2 142,97.3 139.3,95.2 138.6,95.2 130,103.4 129.5,103.2 129.5,102.9 131.2,100.9 138,94.6 138,94.3 135,92.1 134.3,92.1 134.1,91.6 131.1,89.5 130.5,89.5 130,88.8 125.5,85.7"),
+    MuscleSpec(.tricepsLeft, .back, "56.3,98.2 56.1,99.1 55.5,99.1 55.4,99.8 54.5,99.6 52.7,101.4 52.7,102.3 51.6,106.2 50.5,113.8 50.5,121.3 50.9,124.3 50.4,124.5 49.8,123.6 49.6,115.9 50.2,110 51.8,102.1 51.1,102.3 47,106.2 45.4,108.9 43.2,114.8 42.3,122.3 42.5,132.9 43.2,139.6 44.6,145.5 45.7,148 46.8,149.5 47.1,149.5 47.1,147.3 46.6,145.9 46.4,142.7 45.7,141.2 45.7,140.9 46.1,140.7 45.5,136.2 46.1,135.9 45.9,132.1 46.4,131.8 46.6,130.5 47.1,130.4 47.1,129.1 47.7,128.9 47.7,127.7 48,127.1 48.4,127.1 48.4,126.6 49.3,125.7 49.6,124.6 50.5,124.6 50.9,125 50.9,125.5 51.6,126.1 52.1,127.5 52.9,127.7 52.9,128 52.3,128.2 52.5,133.9 51.6,148 52.3,151.1 52.7,151.1 53.2,151.8 53.6,151.8 60.4,135.4 61.8,128.2 61.6,124.5 59.8,115 59.5,114.3 59.1,110.9 58.4,108.4 58.4,106.8 57.3,100.7 56.8,100.5 57,98.4"),
+    MuscleSpec(.tricepsRight, .back, "148,102 149.3,107.1 150.2,113.8 150.4,120.2 150,124.6 150.7,125.2 150.7,125.7 151.2,126.1 151.4,127.1 151.8,127.1 152.3,127.7 152.3,129.1 152.9,129.3 152.9,130.4 153.4,130.5 153.6,132 154.1,132.1 153.9,136.1 154.5,136.2 154.5,138.6 154.3,139.3 153.9,139.5 153.9,140.7 154.3,140.9 153.9,142.5 153.6,142.7 153.4,144.8 153.8,145 153.8,145.4 152.9,147.1 152.7,149.6 153,149.6 154.1,148.2 155.2,145.9 156.1,143 157,138.2 157.5,132.9 157.5,120.2 156.2,113.2 154.1,107.9 152.5,105.5 148.8,102.1;143,98 143,100.5 142.5,100.7 141.6,108.2 141.1,109.8 140.5,114.1 140.2,114.8 138.6,124.1 138.2,125 138.2,128.4 138.9,132.5 140.4,137.3 142.9,142.9 145,148.2 145,148.8 146.4,151.8 146.8,151.8 147.1,150.9 147.9,150.4 148.2,148 147.5,129.1 148,126.6 149.5,125.2 149.1,124.3 149.1,122.9 149.5,121.6 149.5,115 148.4,106.6 147,101.4 146.2,100.2 145.5,99.6 144.6,99.8 144.3,98.8 143.8,98.8 143.6,98.2"),
+    MuscleSpec(.forearmLeft, .back, "57.7,157.9 55.7,158 54.6,159.1 51.8,163.6 50.2,167.1 48.9,172.3 47.3,182 47.1,184.6 47.9,184.6 48,185.5 48.8,185.2 50.7,181.1 53,177.3 54.8,173.2 56.6,166.2;45,156.6 43.8,156.6 43.4,158 42.5,158.2 41.6,159.3 41.1,162.3 40.7,167 40.9,177.3 41.6,185.9 42.3,186.2 43.4,186.1 43.6,183.8 43.6,167 44.1,167.1 44.5,181.1 45.5,181.1 46.1,180.2 47.7,171.6 47.7,162.1 47,159.6;40.9,155.2 40.5,155.2 37.5,160.9 36.4,164.6 35.9,168.4 35.9,176.1 37.3,175.7 37.5,176.4 37.9,176.6 37.3,179.3 37.3,182.9 37.9,186.6 38.2,186.6 39.3,185.2 39.5,181.4 40,178.2 40.2,164.3 39.5,164.3 39.3,163.6 40.9,156.2;42.1,137.7 41.8,137.7 37.9,150.2 36.8,154.8 36.2,160.5 36.6,160.5 38.8,157 40.9,152.9 41.8,150.4 42.7,145.4 42.7,140.9"),
+    MuscleSpec(.forearmRight, .back, "157.1,158.4 156.2,172.3 156.4,185.2 156.6,185.9 157.5,186.1 158,185.9 158,185.5 158.4,185.4 158.8,181.8 158.8,178.8 159.1,175.9 159.1,165.5 158.2,158.8;142.3,158 143.2,165.5 145.5,174.3 151.2,185.2 152,185.4 152.1,185 152.9,185 152.7,182.3 151.2,173.6 149.8,167.3 147,161.4 144.3,158;155.4,156.2 155,156.2 153.9,157.7 152.7,160.5 152.1,163.2 152.1,170.5 153.8,180 154.8,181.4 155.4,181.2 155.5,170.7 156.1,165.5 156.2,158.8 156.6,158.2 156.2,156.8 155.5,156.8;157.7,138 157.1,141.2 157.3,145.5 158.6,151.8 160.2,155 160.2,155.4 159.6,155.5 159.3,154.8 158.9,154.8 160.7,163.6 160.5,164.3 160.2,164.3 160,163.6 159.6,163.6 160,167.5 159.8,177.5 160.5,182.7 160.5,184.8 160.9,185 160.9,185.5 161.4,186.2 162.1,186.2 162,184.5 162.3,184.3 162.5,183.4 162.5,179.3 162,176.4 162.5,175.9 164.1,176.1 164.1,168.8 163,162.5 162.1,160 160.7,157.1 160.4,157 160,155.9 160.7,155.9 161.1,157 161.4,157.1 163.2,160.4 163.4,161.6 163.8,161.6 163.8,158.6 163,153.9 161.8,148.9 158.2,138"),
+    MuscleSpec(.handLeft, .back, "31.8,201.2 31.4,201.2 29.6,203 28.4,203 25.4,205.4 23.9,206.8 21.4,210.5 16.8,215.4 15.9,216.8 15.9,217.3 16.4,218 17.1,218.4 19.1,218.4 21.6,217.1 24.5,214.3 25.7,213.4 26.8,213.4 26.4,219.8 23.2,232.5 23,235.4 23.4,236.3 24.1,236.8 25.4,236.8 26.2,235.9 28.9,228.4 29.1,227.1 30.4,224.3 30.9,224.1 31.1,224.8 30.7,226.1 29.5,236.6 29.5,238.8 29.8,239.6 30.7,240.4 31.6,240.4 32.3,240 33,238.9 34.8,231.3 35.4,231.4 35.4,233.8 35,235.7 35.2,238.2 36.2,239.3 37.3,239.3 38,238.6 38.6,237.1 40.9,225.4 41.4,225.5 42,231.4 42.5,234.1 43.6,235.2 44.1,235.2 44.8,234.6 45.5,231.8 45.5,222 45.9,218.4 46.8,213.9 46.8,209.3 46.1,206.6 45.9,204.5 43.9,205 41.6,205 38.6,204.1 37,203 31.4,203 31.3,202.5"),
+    MuscleSpec(.handRight, .back, "168.2,201.2 168.8,202.5 168.6,203 162.9,203 161.2,204.1 158,205 155.7,205 154.1,204.6 153.2,209.6 153.2,213.4 154.1,218 154.5,222.3 154.5,232 155,234.5 155.5,235 156.2,235.2 157.3,234.3 157.9,232.3 158.6,225.7 159.1,225.5 161.1,236.1 162,238.8 162.7,239.3 163.8,239.3 164.6,238.4 164.8,235 164.5,231.1 165,230.9 166.8,238.8 167.7,240 168.4,240.4 169.3,240.4 170,239.8 170.5,238.4 169.5,227.9 169.1,226.4 169.3,224.8 170,225.2 173.2,234.8 173.9,236.3 174.8,236.8 175.9,236.8 176.6,236.3 177,235.5 176.8,232.3 173.8,220.7 173.2,213.4 173.8,213.2 175,213.9 178,216.8 180.4,218.2 183.4,218.2 184.1,217.3 184.1,216.6 178.9,210.9 176.6,207.5 175,205.7 171.8,203.2 170.4,203 168.6,201.2"),
+    MuscleSpec(.latLeft, .back, "59.5,108 61.1,118 62.5,124.1 62.7,127.3 68.8,144.5 68.6,145.2 67.9,145.2 68.4,152.7 68,154.1 68,157.5 67.1,162.1 67.1,167 66.8,170.9 67.7,171.2 71.8,171.1 73.6,172 78.4,172.1 79.3,170.9 80.2,170.9 80.7,170.5 81.2,167.7 82.3,167.5 82.3,167.1 82.9,167 82.9,166.2 83.2,165.7 83.2,164.3 82.9,164.1 82.5,162.5 83.2,161.8 83,160 83.8,159.8 83.9,159.5 83.8,157.5 84.1,156.4 84.6,156.2 85,155.7 85,154.6 85.5,154.3 85.5,153.2 86.4,153 86.4,151.6 87.1,151.1 88,150.9 88,150.2 88.8,149.6 88.8,148.4 90.5,146.6 90.5,145.5 91.2,145 91.1,144.1 91.6,143.6 91.8,142.7 92.7,142.1 92.7,140.9 93.4,140.4 93.4,138.9 94.5,138 94.3,137 94.8,136.4 94.8,133.6 95.2,133.2 95.2,132 94.5,130 94.5,129.3 88.6,119.8 85.5,113.6 85,111.6 73.9,111.4 70.2,111.1 64.6,110"),
+    MuscleSpec(.latRight, .back, "140.5,108 135.5,110 130.2,111.1 125.7,111.4 115,111.6 114.3,113.9 112.1,118.4 105.4,129.5 105.2,131.2 104.8,131.8 104.8,133.2 105.2,133.8 105,136.1 105.5,136.8 105.5,138.2 106.6,138.9 106.6,140.4 107.1,140.7 107.3,142.1 108.2,142.9 108.4,143.8 108.9,144.1 108.8,145.2 109.3,145.5 109.3,146.4 110.5,147.3 110.7,148 111.2,148.6 111.4,150 112.1,150.4 112.1,151.1 113.6,151.6 113.6,153 114.5,153.2 114.3,154.5 115,154.6 115,155.9 115.9,156.4 115.9,157.1 116.3,157.5 116.1,159.8 116.8,160 116.8,162.1 117.1,162.5 117.1,163.8 116.8,163.9 116.6,165.4 117,165.9 117,167 117.5,167 117.7,167.5 118.4,167.5 118.8,167.9 119.3,170.4 119.6,170.7 120.7,170.9 120.9,171.4 121.4,171.8 121.4,173 121.8,173 122,172.3 126.4,172 128,171.1 132.3,171.2 133,170.9 132.9,163.6 132.3,158.8 132,157.9 132,154.6 131.6,152.5 131.6,148.6 132,147.7 132.1,144.5 131.6,144.5 131.4,143.9 133.9,136.4 136.2,130.5 136.8,128.6 136.8,127.1 137.3,127 137.7,123 138.8,118.8 138.9,116.4 139.5,114.8 139.8,111.2 140.5,108.9"),
+    MuscleSpec(.gluteLeft, .back, "68.2,172.7 68.2,174.5 67.9,174.8 65.9,174.6 65.4,177.1 65,180.9 65,196.8 65.5,197.5 67,197.7 68.9,194.3 71.2,191.1 79.5,182 80.9,180 81.6,179.5 81.6,179.1 82.3,179.1 82,180 79.6,183 75.9,186.6 75.9,187 73.6,189.3 73.6,189.6 70,194.1 67.3,198.4 66.2,201.8 66.2,217.1 67.1,217.3 66.4,219.8 67.3,220.2 67,221.8 67.3,222 67.1,223 67.9,223.2 67.9,225.7 68.9,226.1 69.6,227 71.4,227 72,226.8 73.2,225 74.6,224.1 79.1,222.3 83.2,221.1 88.2,218.8 93.6,215.2 96.8,212.1 98.2,210.2 98.2,198.9 98,196.6 97.7,196.4 97.5,193 96.8,192.7 97,191.8 96.6,191.4 96.6,190.7 96.1,190.5 96.1,189.6 95.7,188.9 93.8,186.6 93,186.2 88.4,182.1 83.6,178.9 82.1,178.9 82,178 80,176.8 74.1,173.9 72.5,173.4 71.4,173.4 71.1,173"),
+    MuscleSpec(.gluteRight, .back, "131.4,172.7 128.9,173 128.4,173.4 125.9,173.9 120.5,176.4 117.9,178 117.7,178.8 116.8,178.8 114.5,180.2 110.5,183 107.5,185.7 106.4,186.2 105.2,187.5 105,188.2 103.9,189.6 103.9,190.4 103.2,190.7 103.2,192.7 102.5,193 102.5,194.6 102.1,195.2 102.3,196.4 101.8,196.8 101.8,210.4 103.2,212.1 105.5,214.5 110.5,218 115.9,220.7 124.1,223.6 126.8,225 128,226.6 128.8,226.6 129.1,227 130.4,227 131.1,226.3 132,225.9 132.3,225.5 132.3,225 132,224.8 132.1,223.4 133,223.2 132.7,222 133,221.8 132.7,220.2 133.6,219.8 133.6,219.1 133.2,218.9 132.9,218 132.9,217.3 133.6,217.1 133.6,201.4 132.3,198 129.8,193.9 127.1,190.7 126.6,189.6 119.3,181.8 118.8,180.7 117.9,179.8 117.9,179.5 118.6,179.5 119.1,180.5 126.3,188.2 127,189.5 128,190.4 131.4,194.8 132.9,197.3 133.4,197.7 134.5,197.5 134.5,197.1 134.8,197 135,183 134.6,177.7 134.1,174.6 132.1,174.8 131.8,174.5"),
+    MuscleSpec(.outerHipLeft, .back, "63.8,191.2 63.4,191.2 62.7,193.2 61.8,197.3 61.4,200.5 61.4,216.2 61.1,220 61.1,225.7 61.6,225.7 61.6,223.4 62,223.2 62.3,221.6 63.6,207.7 63.6,197.9 63.9,195.5"),
+    MuscleSpec(.outerHipRight, .back, "136.2,191.2 136.2,206.6 137.7,222.3 137.9,223 138.4,223.2 138.4,225.4 138.9,225.4 138.6,216.8 138.4,198.8 137.1,192.9 136.6,191.2"),
+    MuscleSpec(.adductorLeft, .back, "92.7,267.3 92.3,267.3 91.8,270.7 88.8,282.3 88.6,285.4 88.8,286.4 89.5,286.6 89.3,288.6 89.6,288.6 90.2,287 90.7,287.1 90.5,288.4 90.9,288.4 91.2,287.5 91.8,287.5 92.7,283 93.2,278.2 93.2,271.6;97.9,212.3 97.3,212.3 94.1,215.7 95,221.4 95.7,230.5 95.7,247.1 96.1,247.1 97.7,231.3"),
+    MuscleSpec(.adductorRight, .back, "107.3,267.3 106.6,274.3 106.8,279.3 108.2,287.3 108.9,287.9 109.1,288.4 109.5,288.4 109.5,287.1 109.8,287.1 110.2,288 110.7,288.2 110.5,286.4 111.2,286.2 111.4,283.9 108.2,270.9 107.7,267.3;102.1,212.3 102.3,231.8 103.2,242.3 103.8,246.3 104.1,246.3 104.3,229.5 105.2,219.8 105.9,215.7 102.5,212.3"),
+    MuscleSpec(.hamstringLeft, .back, "78.2,262.1 77.5,268.4 76.4,273.6 76.4,275.5 78.6,280 82.1,284.6 83,286.4 83.4,286.4 83.6,285 80.9,275.2 79.3,267.3 78.6,262.1;87.9,247.5 87.1,255.5 86.1,261.4 85.4,267.7 85.2,273.4 85.5,275.9 85.9,276.2 86.4,276.2 86.8,276.8 87.1,276.8 87.1,276.4 87.7,276.2 87.9,277 88.2,277 88.2,276.6 89.1,276.4 89.8,275.4 92.1,264.8 88.8,250.2 88.4,247.5;79.1,223.4 76.6,224.1 74.5,225.2 73.6,226.3 73.2,226.3 72.5,227.3 71.4,230 69.8,235.9 68.8,242.7 68.6,251.6 68.9,256.6 70.7,269.5 70.7,275 71.1,275 71.2,273.8 71.8,273.6 72,275.9 72.3,275.9 72.7,271.4 73.2,271.2 73.2,275.9 73.6,275.9 73.8,275.5 74.5,275.5 74.6,276.4 75,276.4 76.2,271.1 77.7,260.2 77.7,252.3 77.3,248.4 77.3,235.2 78,228.2;84.5,221.4 80.7,222.7 79.8,223.6 78.9,228.4 78.2,234.5 78,244.1 78.6,256.8 79.3,262.7 81.2,272.9 81.6,272.9 81.4,271.2 81.8,270.7 82.3,270.5 82.3,269.1 83,268.9 83.4,267.9 84.5,268.2 85,263.4 86.6,253.6 87.3,244.6 87.1,239.3;93,216.4 89.8,218.8 85.5,220.9 85.4,221.8 85.7,222.9 88.6,245.2 90.7,255.4 92.9,263.6 93.4,267.7 93.8,267.7 93.8,262.5 94.6,257.1 95,252.1 95.2,238.6 94.8,229.1 93.6,217.1 93.4,216.4"),
+    MuscleSpec(.hamstringRight, .back, "121.8,261.6 121.4,261.6 121.1,265 119.6,272.7 116.4,284.8 116.8,286.1 117.1,286.1 117.7,284.8 121.6,279.6 123.6,275.4 123.4,273 122.1,266.2;111.6,247.5 110.2,254.8 108.2,262.3 107.9,265.5 108.2,266.1 110.2,275.5 111.1,277 112.1,277.1 112.1,276.6 112.7,276.4 112.9,277.1 113.2,277.1 113.2,276.4 114.5,275.7 114.8,271.8 114.5,266.4 113,257 112.1,247.9 112,247.5;120.9,223.4 122.1,229.3 122.7,237 122.7,244.8 122.3,251.6 122.5,262.3 123.9,272.3 124.8,276.2 125.2,276.2 125.4,275.9 126.1,275.9 126.1,275.5 126.6,275.4 126.8,271.8 127.3,272 127.7,275.7 128,275.7 128,273.9 128.6,273.8 128.8,274.3 129.1,274.3 129.3,273.6 129.5,267.9 131.2,254.5 131.2,243.6 129.8,234.5 128.4,229.5 127.3,227 126.4,225.9 125,224.8;115.4,221.4 112.9,239.1 112.9,247.9 113.6,255.4 115,263.6 115.2,267.1 115.7,268.4 116.1,268.4 116.3,266.2 117,266.2 116.8,269.1 117.7,269.3 117.7,270.9 118.4,271.6 118.4,272.9 118.8,272.9 120.5,263.4 121.4,256.2 121.8,248.4 121.6,232.1 120,223;107,216.4 106.6,216.4 105.7,222.9 104.8,234.8 104.8,248.4 105.4,257.3 106.2,263.2 106.2,267.7 106.6,267.7 107,264.3 109.8,252.9 111.2,245.9 113,231.3 114.6,221.1 112.5,220.2 108.8,217.7 108,217.7 107.9,217.1"),
+    MuscleSpec(.quadLeft, .back, "67.9,255.7 68,267.7 68.4,270.5 68.6,276.8 68.8,277.5 69.1,277.7 69.1,278.2 69.6,278.4 69.6,278 70,277.9 70.2,276.6 70.2,271.2 68.2,255.7;66.4,226.3 65.9,234.3 65.7,245.5 66.4,256.6 66.8,259.3 67.1,259.3 67.3,250.7 68,241.6 68.9,236.1 70.4,230.9 70,230.2 70,229.3 69.6,229.3 69.3,230.7 68.6,230.7 68.2,230.4 68.2,229.3 67.9,229.3 67.7,230.4 67.1,230.2 66.8,226.3"),
+    MuscleSpec(.quadRight, .back, "132,256.8 131.6,256.8 131.1,262.7 129.8,270.9 129.8,277 130,277.7 130.4,277.9 130.4,278.8 130.7,278.8 130.9,277.9 131.2,277.7 132,266.8;133.6,226.4 133.2,226.4 133,227 132.9,230.4 132.1,230.4 132.1,229.5 131.8,229.5 131.4,230.5 130.7,230.5 130.4,230.2 130.4,229.6 129.8,229.6 129.6,231.1 129.8,232.3 130.2,232.5 131.8,240.7 132.7,252 132.9,258.2 133.2,258.2 134.1,249.3 134.1,236.6"),
+    MuscleSpec(.calfLeft, .back, "74.1,351.2 75.4,358 75.9,362.9 76.2,364.1 76.6,364.1 76.2,356.2 74.5,351.2;69.1,330.7 68.9,332.3 71.4,341.6 73.9,348.2 76.6,354.3 78,358.4 78.4,358.4 78.2,356.8 77.9,356.4 77.3,354.1 77.1,351.8 76.8,351.2 76.4,348.9 75.7,347 75.7,346.1 74.6,342.9 74.6,341.8 74.1,340.9 73.4,337.9 70.9,332.3 69.5,331.1 69.5,330.7;82.9,290.9 80.7,294.8 80,296.6 79.3,299.8 79.3,325.4 80.7,330.4 81.6,332 83.2,333.6 84.6,334.1 86.6,334.1 87.3,333.6 87.9,333.8 87.9,334.1 87,334.6 84.8,344.6 84.1,349.8 84.1,352 83.8,353.2 83.8,356.8 84.1,356.8 85.9,349.6 88.4,335.9 88.6,333.4 88,333.4 87.9,332.9 89.1,330.4 90.9,323.9 91.2,321.4 91.2,317.1 90.4,309.3 88.8,299.8 87.9,299.6 87.1,297.1 86.8,297.1 86.8,298.8 86.2,299.5 85.9,302 85,302.1 84.6,305.5 83.9,305.5 84.3,300 83.9,299.6 83.9,299.1 83.4,298.9 83.2,297.5 83.8,291.4 83.4,290.9;73,285 72.3,287 73.6,294.3 74.5,303 73.8,303.2 73.8,305.5 73,305.7 72.9,306.1 72,306.1 71.6,308.9 71.1,309.1 71.1,291.6 70.9,290.4 70.5,290.4 69.6,295.7 68,301.6 67.1,306.6 66.4,312.9 66.4,318.9 67.3,324.3 69.3,329.1 70.4,330.7 72,332.1 74.6,332.3 76.1,331.2 77,329.6 77.9,325.7 78.2,321.4 78.4,302.9 78,298.9 76.6,293 74.3,286.8 73.4,285"),
+    MuscleSpec(.calfRight, .back, "125.9,351.1 125.5,351.1 123.8,355.7 123.2,364.1 123.8,364.1;130.7,330.9 130.4,330.9 128.9,332.3 127.1,337.1 126.6,337.9 125.2,343.4 124.5,344.8 124.3,346.6 123.8,347.5 121.6,358.2 122,358.2 123,355 125.2,350.4 128,343 130.7,333.8 131.1,332;117,290.9 116.6,290.9 116.1,291.6 116.4,295.4 117,297.7 116.6,297.9 116.6,298.9 116.1,299.1 116.1,300 115.7,300.2 115.9,305.2 115.2,305.2 115,302.9 114.3,302.9 113.9,302.3 113.8,300 113,298.6 113,297.3 112.7,297.3 112.1,298.9 111.6,299.1 111.1,300.4 110.7,303.8 109.6,308.9 108.8,316.4 108.9,323.4 110.4,329.1 111.4,331.8 112.1,332.9 112.1,333.4 111.4,333.6 111.8,337.3 113.6,347.5 115.9,356.8 116.3,356.8 116.3,354.8 115,343.6 114.6,343.2 113.8,337.5 113.2,335.9 113.2,334.8 112,333.9 112,333.6 112.5,333.4 113.6,334.1 115,334.1 117,333.4 118,332.3 119.5,329.8 120.7,325.2 120.7,300.2 119.3,295;127,285.2 126.4,285.2 123.6,292.3 122.1,297.7 121.6,302.1 121.8,322.7 122.5,328 123.8,331.1 124.6,332 126.1,332.5 127.9,332.3 128.6,332 130.5,329.3 132.7,324.1 133.6,318.6 133.6,313.8 132.7,305.5 132,301.8 130.5,297 129.5,290.4 129.1,290.4 128.8,296.8 129.1,308.2 128.9,309.5 128.4,309.3 127.9,305.7 126.3,305.7 126.3,304.5 125.4,304.3 125.9,298 127.5,287.9 127.5,286.4"),
+    MuscleSpec(.footLeft, .back, "73.2,367.1 72.5,370.9 72.7,372.5 73,373.2 72.5,378.6 69.6,383.8 67.3,386.8 66.4,388.4 66.2,391.6 67.1,392.7 67.7,392.9 69.8,392.7 70.9,393.2 73.4,393 76.4,394.8 78.6,395.5 83.4,395.7 85.5,395.2 86.4,394.6 87.9,392.9 88,388.8 87,386.1 87,384.1 88,380.5 88,367.1"),
+    MuscleSpec(.footRight, .back, "112,367.1 112,380.5 113,384.1 113,386.1 112,388.6 111.8,390 112,392.1 112.9,393.9 113.9,394.8 115.7,395.5 120.7,395.7 123.2,395 126.4,393 129.1,393.2 130.2,392.7 132.9,392.7 133.8,391.8 133.9,391.1 133.6,390 133.6,388.4 132.7,386.8 130.7,384.3 127.5,378.8 127,375 127,373.2 127.3,372.3 127.3,369.5 126.8,367.1"),
+    MuscleSpec(.head, .back, "85.5,10 84.3,11.6 82.7,14.5 81.4,18.2 81.1,20.4 81.1,26.8 82.3,37 84.1,37 84.1,35.7 84.6,35.9 84.8,37 84.8,35.5 85.4,35.7 85.7,37 93.4,37 93.6,36.6 94.3,37 105.7,37 106.1,36.6 106.4,36.6 106.6,37 114.3,37 114.5,36.1 115,35.9 115.2,36.8 115.5,35.7 116.1,35.9 115.9,37 117.7,37 118.9,25.2 118.9,21.1 118.6,18.6 117.7,15.5 116.4,12.9 115,10.7 112.5,8.2 110.4,6.8 106.1,5 102.5,4.3 97.7,4.3 93.8,5 90.5,6.2 88.4,7.5"),
+    MuscleSpec(.kneeLeft, .back, "81.1,275 83.8,285 83.6,286.4 82.9,286.4 82,284.6 79.5,281.6 77.7,278.8 76.6,276.6 76.6,276.1 73.6,277.9 71.6,279.8 70.5,281.4 69.3,284.6 69.1,288.2 70.2,291.8 70.4,290.4 71.1,290.4 71.2,293.8 73.6,296.1 72.1,287 72.9,285 73.6,285 76.1,290.9 77.5,295.5 78,298.4 79.3,298.8 79.8,296.6 81.6,292.7 82.7,290.9 83.4,290.7 83.9,291.4 83.8,295.2 83.2,297.3 83.6,297.7 83.4,298.9 86.6,298.2 86.8,297 87.1,297 87.7,297.7 90.2,296.1 92.3,289.1 93.6,281.8 93,280.9 92,287.5 91.2,287.7 90.9,288.6 90.4,288.4 90.7,285.5 89.8,288.6 89.3,288.8 89.3,286.6 88.6,286.4 88.4,283.8 89.8,277.5 88.4,276.6 88.4,277 87.9,277.1 87.7,276.2 87.1,277 86.8,277 86.4,276.4 86.4,275.7 86.4,276.2 85.9,276.4 85.4,275.9 85.4,275.4 83.4,275"),
+    MuscleSpec(.kneeRight, .back, "115.2,275.2 114.6,275.4 114.6,275.7 114.1,276.2 113.8,276.2 113.6,275.7 113.2,277.3 112.7,277.1 112.5,276.1 112.1,277.3 111.6,277.1 111.6,276.6 111.4,277.1 110.7,277 110,277.5 111.6,283.9 111.4,286.2 110.7,286.2 110.7,288.4 110,288 109.3,285.5 109.6,288.4 109.1,288.6 108.8,287.9 108.2,287.7 107.5,285.2 107,281.1 106.8,280.9 106.4,281.4 107.1,286.8 108.6,292.5 110.2,296.6 112.1,297.7 112.7,297.1 113,297.1 113.4,298.2 116.6,298.9 116.4,297.9 116.8,297.7 116.3,295.4 115.9,291.6 116.6,290.7 117,290.7 118.2,292.5 119.5,295 120.5,298.8 122,298.4 123.4,292.3 126.4,285 127.1,285.2 127.7,286.4 127.7,287.9 126.4,295.9 128.6,293.8 128.9,290.4 129.6,290.4 129.8,291.4 130.5,289.3 130.7,285.7 130.4,283.9 129.3,281.4 128.2,279.8 125.5,277.3 123.4,276.2 121.8,279.6 117.9,284.8 117.3,286.1 116.8,286.2 116.4,285.9 116.3,284.8 118.8,275"),
+    MuscleSpec(.ankleLeft, .back, "76.2,347.9 76.6,348.9 77,351.2 77.3,351.8 77.9,355.7 78.4,356.8 78.4,358.6 78,358.6 77.7,358 74.3,349.1 73.6,349.5 71.8,351.4 73.2,359.5 73.4,364.3 76.6,366.2 79.5,367 83.4,366.8 87,365.4 87.3,364.6 85.9,360 86.1,354.8 87,348.6 86.2,348.2 84.3,356.8 83.8,357 83.6,353.2 83.9,352 84.3,347.5 82.1,347 79.5,347"),
+    MuscleSpec(.ankleRight, .back, "115.5,347.5 115.5,348.4 115.9,348.9 115.9,352 116.3,352.7 116.3,357 115.9,357 115.5,356.2 113.8,348.4 113,348.6 113.9,355 114.1,359.8 112.5,365 114.6,366.2 117.5,367 120.2,367 122.7,366.4 125,365.4 126.4,364.3 126.8,359.1 128,351.4 125.7,349.1 123.2,355 122.3,357.9 122,358.4 121.6,358.4 121.4,357.9 121.8,357 121.8,355.5 122.1,355 122.5,352.1 122.9,351.6 122.9,350.5 123.6,347.9 120.2,347 117.5,347"),
+    MuscleSpec(.wristLeft, .back, "38.6,190 37.1,190.9 35.2,192.9 34.5,194.1 33.9,195.9 33.9,198 35,200.9 37.1,203 38.6,203.9 41.6,204.8 43.9,204.8 45.7,204.5 46.2,199.5 48.9,191.2 47.1,190 43.9,189.1 41.6,189.1"),
+    MuscleSpec(.wristRight, .back, "152.7,190 151.2,190.9 151.1,191.6 153.8,199.3 154.1,204.5 155.7,204.8 159.3,204.6 162.5,203.2 164.8,200.9 165.9,198 165.9,195.9 165.4,194.1 164.6,192.9 162.5,190.7 159.3,189.3 155.7,189.1"),
+    MuscleSpec(.elbowLeft, .back, "42.3,132.3 41.4,133 41.1,137.7 39.3,142.9 39.1,144.3 39.5,144.6 41.6,137.7 42.1,137.5 42.5,138.2 42.9,140.9 42.9,145.4 42.1,145.7 42.7,145.9 42.5,147.7 43.8,148.4 46.2,148.9 45.2,147.3 43.6,142.5 42.7,137.1;46.6,131.1 46.6,131.8 46.1,132.1 46.2,135.9 45.7,136.2 46.2,139.5 46.2,140.7 45.9,140.9 45.9,141.2 46.6,142.7 46.6,145.9 47,146.1 47.3,147.3 47.3,148.2 47,148.4 47.1,148.9 48,148.9 50.2,148.4 51.4,147.7 52.3,132.9 49.1,131.2"),
+    MuscleSpec(.elbowRight, .back, "157.7,132.5 157.1,138.2 156.2,143 155,146.8 153.8,148.9 155,148.8 157.5,147.7 157.5,145.9 158,146.1 158.2,147.1 157.9,145.2 157.7,145.7 157.1,145.5 157.1,145 157.7,144.8 157.1,144.6 157,141.2 157.7,137.9 158.4,138 160.5,144.6 160.9,143.9 158.8,137.1 158.6,133;151.6,131.1 149.6,131.6 147.7,132.7 148.4,143.8 148.4,147.7 150.7,148.8 152.7,148.9 152.7,147.1 153.6,145.4 153.6,145 153.2,144.8 153.4,142.7 153.8,142.5 154.1,140.9 153.8,140.7 153.8,139.5 154.1,139.3 154.5,137.5 154.1,137.3 154.3,136.2 153.8,136.1 153.9,132.1 153.4,132 153.4,131.1"),
+    MuscleSpec(.lowerBack, .back, "65.5,175.9 65.5,175 65.9,174.5 67.9,174.6 68.2,172.5 72.5,173.2 76.6,174.8 76.8,175.2 77.3,175.2 78.2,175.9 81.8,177.7 82.1,178 82.1,178.8 81.4,179.6 82,179.6 82.7,178.6 83.2,178.6 84.8,179.6 115.2,179.6 116.4,178.8 117.3,178.6 117.9,179.5 118.4,179.6 117.7,178.6 117.7,178 120.5,176.2 125.9,173.8 131.4,172.5 131.8,172.9 132.1,174.6 134.3,174.6 134.5,176.2 132.1,155.2 132.1,157.9 132.5,158.8 133,163.6 133.2,170.9 132.3,171.4 128,171.2 126.4,172.1 122.5,172.5 122,172.3 122,173 121.4,173.2 121.3,171.8 120.7,171.4 120.5,170.7 119.6,170.9 119.1,170.4 118.4,167.5 117.7,167.7 117.5,167.1 116.8,167 116.4,164.5 117.1,163 116.6,162.1 116.6,160 115.9,159.8 115.9,158.2 116.3,157.5 115.7,157.1 115.7,156.4 115.4,156.4 114.8,155.9 114.8,154.6 114.1,154.5 114.3,153 113.4,153 113.4,151.8 86.6,151.8 86.6,153 86.1,153.2 85.5,152.9 85.7,154.3 85,154.6 85.2,155.7 84.6,156.4 84.3,156.4 84.3,157 83.8,157.7 84.1,159.5 83.8,160 83.2,160 83.4,161.8 82.7,162.5 83,164.1 83.4,164.3 83.4,165.7 83,166.2 83,167 82.5,167.1 82.3,167.7 81.4,167.7 80.9,170.5 80.2,171.1 79.5,170.7 79.1,171.6 78.4,172.3 73.6,172.1 71.8,171.2 67.7,171.4 66.8,171.1 66.6,170.5 67,167 67,162.7"),
 ]
 
 /// The anatomical figure itself: the real image (transparent
@@ -327,13 +347,27 @@ struct BodyFigureView: View {
     var primary: Set<MuscleID>? = nil
     var onTap: ((MuscleID) -> Void)? = nil
 
-    private var imageName: String { side == .front ? "BodyFront" : "BodyBack" }
+    private var silhouetteName: String { side == .front ? "BodySilhouetteFront" : "BodySilhouetteBack" }
 
-    /// Overlay palette. The image's own red is the resting state, so
-    /// resting muscles get no overlay at all. Fresh = bright pink with a
-    /// glow AND a dashed white outline, so fresh is never color-only
-    /// (colorblind-safe); recovering = purple, lit = bright orange-red
-    /// with a white edge, a glow, and a pop.
+    /// Segmented style (Nov 12, approved preview): a dark body silhouette,
+    /// every muscle its own flat grey shape with the gaps between them
+    /// showing, and colour only where it means something. Joints, hands,
+    /// feet and head stay silhouette-coloured at rest.
+    private static let silhouette = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 38/255, green: 38/255, blue: 44/255, alpha: 1)
+            : UIColor(white: 0.84, alpha: 1)
+    })
+    private static let muscleRest = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 70/255, green: 70/255, blue: 78/255, alpha: 1)
+            : UIColor(white: 0.68, alpha: 1)
+    })
+
+    /// State palette. Fresh = bright pink AND a dashed white outline, so
+    /// fresh is never colour-only (colourblind-safe); recovering = purple;
+    /// lit = the highlight colour (solid for prime movers, a light wash
+    /// for synergists).
     private static let freshFill = Color(red: 1.0, green: 0.18, blue: 0.33).opacity(0.90)
     private static let recoveringFill = Color(red: 0.55, green: 0.36, blue: 0.96).opacity(0.55)
     private static let litFill = Color(red: 1.0, green: 0.38, blue: 0.08).opacity(0.85)
@@ -362,9 +396,11 @@ struct BodyFigureView: View {
                 // in light mode — with no white box anywhere (DaRon,
                 // 21:36: "background of body needs to match").
                 ZStack {
-                    Image(imageName)
+                    Image(silhouetteName)
                         .resizable()
+                        .renderingMode(.template)
                         .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(Self.silhouette)
                     ForEach(muscleSpecs.filter { $0.side == side }, id: \.id) { spec in
                         muscleOverlay(spec, scale: scale)
                     }
@@ -423,7 +459,9 @@ struct BodyFigureView: View {
         } else if let state = recovery[spec.id] {
             fill = state == .fresh ? Self.freshFill : Self.recoveringFill
         } else {
-            fill = nil
+            // Resting: muscles show as their own grey shape; joints,
+            // hands, feet and head blend into the silhouette.
+            fill = spec.isJoint ? nil : Self.muscleRest
         }
         let shape = overlayPath(spec, scale: scale)
         // The overlay is a PLAIN view, not a Button: touch goes to
@@ -442,9 +480,10 @@ struct BodyFigureView: View {
                 shape
                     .fill(fill ?? Color.clear)
                     .frame(width: 200 * scale, height: 400 * scale)
-                if lit {
-                    shape.stroke(secondary ? Self.stateStroke : Self.litStroke,
-                                 lineWidth: secondary ? 1 : 2)
+                if lit && spec.isJoint {
+                    // A marked joint has no painted muscle edge around
+                    // it: a thin outline keeps it readable.
+                    shape.stroke(Self.litStroke, lineWidth: 1)
                         .frame(width: 200 * scale, height: 400 * scale)
                 } else if recovery[spec.id] == .fresh {
                     // Fresh is never color-only: a dashed white outline
@@ -452,21 +491,11 @@ struct BodyFigureView: View {
                     shape.stroke(Color.white.opacity(0.9),
                                  style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                         .frame(width: 200 * scale, height: 400 * scale)
-                } else if fill != nil {
-                    shape.stroke(Self.stateStroke, lineWidth: 1)
-                        .frame(width: 200 * scale, height: 400 * scale)
                 }
             }
-            // The glow is tight and scales with the figure: a fixed
-            // 12pt shadow bled ~10 canvas units past each shape and
-            // merged neighbouring glows into one blob. At 3 canvas
-            // units the glow still reads as a glow, but two lit
-            // muscles stay visibly separate. Fresh gets the full glow
-            // too, matching the lit glow.
-            .shadow(color: (lit && !secondary) ? litBase
-                        : (recovery[spec.id] == .fresh ? Self.freshFill : .clear),
-                    radius: ((lit && !secondary) || recovery[spec.id] == .fresh) ? 3 * scale : 0)
-            .scaleEffect(lit && !secondary ? 1.02 : 1.0)
+            // Flat fills, no glow or pop: in the segmented style the
+            // gaps between muscles already separate lit shapes, and the
+            // approved preview has none.
             .animation(AppAnimation.snappy, value: lit)
         }
         .accessibilityLabel(spec.id.accessibilityLabel)
@@ -486,34 +515,17 @@ struct BodyFigureView: View {
         }
     }
 
-    /// The overlay shape for one muscle: a polygon tracing the muscle's
-    /// true outline (most muscles, abs included), an ellipse for the
-    /// small parts, rotated around its center when needed.
+    /// The shape for one body area: all of its exact outlines as one
+    /// path (a muscle can be several painted pieces, e.g. two triceps
+    /// heads).
     private func overlayPath(_ spec: MuscleSpec, scale: CGFloat) -> Path {
-        let cx = spec.cx * scale, cy = spec.cy * scale
-        let rx = spec.rx * scale, ry = spec.ry * scale
-        var path: Path
-        if let polygon = spec.polygon, polygon.count >= 3 {
-            path = Path()
-            path.move(to: CGPoint(x: polygon[0].x * scale, y: polygon[0].y * scale))
-            for pt in polygon.dropFirst() {
+        var path = Path()
+        for outline in spec.polygons where outline.count >= 3 {
+            path.move(to: CGPoint(x: outline[0].x * scale, y: outline[0].y * scale))
+            for pt in outline.dropFirst() {
                 path.addLine(to: CGPoint(x: pt.x * scale, y: pt.y * scale))
             }
             path.closeSubpath()
-            return path
-        }
-        if let rect = spec.rect {
-            path = Path(roundedRect: CGRect(x: rect.minX * scale, y: rect.minY * scale,
-                                            width: rect.width * scale, height: rect.height * scale),
-                        cornerRadius: 8 * scale)
-        } else {
-            path = Path(ellipseIn: CGRect(x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2))
-        }
-        if spec.rot != 0 {
-            var t = CGAffineTransform(translationX: cx, y: cy)
-            t = t.rotated(by: spec.rot * .pi / 180)
-            t = t.translatedBy(x: -cx, y: -cy)
-            path = path.applying(t)
         }
         return path
     }
@@ -528,16 +540,24 @@ extension MuscleID {
         case .trapRight: return "Right trapezius"
         case .deltLeft: return "Left shoulder"
         case .deltRight: return "Right shoulder"
+        case .rotatorCuffLeft: return "Left rotator cuff"
+        case .rotatorCuffRight: return "Right rotator cuff"
         case .pecLeft: return "Left chest"
         case .pecRight: return "Right chest"
+        case .serratusLeft: return "Left serratus"
+        case .serratusRight: return "Right serratus"
         case .bicepsLeft: return "Left biceps"
         case .bicepsRight: return "Right biceps"
         case .tricepsLeft: return "Left triceps"
         case .tricepsRight: return "Right triceps"
+        case .elbowLeft: return "Left elbow"
+        case .elbowRight: return "Right elbow"
         case .forearmLeft: return "Left forearm"
         case .forearmRight: return "Right forearm"
         case .wristLeft: return "Left wrist"
         case .wristRight: return "Right wrist"
+        case .handLeft: return "Left hand"
+        case .handRight: return "Right hand"
         case .abs: return "Abs"
         case .obliqueLeft: return "Left obliques"
         case .obliqueRight: return "Right obliques"
@@ -546,6 +566,12 @@ extension MuscleID {
         case .lowerBack: return "Lower back"
         case .gluteLeft: return "Left glute"
         case .gluteRight: return "Right glute"
+        case .outerHipLeft: return "Left outer hip"
+        case .outerHipRight: return "Right outer hip"
+        case .hipFlexorLeft: return "Left hip flexor"
+        case .hipFlexorRight: return "Right hip flexor"
+        case .adductorLeft: return "Left inner thigh"
+        case .adductorRight: return "Right inner thigh"
         case .hipLeft: return "Left hip"
         case .hipRight: return "Right hip"
         case .quadLeft: return "Left quadriceps"
@@ -554,6 +580,8 @@ extension MuscleID {
         case .hamstringRight: return "Right hamstring"
         case .kneeLeft: return "Left knee"
         case .kneeRight: return "Right knee"
+        case .shinLeft: return "Left shin"
+        case .shinRight: return "Right shin"
         case .calfLeft: return "Left calf"
         case .calfRight: return "Right calf"
         case .ankleLeft: return "Left ankle"
