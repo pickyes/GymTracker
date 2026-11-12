@@ -7,6 +7,7 @@ struct TodayView: View {
     @Environment(\.pageContainerSize) private var pageContainerSize
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoWide) private var duoWide
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var saved = false
@@ -139,12 +140,16 @@ struct TodayView: View {
                     .frame(height: (rawKind == .tent || rawKind == .propped || rawKind == .split) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transaction { $0.animation = nil }
-                    // Calendar dropdown (Item B): the same card ContentView's
-                    // menu drops down — scrim + card over the Today page, so
-                    // Today stays visible (dimmed) behind it. Never a sheet.
+                    // Calendar open: the page behind blurs and goes black
+                    // and white, like behind the open menu (DaRon, Nov 12).
+                    .blur(radius: showCalendarDropdown ? 10 : 0)
+                    .saturation(showCalendarDropdown ? 0 : 1)
+                    .animation(AppAnimation.snappy, value: showCalendarDropdown)
+                    // Calendar dropdown: hangs from the Today arrow and
+                    // unfolds downward out of it. Never a sheet.
                     .overlay {
                         if showCalendarDropdown {
-                            calendarDropdownOverlay(size: proxy.size)
+                            calendarDropdownOverlay(size: proxy.size, kind: rawKind)
                         }
                     }
                     .animation(AppAnimation.snappy, value: showCalendarDropdown)
@@ -261,25 +266,50 @@ struct TodayView: View {
     /// Today page stays visible, dimmed, behind the card and Done
     /// dismisses back to Today. One presentation for both entry
     /// points — never a second, different calendar.
-    private func calendarDropdownOverlay(size: CGSize) -> some View {
-        ZStack(alignment: .bottom) {
-            Color.black.opacity(0.35)
+    private func calendarDropdownOverlay(size: CGSize, kind: TodayLayoutKind) -> some View {
+        // Which part of the screen the Today title is on: the workout
+        // column (the right page on the open Duo unless swapped).
+        let columnX: CGFloat = kind == .split && !duoSwapped ? size.width - Self.outerDisplayWidth : 0
+        let columnWidth: CGFloat = kind == .split ? Self.outerDisplayWidth : size.width
+        let cardWidth = min(columnWidth - 24, 460)
+        // Just under the title row (the title sits 30pt down, ~41pt tall).
+        let top: CGFloat = 82
+        let close = { withAnimation(AppAnimation.snappy) { showCalendarDropdown = false } }
+        return ZStack(alignment: .topLeading) {
+            // Tap anywhere outside to fold it back up.
+            Color.black.opacity(0.12)
                 .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation(AppAnimation.snappy) { showCalendarDropdown = false }
-                }
-            CalendarView(onDone: {
-                withAnimation(AppAnimation.snappy) { showCalendarDropdown = false }
-            })
-            .frame(maxWidth: .infinity, maxHeight: size.height * 0.68)
-            .background(Theme.background)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.border, lineWidth: 1))
-            .shadow(radius: 16)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 92)
-            .transition(.move(edge: .top).combined(with: .opacity))
+                .onTapGesture(perform: close)
+            VStack(spacing: 0) {
+                // Small pointer up at the arrow, so the card reads as
+                // dropping out of it.
+                Triangle()
+                    .fill(Theme.background)
+                    .overlay(Triangle().stroke(Theme.border, lineWidth: 1))
+                    .frame(width: 18, height: 9)
+                    // Under the arrow: "Today" (~105pt) + 4pt gap + half
+                    // the chevron, from the column's 16pt margin, minus
+                    // the card's 12pt inset and half the pointer.
+                    .padding(.leading, 114)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .offset(y: 1)
+                    .zIndex(1)
+                CalendarView(onDone: close)
+                    .frame(maxWidth: .infinity, maxHeight: max(320, size.height - top - 110))
+                    .background(Theme.background)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.border, lineWidth: 1))
+            }
+            .frame(width: cardWidth)
+            .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+            .padding(.leading, columnX + 12)
+            .padding(.top, top)
+            // Unfolds downward out of the arrow.
+            .transition(reduceMotion
+                ? .opacity
+                : .scale(scale: 0.08, anchor: UnitPoint(x: 0.28, y: 0)).combined(with: .opacity))
         }
+        .ignoresSafeArea(edges: .top)
     }
 
     /// The workout Today shows: the "Train anyway" plan while one is
@@ -3677,5 +3707,18 @@ struct LibraryExerciseDetailSheet: View {
                 }
             }
         }
+    }
+}
+
+
+/// A small upward-pointing triangle (the calendar dropdown's pointer).
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }
