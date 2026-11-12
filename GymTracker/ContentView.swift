@@ -87,32 +87,15 @@ struct ContentView: View {
                                 }
                         }
                         bottomStack
-                            // Trailing: the nav button's center sits at
-                            // 84% of the screen width (16% from the right
-                            // edge) — the Nov 9 17:32 approved placement
-                            // (DaRon 20:32/20:42: "the placement i approved
-                            // earlier" / "still too low"). Folded
-                            // (~390pt wide) this is ~34pt, so the center
-                            // stays ~62pt from the right edge, essentially
-                            // the 60pt line-up with the exercise card's
-                            // "+" (DaRon 21:23). The rest-timer panel
+                            // Bottom-right corner, lined up with the
+                            // cards' "+" column (see fabTrailingPadding /
+                            // fabBottomPadding). The rest-timer panel
                             // shares the same right edge, stacked above
                             // the button.
                             .padding(.trailing, fabTrailingPadding(screenWidth: proxy.size.width))
-                            // Bottom: the nav button's CENTER sits at 74%
-                            // of the screen height — the Nov 9 17:32
-                            // approved placement (DaRon 20:32/20:42: "the
-                            // placement i approved earlier" / "still too
-                            // low"). The old 24pt rule (DaRon 18:23 "at
-                            // the BOTTOM") put the center ~93% down,
-                            // flush against the bottom edge; the approved
-                            // shot has ~225px of clear space below the
-                            // button. Same fraction in every pose (the
-                            // GeometryReader's size drives it). When the
-                            // keyboard is up the safe area IS the
-                            // keyboard, so the padding grows by the
-                            // keyboard height to keep the button just
-                            // above it instead.
+                            // When the keyboard is up the safe area IS the
+                            // keyboard, so the padding grows to keep the
+                            // button just above it.
                             .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, screenHeight: proxy.size.height))
                             // Fold (Debug Pass 2): the bottom safe-area
                             // inset jumps discretely when the pose flips,
@@ -205,38 +188,31 @@ struct ContentView: View {
         }
     }
 
-    /// Bottom padding for the floating nav button so its CENTER sits at
-    /// 74% of the screen height from the top — the Nov 9 17:32 approved
-    /// placement (DaRon 20:32/20:42: "the placement i approved earlier" /
-    /// "still too low"). The old 24pt rule put the center ~93% down,
-    /// flush against the bottom edge; the approved shot has ~225px of
-    /// clear space below the button. The button is 56pt, so the naive
-    /// padding is 0.26 * screenHeight - 28; the +25 below folds in a
-    /// +53pt upward calibration — the 20:47 measurement showed a
-    /// fraction-based pin landing ~39pt too low, consistent with the
-    /// GeometryReader/window extending ~38pt below the visible display
-    /// (no home-indicator pill visible in the folded bottom strip),
-    /// and the -8 baseline still landed ~33pt too low on screen
-    /// (21:08: (0.843, 0.780) folded). Verified on screen on all
-    /// pages/poses at (0.845, 0.733) folded / (0.833, 0.740) open —
-    /// adjust the constant only from a new on-screen measurement;
-    /// do not re-derive it from the code.
+    /// Bottom padding for the floating nav button: bottom-right corner,
+    /// `fabBottomInset` above the safe-area bottom (Nov 12: DaRon chose
+    /// the corner over the old 74%-height placement, which sat on top of
+    /// the workout — note field, set rows, rest labels — on the Duo).
     /// When the keyboard is up, the safe area IS the keyboard
     /// (safeAreaBottom > 100): the padding becomes the keyboard height
     /// + 12, so the button sits 12pt above the keyboard.
     private func fabBottomPadding(safeAreaBottom: CGFloat, screenHeight: CGFloat) -> CGFloat {
-        safeAreaBottom > 100 ? safeAreaBottom + 12 : max(0, screenHeight * 0.26 + 25)
+        if safeAreaBottom > 100 { return safeAreaBottom + 12 }
+        // With a home-indicator safe area (portrait), the safe-area
+        // bottom is already clear of the screen edge: a 16pt gap lands
+        // ~50pt above it. Without one (Duo landscape) the window reaches
+        // ~30pt past the visible display and the rounded corner bites
+        // into anything closer, so 24 clipped the button and 48 is the
+        // measured fit (Nov 12, on screen). Re-measure in every pose
+        // before changing either number.
+        return safeAreaBottom > 0 ? 16 : 48
     }
 
-    /// Trailing padding for the floating nav button so its CENTER sits
-    /// at 84% of the screen width from the left — the Nov 9 17:32
-    /// approved placement, same fraction in every pose. The button is
-    /// 56pt, so the padding is 0.16 * screenWidth - 28. Folded
-    /// (~390pt wide) this is ~34pt, keeping the center ~62pt from the
-    /// right edge, essentially the 60pt line-up with the exercise
-    /// card's "+" (DaRon 21:23).
+    /// Trailing padding for the floating nav button: its center sits 60pt
+    /// from the right edge in every pose, the same column as the exercise
+    /// cards' "+" buttons (DaRon 21:23 line-up). The button is 56pt, so
+    /// the padding is 60 - 28 = 32.
     private func fabTrailingPadding(screenWidth: CGFloat) -> CGFloat {
-        max(0, screenWidth * 0.16 - 28)
+        32
     }
 
     /// Everything anchored to the bottom-right corner, top to bottom:
