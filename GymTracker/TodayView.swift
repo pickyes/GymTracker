@@ -132,7 +132,11 @@ struct TodayView: View {
                     // Fixed (non-scrolling) layouts only — pinning the
                     // scrolling column stopped it short of the home
                     // indicator and left a black band.
-                    .frame(height: (rawKind == .tent || rawKind == .propped) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
+                    // The open Duo's two-page layout too: on the phone it
+                    // measured taller than the screen and pushed the body
+                    // pane's progress card off the bottom edge. Only ever
+                    // shrinks to the real page height, never grows.
+                    .frame(height: (rawKind == .tent || rawKind == .propped || rawKind == .split) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transaction { $0.animation = nil }
                     // Calendar dropdown (Item B): the same card ContentView's
