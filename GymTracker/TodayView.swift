@@ -2119,10 +2119,11 @@ struct RestTimerCard: View {
                             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                             .frame(width: 56)
                             .padding(.vertical, 22)
+                            // Same material as the swap and menu buttons:
+                            // frosted, plain border, soft shadow — no gloss.
                             .background {
                                 ZStack {
                                     Capsule().fill(.ultraThinMaterial)
-                                    Capsule().fill(Color.black.opacity(0.35))
                                     LavaLiquidFill(
                                         endsAt: store.restEndsAt,
                                         pausedRemaining: store.restPausedRemaining,
@@ -2132,14 +2133,8 @@ struct RestTimerCard: View {
                                 }
                                 .clipShape(Capsule())
                             }
-                            // Glass rim: bright at the top, fading down.
-                            .overlay(
-                                Capsule().stroke(
-                                    LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.08), pillAccent.opacity(0.5)],
-                                                   startPoint: .top, endPoint: .bottom),
-                                    lineWidth: 1.5)
-                            )
-                            .shadow(color: pillAccent.opacity(0.45), radius: 10)
+                            .overlay(Capsule().stroke(Theme.border, lineWidth: 1.5))
+                            .shadow(color: .black.opacity(0.3), radius: 6)
                         } else {
                             HStack(spacing: 8) {
                                 Image(systemName: "timer")

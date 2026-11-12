@@ -397,7 +397,6 @@ struct ContentView: View {
             // it for the full controls. Tent pose has its own tile.
             if restActive && !isTentPose && !navExpanded {
                 RestTimerCard(pill: true)
-                    .shadow(color: .black.opacity(0.5), radius: 12)
                     .transition(.scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
             // Swap sides (open Duo only): above the menu button (and
