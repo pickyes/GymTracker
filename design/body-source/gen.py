@@ -117,13 +117,39 @@ def build(side):
         masks['lowerBack']=m.astype(bool)&alpha&~used
     return alpha,masks,unmapped
 
+def smooth_mask(mask, open_k=13, erode_k=5):
+    """Clean the raw pixel mask into smooth, illustration-quality shapes.
+    Each painted piece is cleaned ON ITS OWN, so the gaps between pieces
+    of one muscle (the six abs blocks, the quad heads) stay open: open
+    removes frayed tendon spikes and drip tails, close fills small
+    notches, blur + threshold turns pixel stair-steps into smooth edges,
+    and a small erode gives every piece the same even gap."""
+    ell=lambda n: cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(n,n))
+    n,lab,st,_=cv2.connectedComponentsWithStats(mask.astype(np.uint8),connectivity=8)
+    out=np.zeros(mask.shape,np.uint8)
+    for i in range(1,n):
+        if st[i,cv2.CC_STAT_AREA]<300: continue
+        m=(lab==i).astype(np.uint8)*255
+        m=cv2.morphologyEx(m,cv2.MORPH_OPEN,ell(open_k))
+        m=cv2.morphologyEx(m,cv2.MORPH_CLOSE,ell(7))
+        m=cv2.GaussianBlur(m,(0,0),3)
+        m=cv2.erode((m>127).astype(np.uint8),ell(erode_k))
+        out|=m
+    return out
+
 def polys(mask):
-    m=cv2.morphologyEx(mask.astype(np.uint8),cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))
+    m=smooth_mask(mask)
+    if cv2.countNonZero(m)<500:
+        # thin areas (outer hip strip, front elbows) would vanish under
+        # the full clean-up: smooth them gently instead
+        m=smooth_mask(mask,open_k=3,erode_k=3)
+    if cv2.countNonZero(m)<500:
+        m=cv2.morphologyEx(mask.astype(np.uint8),cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))
     cs,_=cv2.findContours(m,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
     out=[]
     for c in cs:
-        if cv2.contourArea(c)<120: continue
-        a=cv2.approxPolyDP(c,1.0,True)[:,0,:]
+        if cv2.contourArea(c)<200: continue   # drop slivers
+        a=cv2.approxPolyDP(c,1.2,True)[:,0,:]
         out.append([(round(x/S,1),round(y/S,1)) for x,y in a])
     return out
 
