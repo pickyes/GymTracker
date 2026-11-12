@@ -464,8 +464,12 @@ struct TodayView: View {
         // window is actually wide. A stale .regular size class after a
         // warm relaunch (D26, 2026-11-10) must never squeeze the two-pane
         // layout into the folded window: folded ≈ 412pt, open inner
-        // ≈ 850pt, iPad portrait 768pt.
-        if horizontalSizeClass == .regular && size.width >= 600 { return .regular }
+        // ≈ 850pt. The bar is 760pt, not 600: the open inner display held
+        // in portrait is 669pt wide, which left each pane ~326pt — too
+        // narrow for a set row, so the workout pane ran off the right
+        // edge and covered the Front/Back toggle. That pose now gets the
+        // single column, which has room to spare at 669pt.
+        if horizontalSizeClass == .regular && size.width >= 760 { return .regular }
         // Outer display: single column, one-handed.
         return .compact
     }
