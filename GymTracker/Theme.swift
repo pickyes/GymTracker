@@ -1890,7 +1890,9 @@ struct SideBarItems: ViewModifier {
                         }
                     }
                     if wide && duo.showSwapButton {
-                        ToolbarItem(placement: .secondaryAction) {
+                        // Its own button in the side bar (DaRon), not inside
+                        // the "more" menu.
+                        ToolbarItem(placement: .primaryAction) {
                             Button { store.swapSidesRequest += 1 } label: {
                                 Label("Swap sides", systemImage: "arrow.left.arrow.right")
                             }
