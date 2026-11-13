@@ -47,6 +47,8 @@ struct ContentView: View {
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
     @State private var swapInFlight = false
+    /// The Calendar companion page's width (narrow when upright).
+    @State private var companionWidth: CGFloat = 0
     private var showSwapButton: Bool { duo.showSwapButton }
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
@@ -253,7 +255,8 @@ struct ContentView: View {
                     .opacity(selectedPage == .today ? 1 : 0)
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)
-                unfoldPage(.history, wide: wide) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
+                // Calendar stays side by side upright too (DaRon), like Profile.
+                unfoldPage(.history, wide: wide, stacksWhenTall: false) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
                 // Notes and Profile split themselves when wide, like
                 // Apple's Notes and Settings: list on one page, the
                 // open note / section on the other.
@@ -351,14 +354,14 @@ struct ContentView: View {
     /// Swapped, the two trade places.
     @ViewBuilder
     private func unfoldPage<Main: View, Side: View>(
-        _ page: Page, wide: Bool,
+        _ page: Page, wide: Bool, stacksWhenTall: Bool = true,
         @ViewBuilder main: () -> Main,
         @ViewBuilder companion: () -> Side
     ) -> some View {
         let swapped = wide && swapSides
         let companionPage = companion()
         let mainPage = main()
-        DuoPagePair(wide: wide, swapped: swapped) {
+        DuoPagePair(wide: wide, swapped: swapped, stacksWhenTall: stacksWhenTall) {
             companionPage
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .hingeReveal()
@@ -374,12 +377,20 @@ struct ContentView: View {
     /// Calendar's companion (open Duo): the chosen day, with the
     /// training heatmap pinned under it (Nov 12 layout DaRon picked).
     private var historyCompanion: some View {
-        historyCompanionDay
+        // On the clock's side the page sits under the corner buttons, and
+        // when it's the narrow upright column its top sits under the clock.
+        let clockSide = swapSides
+        let narrow = companionWidth > 0 && companionWidth < 320
+        return historyCompanionDay
+            .padding(.top, clockSide && narrow ? 44 : 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { companionWidth = $0 }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 TrainingHeatmap(selectedDay: $calendarDay)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 24)
+                    // Clear of the swap and menu buttons on their side.
+                    .padding(.trailing, clockSide ? 56 : 0)
                     .padding(.top, 12)
                     .padding(.bottom, 20)
                     .background(Theme.background)

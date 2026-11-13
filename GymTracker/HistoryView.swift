@@ -941,23 +941,22 @@ struct TrainingHeatmap: View {
     @EnvironmentObject var store: WorkoutStore
     @Binding var selectedDay: Date
 
-    private let weeks = 14
     private let cell: CGFloat = 20
     private let gap: CGFloat = 4
 
     private var calendar: Calendar { Calendar.current }
 
-    /// The first day shown: the start of the week, 13 weeks before this one.
-    private var firstDay: Date {
+    /// The first day shown: the start of the week, `weeks - 1` before this one.
+    private func firstDay(_ weeks: Int) -> Date {
         let today = calendar.startOfDay(for: Date())
         let weekStart = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
         return calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: weekStart) ?? weekStart
     }
 
     /// Sets logged per day over the window.
-    private var setsByDay: [Date: Int] {
+    private func setsByDay(from start: Date) -> [Date: Int] {
         var result: [Date: Int] = [:]
-        for session in store.sessions where session.date >= firstDay {
+        for session in store.sessions where session.date >= start {
             let day = calendar.startOfDay(for: session.date)
             // Done working sets only, the same count as This week's bars
             // (unfinished and warm-up sets used to light a full square).
@@ -970,18 +969,35 @@ struct TrainingHeatmap: View {
     }
 
     var body: some View {
-        let sets = setsByDay
+        // As many weeks as fit across (up to 14): the upright Duo's narrow
+        // page fits fewer, so the heatmap never forces its page wider.
+        ViewThatFits(in: .horizontal) {
+            grid(weeks: 14)
+            grid(weeks: 12)
+            grid(weeks: 10)
+            grid(weeks: 8)
+            grid(weeks: 6)
+            grid(weeks: 4)
+        }
+    }
+
+    private func grid(weeks: Int) -> some View {
+        let start = firstDay(weeks)
+        let sets = setsByDay(from: start)
         let today = calendar.startOfDay(for: Date())
         let streak = store.dayStreak
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Last \(weeks) weeks · \(streak)-day streak")
+        return VStack(alignment: .leading, spacing: 8) {
+            // Non-breaking hyphen, so "0-day" never splits across lines.
+            Text("Last \(weeks) weeks · \(streak)\u{2011}day streak")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: gap) {
                 ForEach(0..<weeks, id: \.self) { week in
                     VStack(spacing: gap) {
                         ForEach(0..<7, id: \.self) { weekday in
-                            let day = calendar.date(byAdding: .day, value: week * 7 + weekday, to: firstDay) ?? firstDay
+                            let day = calendar.date(byAdding: .day, value: week * 7 + weekday, to: start) ?? start
                             square(day: day, sets: sets[day] ?? 0, today: today)
                         }
                     }
@@ -989,7 +1005,7 @@ struct TrainingHeatmap: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Training over the last \(weeks) weeks: \(sets.count) workout days, \(streak)-day streak")
+        .accessibilityLabel("Training over the last \(weeks) weeks: \(sets.count) workout days, \(store.dayText(streak)) streak")
     }
 
     @ViewBuilder
