@@ -177,13 +177,14 @@ struct SettingsView: View {
             // section sat at the safe-area bottom — under the floating
             // menu button (and the rest-timer panel while a rest runs)
             // at scroll-bottom.
+            // Privacy & About (from Profile) above the bottom spacer.
+            if let trailingSections { trailingSections }
             Section {
                 Color.clear
                     .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
-            if let trailingSections { trailingSections }
         }
         .oledList()
         .navigationTitle("Settings")
@@ -672,7 +673,7 @@ struct CustomExercisesView: View {
                 .listRowBackground(Color.clear)
         }
         .oledList()
-        .navigationTitle("Custom exercises")
+        .navigationTitle(leadingSections == nil ? "Custom exercises" : "Exercises")
         .sheet(item: $editingExercise) { exercise in
             CustomExerciseEditorView(exercise: exercise) { updated in
                 if let index = store.customExercises.firstIndex(where: { $0.id == updated.id }) {

@@ -216,7 +216,7 @@ private struct DuoSwappedKey: EnvironmentKey { static let defaultValue = false }
 /// How far the open Duo's pages are through a swap, 0 (pane on the
 /// left) to 1 (pane on the right), moving smoothly while they slide.
 /// Side-dependent details read it so they glide with the pages.
-private struct DuoSwapProgressKey: EnvironmentKey { static let defaultValue: Double = 0 }
+private struct DuoSwapProgressKey: EnvironmentKey { static let defaultValue: Double = -1 }
 
 extension EnvironmentValues {
     var fabBottomOffset: CGFloat {
@@ -279,71 +279,50 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// Stack the pages DS style when the open Duo is held upright. Every
     /// page does except Profile (DaRon), which stays side by side.
     var stacksWhenTall = true
+    /// Draw a hairline at the hinge between the pages (Notes).
+    var showsDivider = false
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
 
     @Environment(\.layoutDirection) private var direction
+    /// The page size without the keyboard: the keyboard must never flip
+    /// the DS layout or move its split off the hinge (red team).
+    @State private var steady: CGSize = .zero
 
     var body: some View {
         GeometryReader { geo in
-            if wide && stacksWhenTall && geo.size.height > geo.size.width {
-                // Open and upright (DaRon: Nintendo DS style): one page
-                // on each half of the screen, top and bottom of the fold,
-                // instead of squeezing two pages side by side. The body /
-                // companion page is the top screen, the page you tap and
-                // type in is the bottom one; swap flips them.
-                DuoStackedPair(swapped: swapped, size: geo.size, direction: direction,
-                               pane: pane, main: main)
-            } else {
-                DuoPairStage(progress: wide && swapped ? 1 : 0,
-                             wide: wide, size: geo.size,
-                             mainWidth: mainWidth, direction: direction,
-                             pane: pane, main: main)
-            }
+            let s = steady.width > 0 ? steady : geo.size
+            let stacked = wide && stacksWhenTall && s.height > s.width
+            // Open and upright (DaRon: Nintendo DS style): one page on
+            // each half, top and bottom of the fold; the companion page is
+            // the top screen. Same view either way (only the frames and
+            // offsets change), so rotating never rebuilds the pages — a
+            // separate stacked view lost the open note mid-typing.
+            DuoPairStage(progress: wide && swapped ? 1 : 0,
+                         wide: wide,
+                         stacked: stacked,
+                         showsDivider: showsDivider,
+                         // Stacked keeps the keyboard-free height, so the
+                         // halves stay on the hinge; pages still get the
+                         // keyboard's safe area and scroll above it.
+                         size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
+                         mainWidth: mainWidth, direction: direction,
+                         pane: pane, main: main)
         }
         // The pages span the whole screen, edge to edge (their content
         // still gets the safe areas). Only the top used to be ignored, so
         // the cards were sized to the screen minus the home-indicator
         // strip: a hairline gap at the top, a wide one at the bottom.
         .ignoresSafeArea(.container)
-    }
-}
-
-/// The DS layout: two equal halves split at the hinge. The halves trade
-/// places with the same slide as the side-by-side swap, vertically.
-private struct DuoStackedPair<Pane: View, Main: View>: View {
-    var swapped: Bool
-    var size: CGSize
-    var direction: LayoutDirection
-    var pane: () -> Pane
-    var main: () -> Main
-
-    var body: some View {
-        let half = size.height / 2
-        VStack(spacing: 0) {
-            if swapped {
-                main().environment(\.layoutDirection, direction)
-                    .frame(width: size.width, height: half, alignment: .top)
-                    .clipped()
-                    .transition(.move(edge: .top))
-                Rectangle().fill(Theme.border).frame(height: 0.5)
-                pane().environment(\.layoutDirection, direction)
-                    .frame(width: size.width, height: half, alignment: .top)
-                    .clipped()
-                    .transition(.move(edge: .bottom))
-            } else {
-                pane().environment(\.layoutDirection, direction)
-                    .frame(width: size.width, height: half, alignment: .top)
-                    .clipped()
-                    .transition(.move(edge: .top))
-                Rectangle().fill(Theme.border).frame(height: 0.5)
-                main().environment(\.layoutDirection, direction)
-                    .frame(width: size.width, height: half, alignment: .top)
-                    .clipped()
-                    .transition(.move(edge: .bottom))
+        .background {
+            GeometryReader { g in
+                Color.clear
+                    .onAppear { steady = g.size }
+                    .onChange(of: g.size) { _, size in steady = size }
             }
+            .ignoresSafeArea(.container)
+            .ignoresSafeArea(.keyboard)
         }
-        .frame(width: size.width, height: size.height, alignment: .top)
     }
 }
 
@@ -352,6 +331,9 @@ private struct DuoStackedPair<Pane: View, Main: View>: View {
 private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var progress: Double
     var wide: Bool
+    /// DS layout: halves stacked top and bottom instead of side by side.
+    var stacked = false
+    var showsDivider = false
     var size: CGSize
     var mainWidth: CGFloat?
     var direction: LayoutDirection
@@ -362,28 +344,39 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         get { progress }
         set { progress = newValue }
     }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let total = size.width
-        let mainW = wide ? min(mainWidth ?? total / 2, total) : total
-        let paneW = max(total - mainW, 0)
+        let halfH = size.height / 2
+        // Side by side: the main page keeps the front screen's width.
+        // Stacked (DS): both pages are full width, half height each.
+        let mainW = stacked ? total : (wide ? min(mainWidth ?? total / 2, total) : total)
+        let paneW = stacked ? total : max(total - mainW, 0)
+        let pageH = stacked ? halfH : size.height
         let p = min(max(progress, 0), 1)
         // One continuous motion in three overlapping beats: the cards lift
         // in place (side by side, even gaps), slide past each other, and
         // land side by side again before settling back to full screen.
         func smooth(_ x: Double) -> Double { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
-        let slide = smooth((p - 0.2) / 0.6)
+        // Reduce Motion: no lift or slide, the pages trade places under a
+        // quick fade (red team: it ran the full motion, just faster).
+        let calm = reduceMotion
+        let slide = calm ? (p < 0.5 ? 0 : 1) : smooth((p - 0.2) / 0.6)
         // Left-to-right x of each page, then mirrored for RTL languages.
-        var paneX = slide * mainW
-        var mainX = (1 - slide) * paneW
-        if direction == .rightToLeft {
+        var paneX = stacked ? 0 : slide * mainW
+        var mainX = stacked ? 0 : (1 - slide) * paneW
+        // Stacked: the companion page starts on top and slides down.
+        let paneY = stacked ? slide * halfH : 0
+        let mainY = stacked ? (1 - slide) * halfH : 0
+        if direction == .rightToLeft && !stacked {
             paneX = total - paneX - paneW
             mainX = total - mainX - mainW
         }
         // 0 at rest, 1 for most of the slide: the cards lift off quickly,
         // hold their full card shape (even gaps, round corners) while
         // they cross, and settle back at the very end.
-        let lift = wide ? smooth(p / 0.22) * smooth((1 - p) / 0.22) : 0
+        let lift = wide && !calm ? smooth(p / 0.22) * smooth((1 - p) / 0.22) : 0
         // Even spacing all around (DaRon): each card pulls in a full gap
         // at the screen edge and half a gap on the side facing the other
         // card, so edge | card | card | edge are all one gap apart. The
@@ -392,7 +385,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         let half = g / 2
         var paneLead = g - half * slide, paneTrail = half + half * slide
         var mainLead = half + half * slide, mainTrail = g - half * slide
-        if direction == .rightToLeft {
+        if stacked {
+            paneLead = g; paneTrail = g; mainLead = g; mainTrail = g
+        }
+        if direction == .rightToLeft && !stacked {
             swap(&paneLead, &paneTrail)
             swap(&mainLead, &mainTrail)
         }
@@ -405,23 +401,49 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
             if wide {
                 pane()
                     .environment(\.layoutDirection, direction)
-                    .frame(width: paneW, height: size.height, alignment: .top)
-                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: size.height),
+                    // DS: the bottom half keeps clear of the corner buttons.
+                    .safeAreaPadding(.trailing, stacked && slide >= 0.5 ? 76 : 0)
+                    .frame(width: paneW, height: pageH, alignment: .top)
+                    .clipped()
+                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: pageH),
                                           leading: paneLead, trailing: paneTrail))
-                    .offset(x: paneX)
+                    .offset(x: paneX, y: paneY)
             }
             main()
                 .environment(\.layoutDirection, direction)
-                .frame(width: mainW, height: size.height, alignment: .top)
-                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: size.height),
+                .safeAreaPadding(.trailing, stacked && slide < 0.5 ? 76 : 0)
+                .frame(width: mainW, height: pageH, alignment: .top)
+                .clipped(antialiased: stacked)
+                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: pageH),
                                       leading: mainLead, trailing: mainTrail))
-                .offset(x: wide ? mainX : 0)
+                .offset(x: wide ? mainX : 0, y: mainY)
                 // The front screen's page passes over the other one.
                 .zIndex(1)
+            // At rest: a hairline at the hinge (DS fold, or Notes' pages).
+            if wide && !stacked && showsDivider {
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(width: 0.5, height: size.height)
+                    .offset(x: (1 - slide) * paneW + slide * mainW)
+                    .opacity(1 - min(1, lift * 3))
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+            }
+            if stacked {
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(width: total, height: 0.5)
+                    .offset(y: halfH)
+                    .opacity(1 - min(1, lift * 3))
+                    .allowsHitTesting(false)
+                    .zIndex(2)
+            }
         }
         .frame(width: total, height: size.height, alignment: .topLeading)
+        .opacity(calm && wide ? abs(1 - 2 * p) * 0.85 + 0.15 : 1)
         .environment(\.layoutDirection, .leftToRight)
-        .environment(\.duoSwapProgress, wide ? slide : 0)
+        // -1 = not in a pair (the + button falls back to duoSwapped).
+        .environment(\.duoSwapProgress, wide ? slide : -1)
     }
 }
 
@@ -781,12 +803,16 @@ struct HingeReveal: ViewModifier {
         content
             .frame(width: moving ? openSize.width : nil,
                    height: moving ? openSize.height : nil,
-                   alignment: .top)
+                   alignment: .topLeading)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 // Remember the size only while the phone is fully open
                 // (or has no hinge): that's the size to hold mid-fold.
                 if HingeState.shared.openness >= 1, size.width > 0, size.height > 0 {
                     openSize = size
+                } else if openSize.width > 0,
+                          (size.width > size.height) != (openSize.width > openSize.height) {
+                    // Rotated mid-fold: the held size no longer fits.
+                    openSize = .zero
                 }
             }
     }

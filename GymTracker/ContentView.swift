@@ -319,7 +319,7 @@ struct ContentView: View {
     private func swapPages() {
         guard !swapInFlight else { return }
         if reduceMotion {
-            withAnimation(.easeInOut(duration: 0.25)) { duo.swapSides.toggle() }
+            withDuoSwapAnimation(.easeInOut(duration: 0.3)) { duo.swapSides.toggle() }
             return
         }
         swapInFlight = true

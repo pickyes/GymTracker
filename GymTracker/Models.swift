@@ -2061,6 +2061,9 @@ final class WorkoutStore: ObservableObject {
     func addNoteCategory(_ name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // "Pinned" is the Notes page's own folder (a category with that
+        // name made its notes unreachable).
+        guard trimmed.localizedCaseInsensitiveCompare("Pinned") != .orderedSame else { return }
         guard !noteCategories.contains(where: { $0.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
         noteCategories.append(trimmed)
         persistNoteCategories()

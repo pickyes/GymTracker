@@ -795,9 +795,24 @@ struct InjuryEditorView: View {
                 .buttonStyle(.borderless)
                 .onAppear(perform: setup)
                 .onDisappear { save() }
-                .onChange(of: parts) { _, _ in save() }
+                // One save shortly after you stop tapping or typing
+                // (each save rebuilds the program; text also saves).
+                .onChange(of: parts) { _, _ in scheduleSave() }
+                .onChange(of: otherText) { _, _ in scheduleSave() }
         } else {
             standalone
+        }
+    }
+
+    @State private var saveTask: Task<Void, Never>?
+
+    private func scheduleSave() {
+        guard didSetup else { return }
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            save()
         }
     }
 

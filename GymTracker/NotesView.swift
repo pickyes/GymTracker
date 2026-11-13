@@ -70,8 +70,10 @@ struct NotesView: View {
             case .created:
                 return up ? a.createdAt < b.createdAt : a.createdAt > b.createdAt
             case .category:
-                let ca = a.category ?? "~", cb = b.category ?? "~"
-                if ca != cb {
+                if a.category != b.category {
+                    // Uncategorized always last.
+                    guard let ca = a.category else { return false }
+                    guard let cb = b.category else { return true }
                     let r = ca.localizedStandardCompare(cb)
                     return up ? r == .orderedAscending : r == .orderedDescending
                 }
@@ -137,10 +139,20 @@ struct NotesView: View {
                 let r = $0.name.localizedStandardCompare($1.name)
                 return sortAscending ? r == .orderedAscending : r == .orderedDescending
             }
-        default:
+        case .category:
+            // Folders are categories: keep them ahead of the notes.
+            return folders + notes
+        case .edited, .created:
+            // Notes keep the date the sort is by (Date Created used to
+            // fall back to the edit date here — red team).
+            func date(_ item: NotesItem) -> Date {
+                switch item {
+                case .folder(_, _, let latest): return latest ?? .distantPast
+                case .note(let note): return sort == .created ? note.createdAt : note.updatedAt
+                }
+            }
             return merged.sorted { a, b in
-                let da = a.date ?? .distantPast, db = b.date ?? .distantPast
-                return sortAscending ? da < db : da > db
+                sortAscending ? date(a) < date(b) : date(a) > date(b)
             }
         }
     }
@@ -174,14 +186,10 @@ struct NotesView: View {
                 // The list keeps the front screen's exact width and side
                 // (right, like Today), so opening the Duo is seamless —
                 // the note waits on the other page. Swap mirrors it.
-                DuoPagePair(wide: true, swapped: swapped) {
+                // The pair draws the hinge line itself, so it stays on the
+                // hinge in both layouts and while the pages swap.
+                DuoPagePair(wide: true, swapped: swapped, showsDivider: true) {
                     detailPane
-                        // The line between the pages, on the hinge side.
-                        // (A plain Divider in an overlay draws horizontal —
-                        // it cut across the middle of the note.)
-                        .overlay(alignment: swapped ? .leading : .trailing) {
-                            Rectangle().fill(Theme.border).frame(width: 0.5)
-                        }
                 } main: {
                     // Same black as the note page beside it.
                     listPane
@@ -212,6 +220,8 @@ struct NotesView: View {
             }
         }
         .onChange(of: store.userNotes.map(\.id)) { _, _ in syncSelection() }
+        .onChange(of: store.userNotes.map(\.isPinned)) { _, _ in closeMissingFolder() }
+        .onChange(of: store.noteCategories) { _, _ in closeMissingFolder() }
         // The corner compose button (ContentView).
         .onChange(of: store.composeNoteRequest) { _, _ in compose() }
         .alert("Delete this note?", isPresented: Binding(
@@ -245,7 +255,21 @@ struct NotesView: View {
 
     private func compose() {
         let id = store.createBlankNote(category: initialCategoryForNewNote)
+        // Written inside Pinned: it starts pinned, so it stays here.
+        if openFolder == Self.pinnedFolder, let note = store.userNotes.first(where: { $0.id == id }) {
+            store.setNotePinned(note, pinned: true)
+        }
         open(id)
+    }
+
+    /// Leave a folder that no longer exists (its category was removed,
+    /// or the last pinned note was unpinned).
+    private func closeMissingFolder() {
+        guard let openFolder else { return }
+        let exists = openFolder == Self.pinnedFolder
+            ? store.userNotes.contains(where: \.isPinned)
+            : store.noteCategories.contains(openFolder)
+        if !exists { withAnimation(AppAnimation.snappy) { self.openFolder = nil } }
     }
 
     // MARK: List (Files-style, DaRon Nov 12)
@@ -872,7 +896,9 @@ private struct NoteDetailView: View {
         let day = cal.startOfDay(for: note.createdAt)
         let title = note.workoutTitle
             ?? store.sessions.first(where: { cal.isDate($0.date, inSameDayAs: day) })?.dayTitle
-            ?? store.programDay(for: day)?.title
+            // The plan only counts for a note written today; an old note
+            // must not name a workout that never happened (red team).
+            ?? (Calendar.current.isDateInToday(day) ? store.programDay(for: day)?.title : nil)
         if let title {
             Button {
                 store.calendarJumpRequest = day

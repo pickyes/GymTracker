@@ -1900,7 +1900,9 @@ struct TodayView: View {
         // same center line as the swap/menu buttons, under the Wi-Fi icon
         // (47pt from the edge; the column's own 16pt inset + 3 + 28).
         // Glides with the pages during a swap (no snap afterwards).
-        .padding(.trailing, duoWide ? 3 + 13 * duoSwapProgress : 16)
+        .padding(.trailing, duoWide
+                 ? (duoSwapProgress >= 0 ? 3 + 13 * duoSwapProgress : (duoSwapped ? 16 : 3))
+                 : 16)
     }
 
     /// The vivid circular action button (56pt, accent fill, glow):
