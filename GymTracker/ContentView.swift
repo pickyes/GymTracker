@@ -70,13 +70,8 @@ struct ContentView: View {
     }
     /// Settings → Status bar on the side, on a screen that has one: the
     /// buttons move into a rail along that edge (DaRon, like Reddit).
-    private var rail: HorizontalEdge? {
-        guard duo.sideStatusBar else { return nil }
-        // Where iOS keeps the status bar on top (open and upright), the
-        // grey side bar still shows on the right, with the pages and
-        // buttons in it (DaRon: portrait too).
-        return verticalBarEdge ?? (duo.sideStrip ? .trailing : nil)
-    }
+    /// Only where the status bar really runs down the side (DaRon).
+    private var rail: HorizontalEdge? { duo.sideStatusBar ? verticalBarEdge : nil }
     private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
     static let railWidth: CGFloat = 84
     /// Side status bar on: the buttons' own column beside the strip.
