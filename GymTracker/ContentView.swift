@@ -273,7 +273,7 @@ struct ContentView: View {
             case .today: return "dumbbell"
             case .history: return "calendar"
             case .profile: return "person.fill"
-            case .notes: return "note.text"
+            case .notes: return "pencil"
             }
         }
     }
@@ -1493,7 +1493,12 @@ extension View {
             // side when the page reaches that edge, and it insets the
             // content for its bar itself.
             .toolbar(barShown ? .automatic : .hidden, for: .tabBar)
-            .tabItem { Label(page.title, systemImage: page.systemImage) }
+            .tabItem {
+                Label(page.title, systemImage: page.systemImage)
+                    // Notes keeps the outlined pencil (the tab bar fills
+                    // symbols by default; DaRon's reference is the outline).
+                    .environment(\.symbolVariants, page == .notes ? .none : .fill)
+            }
             .tag(page)
     }
 }
