@@ -529,6 +529,7 @@ enum Limit: String, Codable, CaseIterable, Equatable, Hashable {
     case ankle
     case chest
     case core
+    case groin
     case other
 
     var label: String {
@@ -544,6 +545,7 @@ enum Limit: String, Codable, CaseIterable, Equatable, Hashable {
         case .ankle: return "Ankle"
         case .chest: return "Chest"
         case .core: return "Core"
+        case .groin: return "Groin"
         case .other: return "Something else"
         }
     }
@@ -563,6 +565,7 @@ enum Limit: String, Codable, CaseIterable, Equatable, Hashable {
         case .ankle: return "No squats or calf raises — leg press instead."
         case .chest: return "No bench press or flys — lateral raises instead."
         case .core: return "No planks or crunches — glute bridges instead."
+        case .groin: return "No sumo or wide-stance lifts, lunges or adductor work — leg press and hip thrust instead."
         case .other: return ""
         }
     }
@@ -582,6 +585,7 @@ enum BodyPart: String, Codable, CaseIterable, Equatable, Hashable {
     case kneeLeft, kneeRight
     case ankleLeft, ankleRight
     case chest, core
+    case groin
 
     var label: String {
         switch self {
@@ -602,6 +606,7 @@ enum BodyPart: String, Codable, CaseIterable, Equatable, Hashable {
         case .ankleRight: return "Right ankle"
         case .chest: return "Chest"
         case .core: return "Core"
+        case .groin: return "Groin"
         }
     }
 
@@ -625,6 +630,7 @@ enum BodyPart: String, Codable, CaseIterable, Equatable, Hashable {
         case .ankleRight: return "R ankle"
         case .chest: return "Chest"
         case .core: return "Core"
+        case .groin: return "Groin"
         }
     }
 
@@ -642,13 +648,14 @@ enum BodyPart: String, Codable, CaseIterable, Equatable, Hashable {
         case .ankleLeft, .ankleRight: return .ankle
         case .chest: return .chest
         case .core: return .core
+        case .groin: return .groin
         }
     }
 
     /// Which diagram view(s) this part appears on.
     var sides: [BodyDiagramSide] {
         switch self {
-        case .chest, .core: return [.front]
+        case .chest, .core, .groin: return [.front]
         case .upperBack, .lowerBack: return [.back]
         default: return [.front, .back]
         }
@@ -757,6 +764,7 @@ struct UserProfile: Codable, Equatable {
                 case .ankle: parts.insert(.ankleLeft); parts.insert(.ankleRight)
                 case .chest: parts.insert(.chest)
                 case .core: parts.insert(.core)
+                case .groin: parts.insert(.groin)
                 case .other: break
                 }
             }
@@ -1095,6 +1103,8 @@ extension Limit {
         case .ankle: return [.calves, .ankles, .feet]
         case .chest: return [.chest]
         case .core: return [.core]
+        // The adductors have no muscle group of their own to filter by.
+        case .groin: return []
         case .other: return []
         }
     }

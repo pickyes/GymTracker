@@ -6271,6 +6271,20 @@ enum ExerciseLibrary {
 enum LimitRules {
     static func excludedExerciseIds(for limit: Limit) -> Set<String> {
         switch limit {
+        case .groin:
+            // Wide stance, sumo, lateral and adductor work load the groin.
+            return ["sumo-deadlift", "sumo-deadlift-glute", "dumbbell-sumo-deadlift",
+                    "deadlift-sumo-deficit", "deadlift-sumo-paused", "deadlift-sumo-tempo",
+                    "barbell-sumo-squat", "dumbbell-sumo-squat", "squat-sumo-dumbbell-paused",
+                    "squat-sumo-kettlebell", "squat-sumo-tempo", "sumo-squat-glute",
+                    "squat-wide-stance", "squat-smith-wide-stance", "squat-box-wide",
+                    "leg-press-wide-stance", "good-morning-wide-stance",
+                    "squat-cossack", "squat-cossack-weighted",
+                    "lateral-lunge", "curtsy-lunge", "curtsy-lunge-glute",
+                    "lunge-curtsy-barbell", "lunge-curtsy-dumbbell", "lunge-curtsy-tempo",
+                    "machine-hip-adduction", "cable-hip-adduction", "band-hip-adduction",
+                    "hip-adduction-band-standing", "hip-adduction-cable-standing",
+                    "hip-adduction-copenhagen", "hip-adduction-side-lying", "hip-adduction-tempo"]
         case .shoulder:
             return ["overhead-press", "barbell-ohp", "machine-shoulder-press",
                     "incline-bench", "incline-barbell-bench", "dips", "upright-row",
@@ -6426,6 +6440,23 @@ enum LimitRules {
 
     static func substitute(for id: String, limit: Limit) -> String? {
         switch limit {
+        case .groin:
+            switch id {
+            case "sumo-deadlift", "sumo-deadlift-glute", "dumbbell-sumo-deadlift",
+                 "deadlift-sumo-deficit", "deadlift-sumo-paused", "deadlift-sumo-tempo",
+                 "good-morning-wide-stance":
+                return "hip-thrust"
+            case "barbell-sumo-squat", "dumbbell-sumo-squat", "squat-sumo-dumbbell-paused",
+                 "squat-sumo-kettlebell", "squat-sumo-tempo", "sumo-squat-glute",
+                 "squat-wide-stance", "squat-smith-wide-stance", "squat-box-wide",
+                 "leg-press-wide-stance", "squat-cossack", "squat-cossack-weighted",
+                 "lateral-lunge", "curtsy-lunge", "curtsy-lunge-glute",
+                 "lunge-curtsy-barbell", "lunge-curtsy-dumbbell", "lunge-curtsy-tempo":
+                return "leg-press"
+            default:
+                // Adductor work has no safe stand-in: it's dropped and shown.
+                return nil
+            }
         case .shoulder:
             switch id {
             case "overhead-press", "barbell-ohp", "machine-shoulder-press", "upright-row",

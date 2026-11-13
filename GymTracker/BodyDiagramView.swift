@@ -28,6 +28,7 @@ enum MuscleID: String, CaseIterable, Hashable, Codable {
     case adductorLeft, adductorRight, hipLeft, hipRight, quadLeft, quadRight
     case hamstringLeft, hamstringRight, kneeLeft, kneeRight, shinLeft, shinRight
     case calfLeft, calfRight, ankleLeft, ankleRight, footLeft, footRight
+    case groin
 
     /// Which body part this area marks in the injury diagram.
     var bodyPart: BodyPart? {
@@ -87,6 +88,7 @@ enum MuscleID: String, CaseIterable, Hashable, Codable {
         case .ankleRight: return .ankleRight
         case .footLeft: return .ankleLeft
         case .footRight: return .ankleRight
+        case .groin: return .groin
         }
     }
 
@@ -155,6 +157,8 @@ enum MuscleID: String, CaseIterable, Hashable, Codable {
         case .ankleRight: return nil
         case .footLeft: return .feet
         case .footRight: return .feet
+        // Injury-only: no exercise group lights the groin.
+        case .groin: return nil
         }
     }
 }
@@ -330,6 +334,10 @@ private let muscleSpecs: [MuscleSpec] = [
     MuscleSpec(.elbowLeft, .back, "42.32,132.32 41.43,133.04 41.07,137.68 39.29,142.86 39.11,144.29 39.29,144.64 39.46,144.64 40.18,142.5 40.18,141.96 40.89,139.82 41.25,139.29 41.25,138.75 41.61,138.21 41.61,137.68 42.14,137.5 42.5,138.21 42.68,140.71 42.86,140.89 42.86,145.36 42.5,145.71 42.14,145.71 42.68,145.89 42.5,147.68 43.75,148.39 46.25,148.93 45.18,147.32 43.57,142.5 43.39,140.71 43.04,139.64 43.04,138.57 42.86,138.39 42.86,137.32 42.68,137.14 42.68,135.36 42.5,135.18 42.5,133.04 42.32,132.86;46.61,131.07 46.61,131.79 46.07,132.14 46.25,135.89 45.71,136.25 45.89,138.04 46.07,138.21 46.07,139.29 46.25,139.46 46.25,140.71 45.89,140.89 45.89,141.25 46.07,141.43 46.07,141.96 46.43,142.14 46.61,142.68 46.61,144.29 46.79,144.46 46.79,145.71 46.61,145.89 46.96,146.07 47.32,147.32 47.32,148.21 46.96,148.39 47.14,148.93 48.04,148.93 48.21,148.75 49.11,148.75 50.18,148.39 51.43,147.68 52.32,132.86 51.61,132.32 49.11,131.25"),
     MuscleSpec(.elbowRight, .back, "157.68,132.5 157.5,133.04 157.32,136.25 157.14,136.43 157.14,138.21 156.96,138.39 156.96,139.29 156.79,139.46 156.79,140.36 156.61,140.54 156.25,143.04 155,146.79 153.75,148.93 154.11,148.75 155,148.75 157.5,147.68 157.5,147.14 157.32,146.96 157.32,146.07 157.5,145.89 158.04,146.07 158.21,147.14 157.86,145.18 157.68,145.71 157.14,145.54 157.14,145 157.68,144.82 157.14,144.64 157.14,143.75 156.96,143.57 156.96,141.25 157.14,141.07 157.14,140 157.32,139.82 157.32,138.93 157.68,137.86 158.21,137.86 158.39,138.04 159.82,142.32 159.82,142.86 160.54,144.64 160.89,143.93 158.75,137.14 158.57,133.04;151.61,131.07 151.43,131.25 150.71,131.25 149.64,131.61 147.68,132.68 147.86,132.86 147.86,137.5 148.04,137.68 148.04,140.54 148.21,140.71 148.21,143.57 148.39,143.75 148.39,147.68 150.71,148.75 152.68,148.93 152.86,148.75 152.68,148.39 152.68,147.14 152.86,146.61 153.21,146.43 153.57,145 153.21,144.82 153.39,144.29 153.39,142.68 153.75,142.5 154.11,140.89 153.75,140.71 153.75,139.46 154.11,139.29 154.46,137.5 154.11,137.32 154.29,136.25 153.75,136.07 153.75,132.68 153.93,132.14 153.39,131.96 153.39,131.07"),
     MuscleSpec(.lowerBack, .back, "81.43,179.64 81.96,179.64 82.68,178.57 83.21,178.57 84.82,179.64 115.18,179.64 116.79,178.57 117.32,178.57 118.04,179.64 118.39,179.64 118.39,179.46 117.68,178.57 117.68,178.04 114.11,178.04 113.93,177.86 113.93,165.18 86.07,165.18 86.07,177.86 85.89,178.04 82.14,178.04 82.14,178.75"),
+    // Groin (Nov 13, DaRon): drawn by hand, not from the painting — the
+    // pubic triangle between the hip flexors and the tops of the inner
+    // thighs, just under the abs. Front view only.
+    MuscleSpec(.groin, .front, "90.5,203.5 109.5,203.5 109,210 106,218 102,225 100,227 98,225 94,218 91,210"),
 ]
 
 /// The anatomical figure itself: the real image (transparent
@@ -626,6 +634,7 @@ extension BodyPart {
         case .ankleRight: return [.ankleRight]
         case .chest: return [.pecLeft, .pecRight]
         case .core: return [.abs]
+        case .groin: return [.groin]
         }
     }
 }
@@ -688,6 +697,7 @@ extension MuscleID {
         case .ankleRight: return "Right ankle"
         case .footLeft: return "Left foot"
         case .footRight: return "Right foot"
+        case .groin: return "Groin"
         }
     }
 }
