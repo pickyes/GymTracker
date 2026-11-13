@@ -316,7 +316,8 @@ struct ProfileView: View {
             }
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(!typedName.isEmpty ? typedName : (store.profile?.name ?? "Add your name and photo"))
+                Text(!typedName.isEmpty ? typedName
+                     : (store.profile?.name ?? (identity.photo == nil ? "Add your name and photo" : "Add your name")))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(2)
@@ -966,6 +967,7 @@ struct ProfileIdentityEditor: View {
     @State private var name = ProfileIdentity.shared.name
     @State private var item: PhotosPickerItem?
     @State private var cropping: UIImage?
+    @State private var originalPhoto = ProfileIdentity.shared.photo
 
     var body: some View {
         NavigationStack {
@@ -1015,7 +1017,13 @@ struct ProfileIdentityEditor: View {
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        // Undo photo changes too, not just the name.
+                        if identity.photo !== originalPhoto { identity.setPhoto(originalPhoto) }
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         identity.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1140,9 +1148,18 @@ struct PhotoCropView: View {
 
 extension UIImage {
     /// Redrawn upright (camera photos carry a rotation flag).
+    /// Also shrunk to at most 2048px on the long side at scale 1: a full
+    /// camera photo redrawn at screen scale used ~440 MB (red team).
     func normalizedUp() -> UIImage {
-        guard imageOrientation != .up else { return self }
-        return UIGraphicsImageRenderer(size: size).image { _ in draw(in: CGRect(origin: .zero, size: size)) }
+        let longSide = max(size.width, size.height)
+        let k = min(1, 2048 / max(longSide, 1))
+        guard imageOrientation != .up || k < 1 else { return self }
+        let target = CGSize(width: (size.width * k).rounded(), height: (size.height * k).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: target))
+        }
     }
 }
 

@@ -928,9 +928,9 @@ private struct NoteDetailView: View {
             TextField("Name", text: $newCategoryName)
             Button("Add") {
                 let name = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty {
-                    store.addNoteCategory(name)
-                    store.setNoteCategory(id: noteID, category: name)
+                // Only file it under a folder that really exists.
+                if let folder = store.addNoteCategory(name) {
+                    store.setNoteCategory(id: noteID, category: folder)
                 }
                 newCategoryName = ""
             }

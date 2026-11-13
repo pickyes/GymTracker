@@ -1084,6 +1084,7 @@ struct LavaLiquidFill: View {
     /// The simulation lives as long as the pill does (a reference, so
     /// stepping it every frame never re-renders anything by itself).
     @State private var sim = LiquidSim()
+    @State private var motionOn = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1148,8 +1149,10 @@ struct LavaLiquidFill: View {
                 }
             }
         }
-        .onAppear { if !reduceMotion { MotionSource.shared.start() } }
-        .onDisappear { if !reduceMotion { MotionSource.shared.stop() } }
+        // Stop exactly what this pill started, even if Reduce Motion
+        // changed in between (motion kept running).
+        .onAppear { if !reduceMotion { MotionSource.shared.start(); motionOn = true } }
+        .onDisappear { if motionOn { MotionSource.shared.stop(); motionOn = false } }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -1429,6 +1432,9 @@ struct DuoSplitHandle: View {
     /// Where the drag last was: snapped to rest, at a limit, or free. One
     /// haptic per change, exactly when it happens (DaRon).
     @State private var zone = 0
+    /// True only while a finger is down: a drag cut off by a banner,
+    /// Control Center or a rotation never reaches onEnded.
+    @GestureState private var pressing = false
     @State private var haptic = UIImpactFeedbackGenerator(style: .rigid)
 
     var body: some View {
@@ -1454,6 +1460,7 @@ struct DuoSplitHandle: View {
                 // moves with the line, so its own translation fed back on
                 // itself and the line shook (DaRon).
                 DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                    .updating($pressing) { _, s, _ in s = true }
                     .onChanged { value in
                         if start == nil {
                             start = share; dragging = true
@@ -1481,6 +1488,10 @@ struct DuoSplitHandle: View {
                 withAnimation(.snappy) { share = rest }
                 onCommit()
             }
+            .onChange(of: pressing) { _, down in
+                if !down && start != nil { start = nil; dragging = false; onCommit() }
+            }
+            .onDisappear { if start != nil { start = nil; dragging = false; onCommit() } }
             .accessibilityElement()
             .accessibilityLabel("Divider")
             .accessibilityValue("\(Int((Self.clamp(share) * 100).rounded())) percent")

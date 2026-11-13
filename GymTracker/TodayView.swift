@@ -6,6 +6,8 @@ struct TodayView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.pageContainerSize) private var pageContainerSize
     @Environment(\.screenIsOpen) private var screenIsOpen
+    /// The chosen accent (Pro), not the asset blue.
+    private var accent: Color { store.isPro ? store.settings.accentColor.color : Theme.accent }
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoSwapProgress) private var duoSwapProgress
     @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
@@ -1939,8 +1941,8 @@ struct TodayView: View {
             .scaledFont(size: 26, weight: .bold)
             .foregroundStyle(.white)
             .frame(width: 56, height: 56)
-            .accentGlass(Circle())
-            .shadow(color: Color.accentColor.opacity(0.5), radius: 10, x: 0, y: 4)
+            .accentGlass(Circle(), tint: accent)
+            .shadow(color: accent.opacity(0.5), radius: 10, x: 0, y: 4)
     }
 
     private func header(for plan: DayPlan) -> some View {

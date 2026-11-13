@@ -101,8 +101,9 @@ struct ContentView: View {
 
     /// The buttons stacked at the bottom of the side bar, gaps included.
     private var railButtonsHeight: CGFloat {
-        var b: CGFloat = 0
-        if selectedPage == .today || selectedPage == .notes { b += 56 + 16 }
+        // The tallest page's buttons (+ or compose), so the list sits in
+        // the same place on every page.
+        var b: CGFloat = 56 + 16
         if showSwapButton && Self.isWide(steadySize) { b += 56 + 16 }
         return b
     }
@@ -166,11 +167,6 @@ struct ContentView: View {
     /// Bottom of the side bar kept clear of the camera hole.
     static let cameraClearance: CGFloat = 92
 
-    @State private var railItemWidth: CGFloat = 70
-    private func updateRailItemWidth(_ w: CGFloat) {
-        let v = max(48, min(70, w))
-        if abs(v - railItemWidth) > 0.5 { DispatchQueue.main.async { railItemWidth = v } }
-    }
 
     private func railNavItem(_ page: Page, labeled: Bool, width: CGFloat = 70) -> some View {
         let active = page == selectedPage
@@ -206,7 +202,7 @@ struct ContentView: View {
                 // One highlight that slides to the page you pick.
                 if active {
                     // Liquid Glass, tinted with the accent (DaRon).
-                    RailGlassHighlight(tint: duo.sideTint ? Color.accentColor : nil)
+                    RailGlassHighlight(tint: duo.sideTint ? effectiveAccent : nil)
                         .matchedGeometryEffect(id: "railHighlight", in: railNS)
                 }
             }
@@ -265,7 +261,7 @@ struct ContentView: View {
                         let iconCenter = systemRail > 0 ? systemRail / 2 + 5 : railTotal / 2
                         // Highlight fits inside the bar on both sides with an
                         // even 6pt margin (it ran into the bar's edge).
-                        let _ = updateRailItemWidth(2 * min(iconCenter, railTotal - iconCenter) - 12)
+                        let railItemWidth = max(44, min(70, 2 * min(iconCenter, railTotal - iconCenter) - 12))
                         // The pages stop at the rail. They're drawn edge to edge
                         // (ignoring safe areas), and a view that touches the
                         // safe area's edge spreads into it — so they stop 1pt
@@ -393,7 +389,7 @@ struct ContentView: View {
                         }
                         // Keeps the end-of-rest sound + haptic running
                         // while the visible timer is the inline one.
-                        if restActive && (restShownInline || navExpanded) {
+                        if restActive && (restShownInline || navExpanded || store.calendarDropdownOpen) {
                             RestTimerCard()
                                 .frame(width: 0, height: 0)
                                 .hidden()
@@ -460,7 +456,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             // Left of the button column, so it never sits on
                             // the menu button.
-                            .padding(.trailing, sideBar ? 16 : 16 + 56 + 16)
+                            .padding(.trailing, sideBar ? (rail == .trailing ? railTotal + 12 : 16) : 16 + 56 + 16)
                             .padding(.bottom, keyboardHeight + 14)
                             .ignoresSafeArea(.all)
                             .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottomTrailing)))
@@ -520,7 +516,11 @@ struct ContentView: View {
             // Floating or undocked keyboards change frame without a hide.
             let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
             let screenH = UIScreen.main.bounds.height
-            if frame.minY >= screenH - 1 || frame.height < 120 { keyboardHeight = 0 }
+            if frame.minY >= screenH - 1 || frame.height < 120 {
+                keyboardHeight = 0
+            } else if keyboardShown {
+                keyboardHeight = frame.height   // docked again
+            }
         }
         // Hinge read from launch, 0° to 180°, the whole time.
         .hingeReader()
@@ -566,7 +566,10 @@ struct ContentView: View {
             let steadyOK = steadySize.width > 200 && steadySize.height > 200
             // A width change (unfold, rotate) is never the keyboard: take
             // the live size at once instead of a frame late (red team).
-            let size = steadyOK && abs(steadySize.width - geo.size.width) < 1 ? steadySize : geo.size
+            // The keyboard only ever changes the height: keep the page's own
+            // width and the keyboard-free height (the old width test never
+            // matched beside the side bar, so typing flipped the layout).
+            let size = steadyOK ? CGSize(width: geo.size.width, height: steadySize.height) : geo.size
             // Open or folded comes from the whole screen: the side bar's
             // width narrowed the pages under the "open" cut-off in DS mode.
             let wide = Self.isWide(steadyOK ? steadySize : size)
@@ -955,8 +958,8 @@ struct ContentView: View {
             .scaledFont(size: 26, weight: .bold)
             .foregroundStyle(.white)
             .frame(width: 56, height: 56)
-            .accentGlass(Circle())
-            .shadow(color: Color.accentColor.opacity(0.5), radius: 10, x: 0, y: 4)
+            .accentGlass(Circle(), tint: effectiveAccent)
+            .shadow(color: effectiveAccent.opacity(0.5), radius: 10, x: 0, y: 4)
     }
 
     /// Tent pose shows the rest timer in its own tile (no pill there).

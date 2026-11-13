@@ -2072,15 +2072,21 @@ final class WorkoutStore: ObservableObject {
 
     /// Add a user-made note category. Duplicates (case-insensitive)
     /// and blanks are ignored. (DaRon 22:42.)
-    func addNoteCategory(_ name: String) {
+    /// Adds a folder; returns the folder's name as stored (an existing
+    /// one's spelling on a case match), or nil for empty / "Pinned".
+    @discardableResult
+    func addNoteCategory(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
         // "Pinned" is the Notes page's own folder (a category with that
         // name made its notes unreachable).
-        guard trimmed.localizedCaseInsensitiveCompare("Pinned") != .orderedSame else { return }
-        guard !noteCategories.contains(where: { $0.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+        guard trimmed.localizedCaseInsensitiveCompare("Pinned") != .orderedSame else { return nil }
+        if let existing = noteCategories.first(where: { $0.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return existing
+        }
         noteCategories.append(trimmed)
         persistNoteCategories()
+        return trimmed
     }
 
     private func persistNoteCategories() {
