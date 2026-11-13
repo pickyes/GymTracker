@@ -317,9 +317,14 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         let mainW = wide ? min(mainWidth ?? total / 2, total) : total
         let paneW = max(total - mainW, 0)
         let p = min(max(progress, 0), 1)
+        // One continuous motion in three overlapping beats: the cards lift
+        // in place (side by side, even gaps), slide past each other, and
+        // land side by side again before settling back to full screen.
+        func smooth(_ x: Double) -> Double { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
+        let slide = smooth((p - 0.2) / 0.6)
         // Left-to-right x of each page, then mirrored for RTL languages.
-        var paneX = p * mainW
-        var mainX = (1 - p) * paneW
+        var paneX = slide * mainW
+        var mainX = (1 - slide) * paneW
         if direction == .rightToLeft {
             paneX = total - paneX - paneW
             mainX = total - mainX - mainW
@@ -327,7 +332,19 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // 0 at rest, 1 for most of the slide: the cards lift off quickly,
         // hold their full card shape (even gaps, round corners) while
         // they cross, and settle back at the very end.
-        let lift = wide ? min(1, sin(.pi * p) * 1.8) : 0
+        let lift = wide ? smooth(p / 0.22) * smooth((1 - p) / 0.22) : 0
+        // Even spacing all around (DaRon): each card pulls in a full gap
+        // at the screen edge and half a gap on the side facing the other
+        // card, so edge | card | card | edge are all one gap apart. The
+        // half moves from one side to the other as the pages trade places.
+        let g = DuoSwapCard.inset
+        let half = g / 2
+        var paneLead = g - half * slide, paneTrail = half + half * slide
+        var mainLead = half + half * slide, mainTrail = g - half * slide
+        if direction == .rightToLeft {
+            swap(&paneLead, &paneTrail)
+            swap(&mainLead, &mainTrail)
+        }
         return ZStack(alignment: .topLeading) {
             // A grey backdrop behind the cards, like Duo multitasking.
             Color(.systemGray3)
@@ -338,38 +355,43 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 pane()
                     .environment(\.layoutDirection, direction)
                     .frame(width: paneW, height: size.height, alignment: .top)
-                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: size.height)))
+                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: size.height),
+                                          leading: paneLead, trailing: paneTrail))
                     .offset(x: paneX)
             }
             main()
                 .environment(\.layoutDirection, direction)
                 .frame(width: mainW, height: size.height, alignment: .top)
-                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: size.height)))
+                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: size.height),
+                                      leading: mainLead, trailing: mainTrail))
                 .offset(x: wide ? mainX : 0)
                 // The front screen's page passes over the other one.
                 .zIndex(1)
         }
         .frame(width: total, height: size.height, alignment: .topLeading)
         .environment(\.layoutDirection, .leftToRight)
-        .environment(\.duoSwapProgress, wide ? p : 0)
+        .environment(\.duoSwapProgress, wide ? slide : 0)
     }
 }
 
-/// A page mid-swap: inset 10pt on every side at the very middle, rounded
+/// A page mid-swap: inset so every gap is 10pt, rounded
 /// and shadowed in proportion to `lift`; exactly the page at rest.
 struct DuoSwapCard: ViewModifier {
     var lift: Double
-    /// The page's size, so the card can be inset by the same number of
-    /// points on every side.
+    /// The page's size, so the insets come out in points.
     var size: CGSize
-    /// The gap to the screen edge (and half the gap between the two
-    /// cards) at mid-slide (DaRon: even space around the edges).
+    /// How far the card pulls in on its left and right (at full lift);
+    /// top and bottom always pull in the full gap.
+    var leading: CGFloat = inset
+    var trailing: CGFloat = inset
+    /// The one gap used everywhere mid-swap: screen edges and between
+    /// the two cards (DaRon: even space all around).
     static let inset: CGFloat = 10
 
     func body(content: Content) -> some View {
-        let m = Self.inset * lift
-        let sx = size.width > 0 ? max(0, 1 - 2 * m / size.width) : 1
-        let sy = size.height > 0 ? max(0, 1 - 2 * m / size.height) : 1
+        let l = leading * lift, r = trailing * lift, v = Self.inset * lift
+        let sx = size.width > 0 ? max(0, 1 - (l + r) / size.width) : 1
+        let sy = size.height > 0 ? max(0, 1 - 2 * v / size.height) : 1
         // Always the same modifiers (only their amounts change), so the
         // page is never rebuilt when a swap starts or ends. At rest the
         // mask sits far outside the page and nothing is clipped.
@@ -386,6 +408,8 @@ struct DuoSwapCard: ViewModifier {
             // (a plain percentage left the tall pages more space top and
             // bottom than at the sides).
             .scaleEffect(x: sx, y: sy)
+            // Unequal side insets: shift so each side lands where it should.
+            .offset(x: (l - r) / 2)
     }
 }
 

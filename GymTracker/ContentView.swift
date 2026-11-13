@@ -320,9 +320,9 @@ struct ContentView: View {
         // One motion (DaRon): a single curve slides the pages across and
         // the lift rides it. Eases in and lands cleanly at a fixed time
         // (a spring's long tail kept the cards creeping into place).
-        withDuoSwapAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: 0.55)) { duo.swapSides.toggle() }
+        withDuoSwapAnimation(.timingCurve(0.4, 0, 0.3, 1, duration: 0.75)) { duo.swapSides.toggle() }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(650))
             UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.6)
             try? await Task.sleep(for: .milliseconds(250))
             swapInFlight = false
