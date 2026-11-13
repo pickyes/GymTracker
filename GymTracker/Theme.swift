@@ -407,7 +407,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .clipped()
                     .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: pageH),
                                           leading: paneLead, trailing: paneTrail))
-                    .offset(x: paneX, y: paneY)
+                    // Real layout position (not a visual-only offset), so
+                    // safe areas and hit areas match where the page is.
+                    .alignmentGuide(.leading) { _ in -paneX }
+                    .alignmentGuide(.top) { _ in -paneY }
             }
             main()
                 .environment(\.layoutDirection, direction)
@@ -416,7 +419,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 .clipped(antialiased: stacked)
                 .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: pageH),
                                       leading: mainLead, trailing: mainTrail))
-                .offset(x: wide ? mainX : 0, y: mainY)
+                .alignmentGuide(.leading) { _ in wide ? -mainX : 0 }
+                .alignmentGuide(.top) { _ in -mainY }
                 // The front screen's page passes over the other one.
                 .zIndex(1)
             // At rest: a hairline at the hinge (DS fold, or Notes' pages).

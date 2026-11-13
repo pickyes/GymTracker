@@ -192,8 +192,8 @@ struct ContentView: View {
                 }
                 // On Today the keyboard doesn't shrink the app: the workout
                 // column scrolls clear of it itself, and shrinking lifted the
-                // body pane off the top (and flipped the pose before).
-                // (keyboard handled inside TodayView)
+                // body pane and the corner buttons with it (red team).
+                .ignoresSafeArea(selectedPage == .today ? .keyboard : [], edges: .bottom)
             } else {
                 OnboardingFlowView()
             }
@@ -390,7 +390,12 @@ struct ContentView: View {
     @ViewBuilder private var historyCompanionDay: some View {
         let cal = Calendar.current
         if let session = store.sessions.first(where: { cal.isDate($0.date, inSameDayAs: calendarDay) }) {
-            NavigationStack { SessionDetailView(session: session) }
+            NavigationStack {
+                SessionDetailView(session: session)
+                    // No bar background or hairline: the share/trash
+                    // buttons float like the rest of the page.
+                    .toolbarBackground(.hidden, for: .navigationBar)
+            }
                 .id(session.id)
                 // On the left page (no clock there) it starts at the very
                 // top, level with the Calendar title (Nov 12).

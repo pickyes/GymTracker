@@ -146,6 +146,9 @@ struct ProfileView: View {
                 // waits on the other page. Swap mirrors it.
                 DuoPagePair(wide: true, swapped: swapped, stacksWhenTall: false) {
                     detailPane
+                        // On the right page the swap and menu buttons sit
+                        // over its right edge: keep the values clear.
+                        .contentMargins(.trailing, swapped ? 92 : 0, for: .scrollContent)
                 } main: {
                     sidebar
                         .background(Theme.card.opacity(0.45))
@@ -351,7 +354,10 @@ struct ProfileView: View {
             }))
             .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
         case .settings, .legal:
-            SettingsView(trailingSections: AnyView(legalContent))
+            // Same look as the other pages: a header card, no bar.
+            SettingsView(trailingSections: AnyView(legalContent),
+                         leadingSections: AnyView(Section { headerCard(.settings) }))
+                .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
         case .injuries, .bodyweight, .limits:
             List {
                 Section { headerCard(.injuries) }

@@ -12,8 +12,9 @@ struct HistoryView: View {
     @State private var selectedSessionID: UUID?
     @State private var exportRequest: ExportRequest?
     /// The tool tiles open these (buttons, so the list adds no "›").
-    @State private var showStrengthGraph = false
-    @State private var showBody = false
+    /// The tool tile that's open (one at a time — two flags let both
+    /// destinations be presented at once on a wide screen).
+    @State private var openTool: HistoryTool?
     /// D6 (2026-11-10): the session awaiting delete confirmation —
     /// set by the row swipe action or the detail trash button.
     @State private var sessionToDelete: SessionLog?
@@ -157,8 +158,15 @@ struct HistoryView: View {
             .ignoresSafeArea(edges: .top)
             .infinityTopEdge()
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showStrengthGraph) { StrengthGraphView() }
-            .navigationDestination(isPresented: $showBody) { BodyView() }
+            .navigationDestination(item: $openTool) { tool in
+                switch tool {
+                case .strength: StrengthGraphView()
+                case .body: BodyView()
+                }
+            }
+            // Picking a session or jumping here from a note closes a tool.
+            .onChange(of: selectedSessionID) { _, id in if id != nil { openTool = nil } }
+            .onChange(of: selectedDay) { _, _ in openTool = nil }
         } detail: {
             Group {
                 if let session = store.sessions.first(where: { $0.id == selectedSessionID }) {
@@ -240,11 +248,11 @@ struct HistoryView: View {
     /// One row of three tiles instead of three list rows.
     private var toolTiles: some View {
         HStack(spacing: 10) {
-            Button { showStrengthGraph = true } label: {
+            Button { openTool = .strength } label: {
                 toolTile("Strength graph", systemImage: "chart.line.uptrend.xyaxis")
             }
             .buttonStyle(.plain)
-            Button { showBody = true } label: {
+            Button { openTool = .body } label: {
                 toolTile("Body", systemImage: "figure.stand")
             }
             .buttonStyle(.plain)
@@ -988,6 +996,12 @@ struct TrainingHeatmap: View {
     private func square(day: Date, sets: Int, today: Date) -> some View {
         if day > today {
             Color.clear.frame(width: cell, height: cell)
+        } else if let setup = store.setupDate, day < calendar.startOfDay(for: setup) {
+            // Before you set the app up: nothing to show on the calendar
+            // (it starts at the setup month), so a faint, inert square.
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Theme.cardElevated.opacity(0.35))
+                .frame(width: cell, height: cell)
         } else {
             // Accent color (DaRon): full for a full workout, faded for a
             // short one.
@@ -1008,3 +1022,7 @@ struct TrainingHeatmap: View {
         }
     }
 }
+
+
+/// The Calendar page's tool tiles that open a page.
+enum HistoryTool: Hashable { case strength, body }

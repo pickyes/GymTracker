@@ -190,6 +190,8 @@ struct NotesView: View {
                 // hinge in both layouts and while the pages swap.
                 DuoPagePair(wide: true, swapped: swapped, showsDivider: true) {
                     detailPane
+                        // Clear of the corner buttons when on the right.
+                        .contentMargins(.trailing, swapped ? 92 : 0, for: .scrollContent)
                 } main: {
                     // Same black as the note page beside it.
                     listPane

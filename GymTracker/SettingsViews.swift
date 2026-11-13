@@ -20,9 +20,12 @@ struct SettingsView: View {
     @ObservedObject private var duo = DuoSettings.shared
     /// Extra sections at the end (Profile puts Privacy & About here).
     var trailingSections: AnyView? = nil
+    /// Sections at the top (Profile puts its header card here).
+    var leadingSections: AnyView? = nil
 
     var body: some View {
         Form {
+            if let leadingSections { leadingSections }
             Section("Rest timer") {
                 HStack {
                     Text("Default rest")
