@@ -386,8 +386,8 @@ struct HistoryView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Streak").font(.caption).foregroundStyle(Theme.secondaryText)
-                    let streak = store.weeklyStreak
-                    Text("\(streak) week\(streak == 1 ? "" : "s")")
+                    let streak = store.dayStreak
+                    Text(store.dayText(streak))
                         .font(.headline)
                         .foregroundStyle(Theme.vividOrange)
                 }
@@ -481,8 +481,8 @@ struct HistoryView: View {
                 statRow(label: "Best max lift",
                         value: bestOneRepMax ?? "—")
             case .streak:
-                statRow(label: "Weekly streak",
-                        value: "\(store.weeklyStreak) week\(store.weeklyStreak == 1 ? "" : "s")")
+                statRow(label: "Streak",
+                        value: store.dayText(store.dayStreak))
             }
         }
     }
@@ -972,9 +972,9 @@ struct TrainingHeatmap: View {
     var body: some View {
         let sets = setsByDay
         let today = calendar.startOfDay(for: Date())
-        let streak = store.weeklyStreak
+        let streak = store.dayStreak
         VStack(alignment: .leading, spacing: 8) {
-            Text("Last \(weeks) weeks · \(streak)-week streak")
+            Text("Last \(weeks) weeks · \(streak)-day streak")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
             HStack(alignment: .top, spacing: gap) {
@@ -989,7 +989,7 @@ struct TrainingHeatmap: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Training over the last \(weeks) weeks: \(sets.count) workout days, \(streak)-week streak")
+        .accessibilityLabel("Training over the last \(weeks) weeks: \(sets.count) workout days, \(streak)-day streak")
     }
 
     @ViewBuilder

@@ -462,7 +462,7 @@ struct CalendarView: View {
             guard store.programDay(for: day) != nil else { continue }
             if day >= today { planned += 1 } else if day >= start { missed += 1 }
         }
-        let streak = store.weeklyStreak
+        let streak = store.dayStreak
         return VStack(alignment: .leading, spacing: 8) {
             Text(displayedMonth, format: .dateTime.month(.wide))
                 .font(.caption)
@@ -471,7 +471,7 @@ struct CalendarView: View {
                 summaryStat("\(done)", "Done", Theme.vividGreen)
                 summaryStat("\(missed)", "Missed", Theme.vividOrange)
                 summaryStat("\(planned)", "Planned", Color.accentColor)
-                summaryStat("\(streak) wk", "Streak", Theme.text)
+                summaryStat(store.dayText(streak), "Streak", Theme.text)
             }
         }
         .padding(.horizontal, 14)

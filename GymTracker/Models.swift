@@ -2406,6 +2406,35 @@ final class WorkoutStore: ObservableObject {
     /// still in progress doesn't break the streak: if nothing is
     /// logged yet this week, counting starts from last week — a streak
     /// must not read 0 on Monday morning before the week's workout.
+    /// Days in a row kept (DaRon: streak in days). A day counts when you
+    /// trained, or when the program has it as a rest day; a planned
+    /// workout you skipped ends the streak. Today only adds once you've
+    /// trained (it never breaks the streak before the day is over).
+    /// Days before setup don't count.
+    var dayStreak: Int {
+        let cal = Calendar.current
+        let trained = Set(sessions.map { cal.startOfDay(for: $0.date) })
+        let start = setupDate.map { cal.startOfDay(for: $0) } ?? trained.min() ?? cal.startOfDay(for: Date())
+        var day = cal.startOfDay(for: Date())
+        var streak = 0
+        if trained.contains(day) { streak += 1 }
+        day = cal.date(byAdding: .day, value: -1, to: day) ?? day
+        while day >= start {
+            if trained.contains(day) || programDay(for: day) == nil {
+                streak += 1
+            } else {
+                break
+            }
+            guard let previous = cal.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        // Rest days alone aren't a streak: it needs a workout in it.
+        let since = cal.date(byAdding: .day, value: -streak, to: cal.startOfDay(for: Date())) ?? Date()
+        return trained.contains(where: { $0 >= since }) ? streak : 0
+    }
+
+    func dayText(_ n: Int) -> String { "\(n) day\(n == 1 ? "" : "s")" }
+
     var weeklyStreak: Int {
         var streak = 0
         // One pass over the sessions, then set lookups (it rescanned every
