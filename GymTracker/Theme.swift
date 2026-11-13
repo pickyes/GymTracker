@@ -776,7 +776,9 @@ final class MotionSource {
     func start() {
         users += 1
         guard users == 1, manager.isDeviceMotionAvailable else { return }
-        manager.deviceMotionUpdateInterval = 1.0 / 60
+        // 120 Hz, to match ProMotion: the liquid reads the gyro every
+        // frame instead of every other one.
+        manager.deviceMotionUpdateInterval = 1.0 / 120
         manager.startDeviceMotionUpdates()
     }
 
