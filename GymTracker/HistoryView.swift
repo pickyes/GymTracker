@@ -417,31 +417,31 @@ struct HistoryView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 52), spacing: 8)], spacing: 14) {
+                // Horizontal bars, one row per muscle (DaRon).
+                VStack(spacing: 10) {
                     ForEach(Array(muscles.enumerated()), id: \.element) { index, muscle in
                         let d = done[muscle] ?? 0
                         let t = planned[muscle] ?? 0
                         let color = palette[index % palette.count]
-                        VStack(spacing: 4) {
+                        let fill = t > 0 ? min(1, Double(d) / Double(t)) : (d > 0 ? 1 : 0)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(muscle.label).font(.subheadline)
+                                Spacer()
+                                Text(t > 0 ? "\(d)/\(t)" : "\(d)")
+                                    .font(.subheadline)
+                                    .monospacedDigit()
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
                             GeometryReader { geo in
-                                ZStack(alignment: .bottom) {
-                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                        .fill(Theme.cardElevated)
-                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Theme.cardElevated)
+                                    Capsule()
                                         .fill(color)
-                                        .frame(height: max(d > 0 ? 8 : 0,
-                                                           geo.size.height * (t > 0 ? min(1, Double(d) / Double(t)) : (d > 0 ? 1 : 0))))
+                                        .frame(width: max(d > 0 ? 8 : 0, geo.size.width * fill))
                                 }
                             }
-                            .frame(width: 26, height: 80)
-                            Text(t > 0 ? "\(d)/\(t)" : "\(d)")
-                                .font(.caption2)
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.secondaryText)
-                            Text(muscle.label)
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
+                            .frame(height: 8)
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(muscle.label): \(d) of \(t) sets")
