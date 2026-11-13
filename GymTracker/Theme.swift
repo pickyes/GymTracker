@@ -1116,7 +1116,11 @@ struct LavaLiquidFill: View {
                         let wobble = sin(t * 1.6 + seed) * 2
                         let r = 1.2 + (sin(seed * 3.1) * 0.5 + 0.5) * 1.8
                         let rect = CGRect(x: x0 + wobble - r, y: y - r, width: r * 2, height: r * 2)
-                        // Fully clear inside, just a fine rim (DaRon).
+                        // A hole through the water, so the pill's background
+                        // shows inside it (DaRon), with a fine rim.
+                        var hole = ctx
+                        hole.blendMode = .clear
+                        hole.fill(Path(ellipseIn: rect), with: .color(.black))
                         ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.4)), lineWidth: 0.7)
                     }
                     // (No surface pops: calm water.)

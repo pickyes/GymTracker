@@ -3845,14 +3845,14 @@ private struct CornerColumnOffset: ViewModifier {
         let trailing: CGFloat = !wide ? 16
             : stacked ? 3
             : (progress >= 0 ? 3 + 13 * progress : (swapped ? 16 : 3))
-        // Short bottom half (line dragged down): the column would land on
-        // the swap button, so the + stays beside the column (DaRon).
-        let collides = inset > 0 && plusBottom + 12 > columnTop
+        // Stays in the column and stops above the swap/menu buttons with
+        // the column's even 16pt gap, never sliding left (DaRon).
+        let gap: CGFloat = 16
+        let lift = inset > 0 ? max(0, plusBottom + gap - columnTop) : 0
         content
             .padding(.trailing, trailing)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { plusBottom = $0 }
-            .offset(x: collides ? 0 : inset)
-            .animation(AppAnimation.snappy, value: collides)
+            .offset(x: inset, y: -lift)
     }
 }
 

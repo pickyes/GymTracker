@@ -370,7 +370,9 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("Done typing")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                            .padding(.trailing, 16)
+                            // Left of the button column, so it never sits on
+                            // the menu button.
+                            .padding(.trailing, sideBar ? 16 : 16 + 56 + 16)
                             .padding(.bottom, keyboardHeight + 14)
                             .ignoresSafeArea(.all)
                             .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottomTrailing)))

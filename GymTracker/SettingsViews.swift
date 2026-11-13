@@ -29,37 +29,6 @@ struct SettingsView: View {
     var body: some View {
         Form {
             if let leadingSections { leadingSections }
-            Section {
-                HStack(spacing: 14) {
-                    ProfileAvatar(size: 56)
-                    VStack(alignment: .leading, spacing: 6) {
-                        PhotosPicker(selection: $photoItem, matching: .images) {
-                            Text(identity.photo == nil ? "Add photo" : "Change photo")
-                        }
-                        if identity.photo != nil {
-                            Button("Remove photo", role: .destructive) { identity.setPhoto(nil) }
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                }
-                TextField("Your name", text: $identity.name)
-                    .textContentType(.givenName)
-                    .submitLabel(.done)
-            } header: {
-                Text("Profile")
-            } footer: {
-                Text("Shown in the side bar and in Today's greeting.")
-            }
-            .onChange(of: photoItem) { _, item in
-                guard let item else { return }
-                Task {
-                    if let data = try? await item.loadTransferable(type: Data.self),
-                       let image = UIImage(data: data) {
-                        await MainActor.run { identity.setPhoto(image) }
-                    }
-                    await MainActor.run { photoItem = nil }
-                }
-            }
             Section("Rest timer") {
                 HStack {
                     Text("Default rest")

@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import StoreKit
+import PhotosUI
 
 /// One row on the Profile page, laid out like Apple's Settings app
 /// (Nov 12): an icon tile, a title, and its own page with a header card
@@ -109,6 +110,8 @@ struct ProfileView: View {
     @State private var weightText: String = ""
     @State private var didSetup = false
     @State private var showPaywall = false
+    @State private var editingIdentity = false
+    @ObservedObject private var identity = ProfileIdentity.shared
     @State private var showInvite = false
     @State private var showManageSubscription = false
     @State private var showPrivacyPolicy = false
@@ -188,6 +191,7 @@ struct ProfileView: View {
             }
         }
         .onChange(of: weightText) { _, _ in saveWeight() }
+        .sheet(isPresented: $editingIdentity) { ProfileIdentityEditor() }
         .sheet(isPresented: $showPaywall) {
             PaywallView(
                 programName: store.activeProgram?.name ?? "Your plan",
@@ -220,7 +224,9 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
                 .listRowBackground(Color.clear)
             Section {
-                NavigationLink(value: ProfileSection.program) { summaryCard }
+                // Your photo and name: tap to edit (DaRon).
+                Button { editingIdentity = true } label: { summaryCard }
+                    .buttonStyle(.plain)
             }
             Section {
                 NavigationLink(value: ProfileSection.program) { sectionRow(.program) }
@@ -251,7 +257,7 @@ struct ProfileView: View {
             Section {
                 // The header opens Your Program too, but only the row
                 // below lights up for it (one highlight, not two).
-                Button { selected = .program; userPicked = true } label: { summaryCard }
+                Button { editingIdentity = true } label: { summaryCard }
                     .buttonStyle(.plain)
                     .listRowBackground(Theme.card)
             }
@@ -289,15 +295,22 @@ struct ProfileView: View {
 
     /// Apple Account-style card at the top: the plan you're on.
     private var summaryCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 58, height: 58)
-                .background(Color.accentColor.opacity(0.18), in: Circle())
-                .accessibilityHidden(true)
+        let typedName = identity.name.trimmingCharacters(in: .whitespaces)
+        return HStack(spacing: 14) {
+            Group {
+                if identity.photo != nil {
+                    ProfileAvatar(size: 58)
+                } else {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 58, height: 58)
+                        .background(Color.accentColor.opacity(0.18), in: Circle())
+                }
+            }
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.profile?.name ?? store.activeProgram?.name ?? "No program yet")
+                Text(!typedName.isEmpty ? typedName : (store.profile?.name ?? "Add your name and photo"))
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(2)
@@ -314,9 +327,13 @@ struct ProfileView: View {
                 }
             }
             Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.tertiaryText)
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+        .accessibilityLabel("Edit name and photo")
     }
 
     private func sectionRow(_ section: ProfileSection) -> some View {
@@ -930,4 +947,237 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+
+/// Your name and photo (the Profile header card opens this). Picking a
+/// photo goes to a crop step first: drag and pinch it inside the circle.
+struct ProfileIdentityEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var identity = ProfileIdentity.shared
+    @State private var name = ProfileIdentity.shared.name
+    @State private var item: PhotosPickerItem?
+    @State private var cropping: UIImage?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(spacing: 12) {
+                        ProfileAvatar(size: 110)
+                        PhotosPicker(selection: $item, matching: .images) {
+                            Text(identity.photo == nil ? "Add Photo" : "Change Photo")
+                                .font(.body.weight(.semibold))
+                        }
+                        if identity.photo != nil {
+                            Button("Remove Photo", role: .destructive) { identity.setPhoto(nil) }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                }
+                Section("Or pick one") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7), spacing: 10) {
+                        ForEach(0..<GeneratedAvatar.count, id: \.self) { i in
+                            Button {
+                                identity.setPhoto(GeneratedAvatar.image(i))
+                            } label: {
+                                GeneratedAvatar(index: i)
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PressSqueeze())
+                            .accessibilityLabel("Avatar \(i + 1)")
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                Section("Name") {
+                    TextField("Your name", text: $name)
+                        .textContentType(.givenName)
+                        .submitLabel(.done)
+                }
+                Section {
+                } footer: {
+                    Text("Shown in the side bar and in Today's greeting.")
+                }
+            }
+            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        identity.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        dismiss()
+                    }
+                }
+            }
+            .onChange(of: item) { _, picked in
+                guard let picked else { return }
+                Task {
+                    if let data = try? await picked.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        await MainActor.run { cropping = image.normalizedUp() }
+                    }
+                    await MainActor.run { item = nil }
+                }
+            }
+            .fullScreenCover(item: Binding(
+                get: { cropping.map(CropItem.init) },
+                set: { if $0 == nil { cropping = nil } }
+            )) { crop in
+                PhotoCropView(image: crop.image) { result in
+                    if let result { identity.setPhoto(result) }
+                    cropping = nil
+                }
+            }
+        }
+    }
+
+    private struct CropItem: Identifiable {
+        let image: UIImage
+        var id: ObjectIdentifier { ObjectIdentifier(image) }
+    }
+}
+
+/// Move and zoom a photo inside a circle, then Choose to keep that crop.
+struct PhotoCropView: View {
+    let image: UIImage
+    var onFinish: (UIImage?) -> Void
+
+    @State private var scale: CGFloat = 1
+    @State private var baseScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var baseOffset: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height) - 48
+            let fill = max(side / image.size.width, side / image.size.height)
+            let shown = CGSize(width: image.size.width * fill * scale, height: image.size.height * fill * scale)
+            ZStack {
+                Color.black.ignoresSafeArea()
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: shown.width, height: shown.height)
+                    .offset(offset)
+                // Dim everything outside the circle.
+                Rectangle()
+                    .fill(Color.black.opacity(0.6))
+                    .mask {
+                        Rectangle().overlay(Circle().frame(width: side, height: side).blendMode(.destinationOut))
+                            .compositingGroup()
+                    }
+                    .allowsHitTesting(false)
+                Circle().stroke(.white.opacity(0.8), lineWidth: 1.5)
+                    .frame(width: side, height: side)
+                    .allowsHitTesting(false)
+                VStack {
+                    Text("Move and Scale")
+                        .font(.headline).foregroundStyle(.white)
+                        .padding(.top, 20)
+                    Spacer()
+                    HStack {
+                        Button("Cancel") { onFinish(nil) }
+                        Spacer()
+                        Button("Choose") { onFinish(render(side: side, fill: fill)) }
+                            .fontWeight(.semibold)
+                    }
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 24)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                SimultaneousGesture(
+                    MagnificationGesture()
+                        .onChanged { scale = max(1, min(baseScale * $0, 6)) }
+                        .onEnded { _ in baseScale = scale; offset = clamp(offset, side: side, shown: shown); baseOffset = offset },
+                    DragGesture()
+                        .onChanged { v in
+                            offset = CGSize(width: baseOffset.width + v.translation.width,
+                                            height: baseOffset.height + v.translation.height)
+                        }
+                        .onEnded { _ in
+                            withAnimation(.snappy) { offset = clamp(offset, side: side, shown: shown) }
+                            baseOffset = offset
+                        }
+                )
+            )
+        }
+    }
+
+    /// Keep the circle covered by the photo.
+    private func clamp(_ o: CGSize, side: CGFloat, shown: CGSize) -> CGSize {
+        let mx = max(0, (shown.width - side) / 2), my = max(0, (shown.height - side) / 2)
+        return CGSize(width: min(max(o.width, -mx), mx), height: min(max(o.height, -my), my))
+    }
+
+    /// The part of the photo inside the circle, as a square image.
+    private func render(side: CGFloat, fill: CGFloat) -> UIImage {
+        let out: CGFloat = 512
+        let k = out / side
+        let w = image.size.width * fill * scale * k, h = image.size.height * fill * scale * k
+        return UIGraphicsImageRenderer(size: CGSize(width: out, height: out)).image { _ in
+            image.draw(in: CGRect(x: (out - w) / 2 + offset.width * k,
+                                  y: (out - h) / 2 + offset.height * k, width: w, height: h))
+        }
+    }
+}
+
+extension UIImage {
+    /// Redrawn upright (camera photos carry a rotation flag).
+    func normalizedUp() -> UIImage {
+        guard imageOrientation != .up else { return self }
+        return UIGraphicsImageRenderer(size: size).image { _ in draw(in: CGRect(origin: .zero, size: size)) }
+    }
+}
+
+
+/// 35 avatars in one family: soft two-color gradients with drifting
+/// blobs, each seeded by its number (like Kalshi's random pictures).
+struct GeneratedAvatar: View {
+    static let count = 35
+    var index: Int
+
+    var body: some View {
+        GeometryReader { g in
+            let s = min(g.size.width, g.size.height)
+            let r = Self.rand(index)
+            let h1 = r(0), h2 = (h1 + 0.12 + r(1) * 0.25).truncatingRemainder(dividingBy: 1)
+            ZStack {
+                LinearGradient(colors: [Color(hue: h1, saturation: 0.75, brightness: 0.95),
+                                        Color(hue: h2, saturation: 0.85, brightness: 0.75)],
+                               startPoint: UnitPoint(x: r(2), y: 0), endPoint: UnitPoint(x: 1 - r(3), y: 1))
+                ForEach(0..<3, id: \.self) { k in
+                    let hb = (h1 + 0.5 + r(10 + k) * 0.2).truncatingRemainder(dividingBy: 1)
+                    Circle()
+                        .fill(Color(hue: hb, saturation: 0.6, brightness: 1).opacity(0.55))
+                        .frame(width: s * (0.35 + r(20 + k) * 0.5))
+                        .position(x: s * r(30 + k), y: s * r(40 + k))
+                        .blur(radius: s * 0.12)
+                }
+            }
+            .frame(width: s, height: s)
+        }
+    }
+
+    /// Deterministic 0…1 values for one avatar.
+    static func rand(_ i: Int) -> (Int) -> Double {
+        { k in
+            let x = sin(Double(i * 7919 + k * 104729 + 17) * 12.9898) * 43758.5453
+            return x - floor(x)
+        }
+    }
+
+    @MainActor static func image(_ i: Int) -> UIImage? {
+        let r = ImageRenderer(content: GeneratedAvatar(index: i).frame(width: 256, height: 256))
+        r.scale = 2
+        return r.uiImage
+    }
 }
