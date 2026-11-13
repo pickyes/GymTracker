@@ -3,6 +3,8 @@ import AudioToolbox
 import UIKit
 
 struct TodayView: View {
+    @Environment(\.systemSideBar) private var systemSideBar
+    @Environment(\.railEdge) private var sideBarEdge
     @Environment(\.pageTitleTop) private var pageTitleTop
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.pageContainerSize) private var pageContainerSize
@@ -151,7 +153,12 @@ struct TodayView: View {
                 // (see compactLayout), so opening the phone keeps it
                 // exactly where it was — same scroll, same width — and the
                 // body pane is simply revealed beside it, already waiting.
+                // Open, both pages stay clear of iOS's side bar together
+                // (folded, the single column insets itself).
+                let padsPair = systemSideBar && screenIsOpen
                 todayContent(kind: rawKind)
+                    .environment(\.sideBarInset, !padsPair)
+                    .padding(sideBarEdge == .leading ? .leading : .trailing, padsPair ? ContentView.railWidth : 0)
                     // Pin to the real page height (see PageContainerSizeKey):
                     // on the outer screen held sideways the stack measures
                     // taller than the display, which pushed the bottom of
@@ -804,7 +811,7 @@ struct TodayView: View {
             .padding()
             // The page's single stack (in body) hosts this too — keep its
             // bar hidden like every other Today layout.
-            .toolbar(.hidden, for: .navigationBar)
+            .sideBarItems(.today)
         }
     }
 
@@ -852,7 +859,7 @@ struct TodayView: View {
         // The page's single stack (in body) hosts the rest-day screen
         // too — it used to sit outside any stack, so without this the
         // hoisted stack would show an empty bar above it.
-        .toolbar(.hidden, for: .navigationBar)
+        .sideBarItems(.today)
     }
 
     /// Recovery colour per muscle, from the store's logged history —
@@ -1354,7 +1361,7 @@ struct TodayView: View {
                     if height > 0 { scrollToFocusedField(proxy: proxy) }
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .sideBarItems(.today)
             .toolbar { keyboardDoneToolbar }
         }
     }
@@ -1507,7 +1514,7 @@ struct TodayView: View {
                 .padding(.horizontal, 16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar(.hidden, for: .navigationBar)
+            .sideBarItems(.today)
             .toolbar { keyboardDoneToolbar }
         }
     }
@@ -1687,7 +1694,7 @@ struct TodayView: View {
                 .padding(.horizontal, 16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar(.hidden, for: .navigationBar)
+            .sideBarItems(.today)
             .toolbar { keyboardDoneToolbar }
         }
     }
@@ -1725,7 +1732,7 @@ struct TodayView: View {
         // No keyboard lift: this view has no text fields, and a keyboard
         // left over from the list (or a hardware keyboard bar) left a dark
         // band under the tiles.
-        .toolbar(.hidden, for: .navigationBar)
+        .sideBarItems(.today)
         .background(Color.black)
         .onAppear { hideKeyboard() }
     }

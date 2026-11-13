@@ -27,6 +27,10 @@ struct HistoryView: View {
     /// The workout shown ("" = every workout). Not saved: a filter left on
     /// from last week would hide sessions with no clue why.
     @State private var sessionsWorkout = ""
+    @AppStorage("gymtracker.sessionsGrouping.v1", store: SharedDefaults.shared) private var sessionsGroupingRaw = SessionGrouping.month.rawValue
+    /// Groups the user opened or closed by hand; the rest follow the rule
+    /// (the first group open, the others folded).
+    @State private var groupToggles: [String: Bool] = [:]
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     /// Open Duo: the chosen day lives on the other page, so this page
     /// doesn't repeat it.
@@ -154,18 +158,20 @@ struct HistoryView: View {
                             .foregroundStyle(Theme.secondaryText)
                             .listRowSeparator(.hidden)
                     }
-                    ForEach(shown) { session in
-                        SessionRowView(session: session)
-                            .tag(session.id)
-                            // D6: swipe to delete — the only way to remove
-                            // a saved session (deleteSession existed with
-                            // zero callers). Confirms before deleting.
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) { sessionToDelete = session } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                .tint(.red)
+                    // Grouped (by month unless changed): each group folds
+                    // away on its own, so three years of sessions is a
+                    // short list of months, not 700 rows.
+                    let groups = sessionGroups(shown)
+                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                        if sessionsGrouping == .none {
+                            ForEach(group.sessions) { sessionRow($0) }
+                        } else {
+                            let open = groupIsOpen(group.id, first: index == 0)
+                            sessionGroupHeader(group, open: open)
+                            if open {
+                                ForEach(group.sessions) { sessionRow($0) }
                             }
+                        }
                     }
                 }
                 // Bottom breathing room (shared LayoutClearance rule,
@@ -184,7 +190,7 @@ struct HistoryView: View {
             .listStyle(.plain)
             .ignoresSafeArea(edges: .top)
             .infinityTopEdge()
-            .toolbar(.hidden, for: .navigationBar)
+            .sideBarItems(.history)
             .navigationDestination(item: $openTool) { tool in
                 Group {
                     switch tool {
@@ -333,6 +339,93 @@ struct HistoryView: View {
 
     private var sessionsSort: SessionSort { SessionSort(rawValue: sessionsSortRaw) ?? .newest }
     private var sessionsRange: SessionRange { SessionRange(rawValue: sessionsRangeRaw) ?? .all }
+    private var sessionsGrouping: SessionGrouping { SessionGrouping(rawValue: sessionsGroupingRaw) ?? .month }
+
+    private func groupIsOpen(_ id: String, first: Bool) -> Bool { groupToggles[id] ?? first }
+
+    /// One saved session in the list, with swipe to delete (confirmed).
+    private func sessionRow(_ session: SessionLog) -> some View {
+        SessionRowView(session: session)
+            .tag(session.id)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { sessionToDelete = session } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .tint(.red)
+            }
+    }
+
+    /// The shown sessions split into groups. Sessions keep the chosen sort
+    /// inside each group; months and years run newest first (oldest first
+    /// when that's the sort), workouts by how often they were done.
+    private func sessionGroups(_ shown: [SessionLog]) -> [SessionGroup] {
+        let grouping = sessionsGrouping
+        guard grouping != .none else { return [SessionGroup(id: "all", title: "", order: 0, sessions: shown)] }
+        let cal = Calendar.current
+        var byKey: [String: SessionGroup] = [:]
+        for session in shown {
+            let key: String, title: String, order: Double
+            switch grouping {
+            case .month:
+                let c = cal.dateComponents([.year, .month], from: session.date)
+                let y = c.year ?? 0, m = c.month ?? 0
+                key = "m\(y)-\(m)"
+                order = Double(y * 12 + m)
+                title = session.date.formatted(.dateTime.month(.wide).year())
+            case .year:
+                let y = cal.component(.year, from: session.date)
+                key = "y\(y)"; order = Double(y); title = String(y)
+            case .workout:
+                key = "w" + session.dayTitle; order = 0; title = session.dayTitle
+            case .none:
+                key = "all"; order = 0; title = ""
+            }
+            byKey[key, default: SessionGroup(id: key, title: title, order: order, sessions: [])].sessions.append(session)
+        }
+        let groups = Array(byKey.values)
+        switch grouping {
+        case .workout:
+            return groups.sorted { $0.sessions.count != $1.sessions.count ? $0.sessions.count > $1.sessions.count : $0.title < $1.title }
+        default:
+            return groups.sorted { sessionsSort == .oldest ? $0.order < $1.order : $0.order > $1.order }
+        }
+    }
+
+    /// A group's heading row: tap to fold its sessions away or open them.
+    private func sessionGroupHeader(_ group: SessionGroup, open: Bool) -> some View {
+        Button {
+            withAnimation(AppAnimation.snappy) { groupToggles[group.id] = !open }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Text(group.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(pluralised(group.sessions.count, singular: "session"))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, cornerButtonsInset)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        .listRowBackground(Color.clear)
+        .accessibilityLabel("\(group.title), \(pluralised(group.sessions.count, singular: "session"))")
+        .accessibilityValue(open ? "Expanded" : "Collapsed")
+        .accessibilityAddTraits(.isHeader)
+    }
+
     private var sessionsFiltered: Bool { sessionsRange != .all || !sessionsWorkout.isEmpty }
 
     /// Workout names that have sessions, most trained first.
@@ -395,6 +488,10 @@ struct HistoryView: View {
                 Picker("Sort by", selection: $sessionsSortRaw) {
                     ForEach(SessionSort.allCases) { Text($0.label).tag($0.rawValue) }
                 }
+                Picker("Group by", selection: $sessionsGroupingRaw) {
+                    ForEach(SessionGrouping.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.menu)
                 Picker("When", selection: $sessionsRangeRaw) {
                     ForEach(SessionRange.allCases) { Text($0.label).tag($0.rawValue) }
                 }
@@ -428,6 +525,8 @@ struct HistoryView: View {
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 16))
         .listRowBackground(Color.clear)
+        // A new grouping starts from the rule again (first group open).
+        .onChange(of: sessionsGroupingRaw) { _, _ in groupToggles = [:] }
         // The filtered-away workout no longer exists (deleted, renamed).
         .onChange(of: store.sessions.count) { _, _ in
             if !sessionsWorkout.isEmpty, !store.sessions.contains(where: { $0.dayTitle == sessionsWorkout }) {
@@ -1444,4 +1543,27 @@ enum SessionRange: String, CaseIterable, Identifiable {
         case .year: return cal.date(byAdding: .year, value: -1, to: start)
         }
     }
+}
+
+/// How the All sessions list is split up.
+enum SessionGrouping: String, CaseIterable, Identifiable {
+    case month, year, workout, none
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .month: return "Month"
+        case .year: return "Year"
+        case .workout: return "Workout"
+        case .none: return "No groups"
+        }
+    }
+}
+
+/// One foldable group of sessions (a month, a year, a workout).
+struct SessionGroup: Identifiable {
+    let id: String
+    let title: String
+    /// Where the group sorts among the others (months and years).
+    let order: Double
+    var sessions: [SessionLog]
 }

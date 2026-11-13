@@ -1703,6 +1703,8 @@ final class WorkoutStore: ObservableObject {
     @Published var calendarDropdownOpen = false
     /// Bumped by the Notes compose button in the corner (Notes opens a new note).
     @Published var composeNoteRequest = 0
+    /// Bumped by the side bar's Swap sides item (the open Duo).
+    @Published var swapSidesRequest = 0
     /// Today's + actions, shared so the + can also live in the side rail
     /// (Settings → Status bar on the side).
     @Published var todayEditing = false
@@ -4137,10 +4139,10 @@ private struct LossyElement<T: Decodable>: Decodable {
 /// Format a stored lb weight in a given unit (for History / Profile rows).
 func weightLabel(_ weightLb: Double?, isPair: Bool, unit: WeightUnit) -> String {
     guard let display = unit.displayValue(for: weightLb), display > 0 else { return "Set weight" }
-    if display == display.rounded() {
-        return isPair ? "\(Int(display))s" : "\(Int(display)) \(unit.label)"
-    }
-    return isPair ? "\(roundedWeightText(display))s" : "\(roundedWeightText(display)) \(unit.label)"
+    // Pairs read like any weight ("95 lb", not "95s"), the same as Today
+    // (the saved session showed "95s × 12" beside "145 lb × 15").
+    _ = isPair
+    return "\(roundedWeightText(display)) \(unit.label)"
 }
 
 // MARK: - Sample history (Settings → Test data)

@@ -220,7 +220,7 @@ struct NotesView: View {
             } else {
                 NavigationStack(path: $path) {
                     listPane
-                        .toolbar(.hidden, for: .navigationBar)
+                        .sideBarItems(.notes)
                         .navigationDestination(for: UUID.self) { id in
                             NoteDetailView(noteID: id)
                                 .navigationBarBackButtonHidden(inSideBar)

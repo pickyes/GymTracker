@@ -164,7 +164,7 @@ struct ProfileView: View {
             } else {
                 NavigationStack(path: $path) {
                     rootList
-                        .toolbar(.hidden, for: .navigationBar)
+                        .sideBarItems(.profile)
                         .navigationDestination(for: ProfileSection.self) { section in
                             sectionPage(section)
                                 .navigationBarBackButtonHidden(inRail)

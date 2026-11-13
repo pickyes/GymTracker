@@ -276,7 +276,20 @@ extension EnvironmentValues {
         get { self[PageTitleTopKey.self] }
         set { self[PageTitleTopKey.self] = newValue }
     }
-    /// Top of the corner button column (swap/menu), on screen.
+    /// iOS is drawing the Duo's side bar itself (its tab bar, Back and
+    /// toolbar items run down the side): the page's actions go in the
+    /// toolbar instead of floating buttons.
+    /// This page keeps itself clear of the system side bar (off where a
+    /// container already does, or the page isn't the one beside it).
+    var sideBarInset: Bool {
+        get { self[SideBarInsetKey.self] }
+        set { self[SideBarInsetKey.self] = newValue }
+    }
+    var systemSideBar: Bool {
+        get { self[SystemSideBarKey.self] }
+        set { self[SystemSideBarKey.self] = newValue }
+    }
+
     var cornerColumnTop: CGFloat {
         get { self[CornerColumnTopKey.self] }
         set { self[CornerColumnTopKey.self] = newValue }
@@ -316,6 +329,8 @@ private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
 private struct ScreenIsOpenKey: EnvironmentKey { static let defaultValue = false }
 private struct DuoHingeXKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 private struct PageTitleTopKey: EnvironmentKey { static let defaultValue: CGFloat = 30 }
+private struct SystemSideBarKey: EnvironmentKey { static let defaultValue = false }
+private struct SideBarInsetKey: EnvironmentKey { static let defaultValue = true }
 private struct CornerColumnTopKey: EnvironmentKey { static let defaultValue: CGFloat = .infinity }
 private struct AppDrawsKeyboardDoneKey: EnvironmentKey { static let defaultValue = false }
 
@@ -1821,4 +1836,71 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         viewControllers.count > 1
     }
+}
+
+
+// MARK: - The Duo's system side bar
+
+/// A main page's navigation bar. Hidden as before (the pages draw their own
+/// big titles), except where iOS runs bars down the side of the Duo: there
+/// the page's actions become real toolbar items, so they get the system's
+/// own side bar buttons.
+struct SideBarItems: ViewModifier {
+    let page: ContentView.Page
+    @Environment(\.systemSideBar) private var on
+    @Environment(\.railEdge) private var edge
+    @Environment(\.sideBarInset) private var inset
+    @Environment(\.duoWide) private var wide
+    @EnvironmentObject private var store: WorkoutStore
+    @ObservedObject private var duo = DuoSettings.shared
+
+    func body(content: Content) -> some View {
+        content
+            // Clear of the side bar (iOS floats it over the page). Inside
+            // the page, not around it: iOS only runs the toolbar down the
+            // side when the page itself reaches that edge.
+            .padding(edge == .leading ? .leading : .trailing, on && inset ? ContentView.railWidth : 0)
+            .toolbar(on ? .visible : .hidden, for: .navigationBar)
+            // Only the buttons: no bar background or hairline across the top.
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                if on {
+                    if page == .today {
+                        ToolbarItem(placement: .primaryAction) {
+                            if store.todayEditing {
+                                Button { store.todayEditing = false } label: {
+                                    Label("Done editing", systemImage: "checkmark")
+                                }
+                            } else {
+                                Menu {
+                                    Button("Edit", systemImage: "pencil") { store.todayEditing = true }
+                                    Button("Add exercise", systemImage: "plus") { store.todayAddExercise = true }
+                                    Button("Modify today", systemImage: "slider.horizontal.3") { store.todaySessionMod = true }
+                                } label: {
+                                    Label("Workout actions", systemImage: "plus")
+                                }
+                            }
+                        }
+                    }
+                    if page == .notes {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button { store.composeNoteRequest += 1 } label: {
+                                Label("New note", systemImage: "square.and.pencil")
+                            }
+                        }
+                    }
+                    if wide && duo.showSwapButton {
+                        ToolbarItem(placement: .secondaryAction) {
+                            Button { store.swapSidesRequest += 1 } label: {
+                                Label("Swap sides", systemImage: "arrow.left.arrow.right")
+                            }
+                        }
+                    }
+                }
+            }
+    }
+}
+
+extension View {
+    func sideBarItems(_ page: ContentView.Page) -> some View { modifier(SideBarItems(page: page)) }
 }

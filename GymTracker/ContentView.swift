@@ -92,6 +92,14 @@ struct ContentView: View {
         let dsMode = Self.isWide(steadySize) && steadySize.height > steadySize.width
         return dsMode ? .trailing : nil
     }
+    /// The Duo with the side status bar on: the pages live in a real tab
+    /// view, so iOS draws its own side bar (tab bar, Back, toolbar items)
+    /// wherever it presents bars vertically.
+    private var useTabs: Bool { duo.sideStatusBar && hinge.hasHinge }
+    /// iOS is drawing the side bar itself right now (folded, and open
+    /// sideways). Open and upright it keeps bars horizontal, so the app's
+    /// own bar shows there instead.
+    private var nativeBar: Bool { useTabs && verticalBarEdge != nil }
     private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
     /// The side bar is showing where iOS's status bar is horizontal.
     private var drawsOwnStatusBar: Bool { rail != nil && verticalBarEdge == nil }
@@ -250,7 +258,7 @@ struct ContentView: View {
     /// Duo's other page).
     @State private var calendarDay: Date = Calendar.current.startOfDay(for: Date())
 
-    enum Page: String, CaseIterable {
+    enum Page: String, CaseIterable, Hashable {
         case today, history, notes, profile
         var title: String {
             switch self {
@@ -281,7 +289,9 @@ struct ContentView: View {
                             : rail == .trailing ? proxy.safeAreaInsets.trailing : 0
                         // Strip off (Settings): the pages run under the side
                         // status bar; only the button column stays clear.
-                        let strip = rail != nil   // The grey bar always comes with the side status bar (DaRon)
+                        // The app's own grey bar: only where iOS isn't drawing
+                        // the side bar itself.
+                        let strip = rail != nil && !nativeBar
                         let extraRail = strip ? max(0, Self.railWidth - systemRail) : 0
                         let railTotal = strip ? systemRail + extraRail : 0
                         // The status icons sit centered in the system's own
@@ -305,16 +315,19 @@ struct ContentView: View {
                             // wider frame slid the page off the far edge).
                             .frame(width: strip ? proxy.size.width - extraRail - 1 : nil)
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
-                            .ignoresSafeArea(.container, edges: rail != nil && !strip ? (rail == .leading ? .leading : .trailing) : [])
+                            .ignoresSafeArea(.container, edges: [])
                             // Nothing drawn past the page area's sides (shadows,
                             // glows); top and bottom still run to the edges.
-                            .mask(Rectangle().padding(.vertical, -600))
+                            // (Not over iOS's own side bar, which sits outside
+                            // the page area.)
+                            .mask(Rectangle().padding(.vertical, -600).padding(.horizontal, nativeBar ? -200 : 0))
                             .environment(\.railEdge, rail)
                             // Where the hinge is across the pages.
                             .environment(\.duoHingeX,
                                          (proxy.size.width + proxy.safeAreaInsets.leading + proxy.safeAreaInsets.trailing) / 2
                                          - (rail == .leading && strip ? railTotal + 1 : 0))
                             .environment(\.cornerButtonsInRail, strip)
+                            .environment(\.systemSideBar, nativeBar)
                             .environment(\.appDrawsKeyboardDone, true)
                             .environment(\.cornerColumnTop, cornerColumnTop)
                             .environment(\.pageTitleTop,
@@ -441,6 +454,17 @@ struct ContentView: View {
                                     .transition(.opacity)
                             }
                         }
+                        // iOS's side bar: the rest pill sits in the bar's free
+                        // gap, between the buttons at the top and the tabs.
+                        if nativeBar && restActive && !isTentPose && !store.calendarDropdownOpen {
+                            RestTimerCard(pill: true, pillHeight: 176)
+                                .padding(.top, 236)
+                                .padding(verticalBarEdge == .leading ? .leading : .trailing, 20)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                       alignment: verticalBarEdge == .leading ? .topLeading : .topTrailing)
+                                .ignoresSafeArea()
+                                .transition(.opacity)
+                        }
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -487,7 +511,7 @@ struct ContentView: View {
                                      : fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
                             .frame(maxWidth: .infinity, maxHeight: .infinity,
                                    alignment: rail == .leading ? .bottomLeading : .bottomTrailing)
-                            .ignoresSafeArea(.container, edges: rail == nil ? [] : (rail == .leading ? .leading : .trailing))
+                            .ignoresSafeArea(.container, edges: rail == nil || nativeBar ? [] : (rail == .leading ? .leading : .trailing))
                             // Fold (Debug Pass 2): the bottom safe-area
                             // inset jumps discretely when the pose flips,
                             // which used to snap the button to its new
@@ -650,7 +674,33 @@ struct ContentView: View {
             // Open or folded comes from the whole screen: the side bar's
             // width narrowed the pages under the "open" cut-off in DS mode.
             let wide = Self.isWide(steadyOK ? steadySize : size)
-            ZStack {
+            Group {
+                if useTabs {
+                    // A real tab view: iOS presents its tab bar down the
+                    // side of the Duo with the system's own buttons.
+                    TabView(selection: $selectedPage) {
+
+                TodayView()
+                    .environment(\.pageContainerSize, size)
+                    .environment(\.screenIsOpen, wide)
+                    // Today makes room for the keyboard itself (its column
+                    // scrolls clear of it); the page as a whole doesn't get
+                    // squeezed or lifted, so the body pane stays in place.
+                    .ignoresSafeArea(.keyboard)
+                    .modifier(StillWhenHidden(hidden: selectedPage != .today))
+                    .opacity(selectedPage == .today ? 1 : 0)
+                    .allowsHitTesting(selectedPage == .today)
+                    .accessibilityHidden(selectedPage != .today)
+                            .tabPage(.today, barShown: nativeBar, edge: verticalBarEdge)
+                unfoldPage(.history, wide: wide) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
+                            .tabPage(.history, barShown: nativeBar, edge: verticalBarEdge)
+                        fullPage(.notes) { NotesView() }
+                            .tabPage(.notes, barShown: nativeBar, edge: verticalBarEdge)
+                        fullPage(.profile) { ProfileView() }
+                            .tabPage(.profile, barShown: nativeBar, edge: verticalBarEdge)
+                    }
+                } else {
+                    ZStack {
                 TodayView()
                     .environment(\.pageContainerSize, size)
                     .environment(\.screenIsOpen, wide)
@@ -669,8 +719,12 @@ struct ContentView: View {
                 fullPage(.profile) { ProfileView() }
                 fullPage(.notes) { NotesView() }
             }
+                }
+            }
             .environment(\.duoWide, wide)
             .environment(\.duoSwapped, wide && swapSides)
+            .onChange(of: store.swapSidesRequest) { _, _ in swapPages() }
+            .onChange(of: selectedPage) { _, _ in dismissKeyboard() }
             // A note's linked workout: open the Calendar on that day.
             .onChange(of: store.calendarJumpRequest) { _, day in
                 guard let day else { return }
@@ -952,7 +1006,7 @@ struct ContentView: View {
             // Rest timer (Nov 12, DaRon): an upright pill at the top of the
             // button column (above swap), growing out of the corner. Tap
             // it for the full controls. Tent pose has its own tile.
-            if restActive && !isTentPose && !navExpanded && !store.calendarDropdownOpen {
+            if restActive && !nativeBar && !isTentPose && !navExpanded && !store.calendarDropdownOpen {
                 RestTimerCard(pill: true, pillHeight: sideBar ? sideBarPillHeight : 200)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
@@ -962,7 +1016,7 @@ struct ContentView: View {
             // Hidden while typing: you're already writing one, and with
             // the keyboard up a third button pushed the column into the
             // clock (landscape).
-            if selectedPage == .notes && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
+            if selectedPage == .notes && !nativeBar && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
                 Button { store.composeNoteRequest += 1 } label: {
                     Image(systemName: "square.and.pencil")
                         .scaledFont(size: 22, weight: .semibold, maxScale: 1.3)
@@ -982,11 +1036,11 @@ struct ContentView: View {
             // (With the grey strip on, it sits in the strip instead.)
             // Hidden only behind a real on-screen keyboard (a stale flag
             // from a hardware keyboard hid it on the phone).
-            if rail != nil && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
+            if rail != nil && !nativeBar && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
                 railTodayActions
                     .transition(.scale.combined(with: .opacity))
             }
-            if showSwapButton && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
+            if showSwapButton && !nativeBar && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
                 swapSidesButton
                     // Always fully there and tappable while the Duo is
                     // open, at any hinge angle (it used to fade and blur
@@ -1427,4 +1481,19 @@ final class NetworkWatch: ObservableObject {
         monitor.start(queue: DispatchQueue(label: "status.net"))
     }
     deinit { monitor.cancel() }
+}
+
+
+extension View {
+    /// One page of the Duo's tab view: its tab bar entry, and the tab bar
+    /// hidden where the app draws its own bar instead.
+    func tabPage(_ page: ContentView.Page, barShown: Bool, edge: HorizontalEdge?) -> some View {
+        self
+            // No inset of our own: iOS only runs a page's toolbar down the
+            // side when the page reaches that edge, and it insets the
+            // content for its bar itself.
+            .toolbar(barShown ? .automatic : .hidden, for: .tabBar)
+            .tabItem { Label(page.title, systemImage: page.systemImage) }
+            .tag(page)
+    }
 }
