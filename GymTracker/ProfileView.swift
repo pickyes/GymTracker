@@ -126,16 +126,17 @@ struct ProfileView: View {
     @State private var userPicked = false
 
     /// Grouped like Settings: you and your plan, your body, the app.
-    private var groups: [[ProfileSection]] {
-        var body: [ProfileSection] = [.bodyweight, .injuries, .weights]
+    /// Settings-app groups (DaRon picked layout A): Your Program on its
+    /// own, then Training, Body and App.
+    private var groups: [(title: String, sections: [ProfileSection])] {
+        var training: [ProfileSection] = [.gyms, .exercises, .weights]
         if !(store.profile?.limits.isEmpty ?? true) || store.activeProgram?.isPreset == true {
-            body.append(.limits)
+            training.append(.limits)
         }
         return [
-            [.program, .gyms, .exercises],
-            body,
-            [.muse, .pro],
-            [.settings, .legal],
+            ("Training", training),
+            ("Body", [.bodyweight, .injuries]),
+            ("App", [.muse, .pro, .settings, .legal]),
         ]
     }
 
@@ -216,9 +217,12 @@ struct ProfileView: View {
             Section {
                 NavigationLink(value: ProfileSection.program) { summaryCard }
             }
-            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
-                Section {
-                    ForEach(group.filter { index > 0 || $0 != .program }) { section in
+            Section {
+                NavigationLink(value: ProfileSection.program) { sectionRow(.program) }
+            }
+            ForEach(groups, id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.sections) { section in
                         NavigationLink(value: section) { sectionRow(section) }
                     }
                 }
@@ -237,36 +241,45 @@ struct ProfileView: View {
         List {
             PageTitle(text: "Profile")
                 .padding(.top, 30)
-                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 4, trailing: 8))
+                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
                 .listRowBackground(Color.clear)
-            Button { selected = .program; userPicked = true } label: { summaryCard }
-                .buttonStyle(.plain)
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(selected == .program ? Color.accentColor.opacity(0.3) : Color.clear)
-                        .padding(.horizontal, 6)
-                )
-                .listRowSeparator(.hidden)
-            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
-                Section {
-                    ForEach(group.filter { index > 0 || $0 != .program }) { section in
-                        Button { selected = section; userPicked = true } label: { sectionRow(section) }
-                            .buttonStyle(.plain)
-                            .listRowBackground(
-                                Capsule()
-                                    .fill(selected == section ? Color.accentColor.opacity(0.3) : Color.clear)
-                                    .padding(.horizontal, 6)
-                            )
-                            .listRowSeparator(.hidden)
+            Section {
+                // The header opens Your Program too, but only the row
+                // below lights up for it (one highlight, not two).
+                Button { selected = .program; userPicked = true } label: { summaryCard }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Theme.card)
+            }
+            Section {
+                sidebarButton(.program) { sectionRow(.program) }
+            }
+            ForEach(groups, id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.sections) { section in
+                        sidebarButton(section) { sectionRow(section) }
                     }
                 }
             }
             clearanceRow
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        // Grouped rounded sections inside the page margins, like the
+        // Settings app (the plain list ran the icons off the edge).
+        .listStyle(.insetGrouped)
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        // The title sits in the clock's row, like the other pages.
+        .contentMargins(.top, 0, for: .scrollContent)
+        .oledList()
         .ignoresSafeArea(edges: .top)
         .infinityTopEdge()
+    }
+
+    /// A sidebar row: opens its page beside the list; the open one is lit.
+    private func sidebarButton<Label: View>(_ section: ProfileSection, @ViewBuilder label: () -> Label) -> some View {
+        Button { selected = section; userPicked = true } label: {
+            label()
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(selected == section ? Color.accentColor.opacity(0.3) : Theme.card)
     }
 
     /// Apple Account-style card at the top: the plan you're on.
@@ -279,12 +292,14 @@ struct ProfileView: View {
                 .background(Color.accentColor.opacity(0.18), in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.activeProgram?.name ?? "No program yet")
+                Text(store.profile?.name ?? store.activeProgram?.name ?? "No program yet")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(2)
                 if let program = store.activeProgram, let profile = store.profile {
-                    Text("\(profile.goal.label) · \(daysPerWeekText(program.days.count)) · \(subscription.isPro ? "Pro" : "Free")")
+                    Text(profile.name == nil
+                         ? "\(profile.goal.label) · \(daysPerWeekText(program.days.count)) · \(subscription.isPro ? "Pro" : "Free")"
+                         : "\(program.name) · \(subscription.isPro ? "Pro" : "Free")")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
                 } else {
