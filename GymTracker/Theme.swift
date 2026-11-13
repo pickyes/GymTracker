@@ -952,35 +952,21 @@ struct StatusBarBlur: View {
     }
 }
 
-
-/// Behind the status icons (DaRon, Nov 12): an ombré from transparent on
-/// the left to the page color under the clock / signal / battery, fading
-/// out at the bottom too — content sliding under the status bar fades
-/// away instead of meeting a hard edge. Only while the status bar runs
-/// across the top (statusBarHeight 0 = hidden or sideways → nothing).
-struct StatusBarScrim: View {
-    var statusBarHeight: CGFloat
-    var clusterWidth: CGFloat = 140
+/// The top bar (DaRon, Nov 12: "ombré from transparent to black"): solid
+/// page color at the very top edge, fading to transparent at the bottom of
+/// the status bar. No blur, no band — content just fades out under it.
+struct StatusBarOmbre: View {
+    var height: CGFloat
 
     var body: some View {
-        Group {
-            if statusBarHeight > 0 {
-                Theme.background
-                    .mask(LinearGradient(stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black.opacity(0.85), location: 0.45),
-                        .init(color: .black, location: 0.65),
-                    ], startPoint: .leading, endPoint: .trailing))
-                    .mask(LinearGradient(stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black, location: 0.7),
-                        .init(color: .clear, location: 1),
-                    ], startPoint: .top, endPoint: .bottom))
-                    .frame(width: clusterWidth + 90, height: statusBarHeight + 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .ignoresSafeArea(edges: .top)
-            }
-        }
+        LinearGradient(stops: [
+            .init(color: Theme.background, location: 0),
+            .init(color: Theme.background.opacity(0.85), location: 0.4),
+            .init(color: Theme.background.opacity(0), location: 1),
+        ], startPoint: .top, endPoint: .bottom)
+        .frame(height: height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

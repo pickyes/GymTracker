@@ -106,11 +106,10 @@ struct ContentView: View {
                         // across the top, visible. Hidden or turned to run
                         // down the side → no grey spot (DaRon, Nov 12).
                         StatusBarFade(height: stripHeight)
-                        // Ombré behind the status icons: transparent → page
-                        // color. Folded shows more icons (silent, location).
-                        StatusBarScrim(statusBarHeight: Self.horizontalStatusBarHeight(proxy.size),
-                                       clusterWidth: proxy.size.width < 600 ? 165 : 135)
-                        StatusBarBlur(height: stripHeight)
+                        // The top bar: an ombré from the page color at the
+                        // very top edge to transparent (DaRon, Nov 12) —
+                        // replaces the blur bar, which showed as a band.
+                        StatusBarOmbre(height: 30)  // ends where the page titles begin
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
