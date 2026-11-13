@@ -354,6 +354,10 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// (the main page at the front screen's width), as a share of the
     /// width. One setting for every page.
     @AppStorage("duoSideShift") private var sideShift: Double = 0
+    /// While a line is being dragged: only this pair moves, and the
+    /// setting is saved once on release.
+    @State private var liveSplit: Double?
+    @State private var liveShift: Double?
 
     var body: some View {
         GeometryReader { geo in
@@ -376,8 +380,12 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          // halves stay on the hinge; pages still get the
                          // keyboard's safe area and scroll above it.
                          size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
-                         split: $split,
-                         sideShift: $sideShift,
+                         split: Binding(get: { liveSplit ?? split }, set: { liveSplit = $0 }),
+                         sideShift: Binding(get: { liveShift ?? sideShift }, set: { liveShift = $0 }),
+                         commit: {
+                             if let v = liveSplit { split = v; liveSplit = nil }
+                             if let v = liveShift { sideShift = v; liveShift = nil }
+                         },
                          mainMinWidth: mainMinWidth,
                          mainWidth: mainWidth, direction: direction,
                          pane: pane, main: main)
@@ -412,6 +420,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var size: CGSize
     @Binding var split: Double
     @Binding var sideShift: Double
+    var commit: () -> Void
     var mainMinWidth: CGFloat?
     var mainWidth: CGFloat?
     var direction: LayoutDirection
@@ -541,7 +550,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .zIndex(2)
                 // Drag the line to give either half more room (DaRon).
                 DuoSplitHandle(share: $split, length: size.height, span: total,
-                               horizontal: true, rest: 0.5)
+                               horizontal: true, rest: 0.5, onCommit: commit)
                     .offset(y: topH - DuoSplitHandle.grab / 2)
                     .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(lift == 0)
@@ -560,7 +569,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     ),
                     length: total, span: size.height,
                     horizontal: false,
-                    rest: mirrored ? 1 - sideDefault : sideDefault)
+                    rest: mirrored ? 1 - sideDefault : sideDefault,
+                    onCommit: commit)
                     .offset(x: (direction == .rightToLeft ? total - lineX : lineX) - DuoSplitHandle.grab / 2)
                     .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(lift == 0)
@@ -1272,6 +1282,9 @@ struct DuoSplitHandle: View {
     /// true: a horizontal line (DS); false: a vertical one (side by side).
     var horizontal: Bool
     var rest: Double
+    /// Called when the drag ends: the pair saves the setting then (saving
+    /// every frame re-laid out every page, hidden ones too).
+    var onCommit: () -> Void = {}
     /// Thickness of the touch band centred on the line.
     static let grab: CGFloat = 28
     static func clamp(_ v: Double) -> Double { min(max(v, 1.0 / 3), 2.0 / 3) }
@@ -1291,7 +1304,10 @@ struct DuoSplitHandle: View {
                     .animation(.snappy(duration: 0.2), value: dragging)
             }
             .gesture(
-                DragGesture(minimumDistance: 2)
+                // Measured on the screen, not on the handle: the handle
+                // moves with the line, so its own translation fed back on
+                // itself and the line shook (DaRon).
+                DragGesture(minimumDistance: 2, coordinateSpace: .global)
                     .onChanged { value in
                         if start == nil { start = share; dragging = true }
                         let moved = horizontal ? value.translation.height : value.translation.width
@@ -1304,10 +1320,11 @@ struct DuoSplitHandle: View {
                         var t = Transaction(); t.animation = nil
                         withTransaction(t) { share = next }
                     }
-                    .onEnded { _ in start = nil; dragging = false }
+                    .onEnded { _ in start = nil; dragging = false; onCommit() }
             )
             .onTapGesture(count: 2) {
                 withAnimation(.snappy) { share = rest }
+                onCommit()
             }
             .accessibilityElement()
             .accessibilityLabel("Divider")
@@ -1316,6 +1333,7 @@ struct DuoSplitHandle: View {
                 withAnimation(.snappy) {
                     share = Self.clamp(share + (dir == .increment ? 0.05 : -0.05))
                 }
+                onCommit()
             }
     }
 }
