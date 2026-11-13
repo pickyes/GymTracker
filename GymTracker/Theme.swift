@@ -276,6 +276,9 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     var swapped: Bool
     /// The main page's width (the front screen's), nil to share equally.
     var mainWidth: CGFloat? = TodayView.outerDisplayWidth
+    /// Stack the pages DS style when the open Duo is held upright. Every
+    /// page does except Profile (DaRon), which stays side by side.
+    var stacksWhenTall = true
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
 
@@ -283,7 +286,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            if wide && geo.size.height > geo.size.width {
+            if wide && stacksWhenTall && geo.size.height > geo.size.width {
                 // Open and upright (DaRon: Nintendo DS style): one page
                 // on each half of the screen, top and bottom of the fold,
                 // instead of squeezing two pages side by side. The body /

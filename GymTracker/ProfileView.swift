@@ -144,7 +144,7 @@ struct ProfileView: View {
                 // The list keeps the front screen's exact width and side
                 // (right, like Today) for a seamless unfold; the section
                 // waits on the other page. Swap mirrors it.
-                DuoPagePair(wide: true, swapped: swapped) {
+                DuoPagePair(wide: true, swapped: swapped, stacksWhenTall: false) {
                     detailPane
                 } main: {
                     sidebar
