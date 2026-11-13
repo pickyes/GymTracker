@@ -1037,13 +1037,6 @@ struct TrainingHeatmap: View {
                             if let day = cells[row * 7 + column] {
                                 square(day: day, sets: sets[day] ?? 0, today: today, cell: cell, corner: corner)
                                     .overlay {
-                                        // The day number, small, so it reads like the calendar.
-                                        Text("\(calendar.component(.day, from: day))")
-                                            .font(.system(size: max(8, cell * 0.32), weight: .medium))
-                                            .foregroundStyle((sets[day] ?? 0) >= 12 ? Color.white : Theme.secondaryText)
-                                            .allowsHitTesting(false)
-                                    }
-                                    .overlay {
                                         if calendar.isDate(day, inSameDayAs: selectedDay) && day <= today {
                                             RoundedRectangle(cornerRadius: corner, style: .continuous)
                                                 .stroke(Theme.text.opacity(0.8), lineWidth: 1.5)

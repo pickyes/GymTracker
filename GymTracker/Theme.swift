@@ -474,7 +474,10 @@ struct DuoSwapCard: ViewModifier {
         // mask sits far outside the page and nothing is clipped.
         let edge = min(1, lift * 4)
         content
-            .background(Theme.background.opacity(edge))
+            // Always solid: a see-through card let the grey backdrop tint
+            // the whole page at the end of a swap, then pop back to black
+            // (the flicker DaRon saw).
+            .background(Theme.background)
             .mask {
                 // Close to the Duo's own screen corners.
                 RoundedRectangle(cornerRadius: 36 * lift, style: .continuous)
