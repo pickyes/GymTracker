@@ -288,11 +288,11 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          mainWidth: mainWidth, direction: direction,
                          pane: pane, main: main)
         }
-        // The pages reach the top edge themselves (their content still
-        // gets the status bar's safe area). Otherwise the card effects
-        // stopped pages that run under the status bar (Today) from doing
-        // so, and the page dropped by the status bar's height mid-swap.
-        .ignoresSafeArea(edges: .top)
+        // The pages span the whole screen, edge to edge (their content
+        // still gets the safe areas). Only the top used to be ignored, so
+        // the cards were sized to the screen minus the home-indicator
+        // strip: a hairline gap at the top, a wide one at the bottom.
+        .ignoresSafeArea(.container)
     }
 }
 
@@ -324,8 +324,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
             paneX = total - paneX - paneW
             mainX = total - mainX - mainW
         }
-        // 0 at rest, 1 mid-slide: the lift rides the same curve.
-        let lift = wide ? sin(.pi * p) : 0
+        // 0 at rest, 1 for most of the slide: the cards lift off quickly,
+        // hold their full card shape (even gaps, round corners) while
+        // they cross, and settle back at the very end.
+        let lift = wide ? min(1, sin(.pi * p) * 1.8) : 0
         return ZStack(alignment: .topLeading) {
             // A grey backdrop behind the cards, like Duo multitasking.
             Color(.systemGray3)
@@ -375,7 +377,8 @@ struct DuoSwapCard: ViewModifier {
         content
             .background(Theme.background.opacity(edge))
             .mask {
-                RoundedRectangle(cornerRadius: 26 * lift, style: .continuous)
+                // Close to the Duo's own screen corners.
+                RoundedRectangle(cornerRadius: 36 * lift, style: .continuous)
                     .padding(-200 * (1 - edge))
             }
             .shadow(color: .black.opacity(0.35 * lift), radius: 14 * lift, y: 6 * lift)
