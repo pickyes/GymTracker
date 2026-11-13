@@ -289,6 +289,9 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     var stacksWhenTall = true
     /// Draw a hairline at the hinge between the pages (Notes).
     var showsDivider = false
+    /// On the DS bottom half, pull the companion page in to clear the
+    /// corner buttons. Today's body stays centered (DaRon), so it doesn't.
+    var paneClearsCorner = true
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
 
@@ -310,6 +313,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          wide: wide,
                          stacked: stacked,
                          showsDivider: showsDivider,
+                         paneClearsCorner: paneClearsCorner,
                          // Stacked keeps the keyboard-free height, so the
                          // halves stay on the hinge; pages still get the
                          // keyboard's safe area and scroll above it.
@@ -342,6 +346,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     /// DS layout: halves stacked top and bottom instead of side by side.
     var stacked = false
     var showsDivider = false
+    var paneClearsCorner = true
     var size: CGSize
     var mainWidth: CGFloat?
     var direction: LayoutDirection
@@ -410,8 +415,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 pane()
                     .environment(\.layoutDirection, direction)
                     // DS: the bottom half keeps clear of the corner buttons.
-                    .safeAreaPadding(.trailing, stacked && slide >= 0.5 ? 76 : 0)
-                    .environment(\.duoCornerInset, stacked && slide >= 0.5 ? 76 : 0)
+                    .safeAreaPadding(.trailing, stacked && slide >= 0.5 && paneClearsCorner ? 76 : 0)
+                    .environment(\.duoCornerInset, stacked && slide >= 0.5 && paneClearsCorner ? 76 : 0)
                     .frame(width: paneW, height: pageH, alignment: .top)
                     .clipped()
                     .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: pageH),

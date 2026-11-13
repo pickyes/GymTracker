@@ -944,7 +944,7 @@ struct TodayView: View {
         // the left page and the body waits on the right.
         let swapped = split && duoSwapped
         // One pair of pages that trade sides like two apps (DuoPagePair).
-        return DuoPagePair(wide: split, swapped: swapped) {
+        return DuoPagePair(wide: split, swapped: swapped, paneClearsCorner: false) {
             splitBodyPane(for: plan, anchor: swapped ? .leading : .trailing)
         } main: {
             compactColumn(for: plan, showBody: !split)
