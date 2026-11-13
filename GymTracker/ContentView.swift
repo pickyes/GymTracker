@@ -67,12 +67,11 @@ struct ContentView: View {
     // Upright (portrait) and turned left: camera at the top of the bar;
     // upside down and turned right: at the bottom (measured on the Duo).
     private var cameraAtTop: Bool {
-        !Self.isWide(steadySize) && [UIInterfaceOrientation.portrait.rawValue,
-                                     UIInterfaceOrientation.landscapeLeft.rawValue].contains(interfaceOrientation)
+        // Seen on the Duo: at the top in both sideways turns and upright.
+        !Self.isWide(steadySize) && interfaceOrientation != UIInterfaceOrientation.portraitUpsideDown.rawValue
     }
     private var cameraAtBottom: Bool {
-        !Self.isWide(steadySize) && [UIInterfaceOrientation.portraitUpsideDown.rawValue,
-                                     UIInterfaceOrientation.landscapeRight.rawValue].contains(interfaceOrientation)
+        !Self.isWide(steadySize) && interfaceOrientation == UIInterfaceOrientation.portraitUpsideDown.rawValue
     }
     /// Settings → Status bar on the side, on a screen that has one: the
     /// buttons move into a rail along that edge (DaRon, like Reddit).
@@ -102,7 +101,14 @@ struct ContentView: View {
     }
 
     /// Where the side bar's list starts.
-    private var railTop: CGFloat { Self.railButtonTop + (cameraAtTop ? Self.cameraClearance : 0) }
+    /// Where the side bar's list starts: below the status icons, moved up
+    /// (never past the camera) when the screen is too short for the list
+    /// and the buttons, so nothing overlaps.
+    private var railTop: CGFloat {
+        let wanted = Self.railButtonTop + (cameraAtTop ? Self.cameraClearance : 0)
+        let fits = steadySize.height - railBottom - railButtonsHeight - 12 - railListHeight(labeled: false)
+        return max(cameraAtTop ? 84 : 20, min(wanted, fits))
+    }
 
     private var railBottom: CGFloat { cameraAtBottom ? Self.cameraClearance : 16 }
 
@@ -153,7 +159,13 @@ struct ContentView: View {
     /// Bottom of the side bar kept clear of the camera hole.
     static let cameraClearance: CGFloat = 92
 
-    private func railNavItem(_ page: Page, labeled: Bool) -> some View {
+    @State private var railItemWidth: CGFloat = 70
+    private func updateRailItemWidth(_ w: CGFloat) {
+        let v = max(48, min(70, w))
+        if abs(v - railItemWidth) > 0.5 { DispatchQueue.main.async { railItemWidth = v } }
+    }
+
+    private func railNavItem(_ page: Page, labeled: Bool, width: CGFloat = 70) -> some View {
         let active = page == selectedPage
         return Button {
             withAnimation(AppAnimation.snappy) { selectedPage = page }
@@ -182,7 +194,7 @@ struct ContentView: View {
             }
             // Selected: lit white on the accent highlight (DaRon).
             .foregroundStyle(active ? Color.white : Theme.secondaryText)
-            .frame(width: 70, height: labeled || active ? 58 : 44)
+            .frame(width: width, height: labeled || active ? 58 : 44)
             .background {
                 // One highlight that slides to the page you pick.
                 if active {
@@ -241,7 +253,12 @@ struct ContentView: View {
                         // The status icons sit centered in the system's own
                         // strip at the edge; everything in the bar lines up
                         // on that same center (DaRon: with the WiFi icon).
-                        let iconCenter = systemRail > 0 ? systemRail / 2 : railTotal / 2
+                        // The camera and status icons sit a touch in from the
+                        // strip's middle (toward the page): line up with them.
+                        let iconCenter = systemRail > 0 ? systemRail / 2 + 5 : railTotal / 2
+                        // Highlight fits inside the bar on both sides with an
+                        // even 6pt margin (it ran into the bar's edge).
+                        let _ = updateRailItemWidth(2 * min(iconCenter, railTotal - iconCenter) - 12)
                         // The pages stop at the rail. They're drawn edge to edge
                         // (ignoring safe areas), and a view that touches the
                         // safe area's edge spreads into it — so they stop 1pt
@@ -342,7 +359,7 @@ struct ContentView: View {
                                 VStack(spacing: railLabeled ? 6 : 4) {
                                     railBackButton
                                         .frame(width: 52, height: 52)
-                                    ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled) }
+                                    ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled, width: railItemWidth) }
                                 }
                                     .frame(width: iconCenter * 2)
                                     // One spot in every pose, below the status icons
