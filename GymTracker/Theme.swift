@@ -831,18 +831,6 @@ struct StatusBarFade: View {
                 .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
                 .frame(height: height)
                 .frame(maxWidth: .infinity, alignment: .top)
-            if statusBarHeight > 0 {
-                // Only behind the status icons (DaRon, Nov 12): a capsule
-                // hugging the clock / signal / battery cluster, the status
-                // bar's own height, with a short soft edge — no spill to
-                // the left of the clock or below the icons.
-                Capsule()
-                    .fill(Color(white: 0.5))
-                    .frame(width: clusterWidth, height: max(0, statusBarHeight - 12))
-                    .blur(radius: 3)
-                    .padding(.top, 6)
-                    .padding(.trailing, 6)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .ignoresSafeArea(edges: .top)
@@ -956,6 +944,40 @@ struct StatusBarBlur: View {
                     ], startPoint: .top, endPoint: .bottom))
                     .frame(height: height)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea(edges: .top)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+
+/// Behind the status icons (DaRon, Nov 12): an ombré from transparent on
+/// the left to the page color under the clock / signal / battery, fading
+/// out at the bottom too — content sliding under the status bar fades
+/// away instead of meeting a hard edge. Only while the status bar runs
+/// across the top (statusBarHeight 0 = hidden or sideways → nothing).
+struct StatusBarScrim: View {
+    var statusBarHeight: CGFloat
+    var clusterWidth: CGFloat = 140
+
+    var body: some View {
+        Group {
+            if statusBarHeight > 0 {
+                Theme.background
+                    .mask(LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black.opacity(0.85), location: 0.45),
+                        .init(color: .black, location: 0.65),
+                    ], startPoint: .leading, endPoint: .trailing))
+                    .mask(LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.7),
+                        .init(color: .clear, location: 1),
+                    ], startPoint: .top, endPoint: .bottom))
+                    .frame(width: clusterWidth + 90, height: statusBarHeight + 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .ignoresSafeArea(edges: .top)
             }
         }
