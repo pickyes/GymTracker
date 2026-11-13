@@ -256,7 +256,8 @@ struct ContentView: View {
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)
                 // Calendar stays side by side upright too (DaRon), like Profile.
-                unfoldPage(.history, wide: wide, stacksWhenTall: false) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
+                // Exactly half and half (DaRon).
+                unfoldPage(.history, wide: wide, stacksWhenTall: false, halves: true) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
                 // Notes and Profile split themselves when wide, like
                 // Apple's Notes and Settings: list on one page, the
                 // open note / section on the other.
@@ -354,14 +355,16 @@ struct ContentView: View {
     /// Swapped, the two trade places.
     @ViewBuilder
     private func unfoldPage<Main: View, Side: View>(
-        _ page: Page, wide: Bool, stacksWhenTall: Bool = true,
+        _ page: Page, wide: Bool, stacksWhenTall: Bool = true, halves: Bool = false,
         @ViewBuilder main: () -> Main,
         @ViewBuilder companion: () -> Side
     ) -> some View {
         let swapped = wide && swapSides
         let companionPage = companion()
         let mainPage = main()
-        DuoPagePair(wide: wide, swapped: swapped, stacksWhenTall: stacksWhenTall) {
+        DuoPagePair(wide: wide, swapped: swapped,
+                    mainWidth: halves ? nil : TodayView.outerDisplayWidth,
+                    stacksWhenTall: stacksWhenTall) {
             companionPage
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .hingeReveal()
