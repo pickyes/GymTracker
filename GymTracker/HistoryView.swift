@@ -945,18 +945,11 @@ struct TrainingHeatmap: View {
     var fill = false
 
     private let gap: CGFloat = 4
-    private let labelWidth: CGFloat = 16
-    /// Header, month row, key and the spacing between them.
-    private let chrome: CGFloat = 18 + 14 + 16 + 3 * 8
+    /// Header, weekday row, key and the spacing between them.
+    private let chrome: CGFloat = 34 + 14 + 16 + 3 * 8
 
     private var calendar: Calendar { Calendar.current }
 
-    /// The first day shown: the start of the week, `weeks - 1` before this one.
-    private func firstDay(_ weeks: Int) -> Date {
-        let today = calendar.startOfDay(for: Date())
-        let weekStart = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
-        return calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: weekStart) ?? weekStart
-    }
 
     /// Done working sets per day from `start` on.
     private func setsByDay(from start: Date) -> [Date: Int] {
@@ -972,81 +965,87 @@ struct TrainingHeatmap: View {
         return result
     }
 
+    /// The month shown: the one the chosen day is in (DaRon: daily, like
+    /// the calendar — "This month, by day").
+    private var monthStart: Date {
+        calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDay)) ?? selectedDay
+    }
+
+    /// The month's days laid out by week: leading blanks, then each day.
+    private var monthCells: [Date?] {
+        let start = monthStart
+        let lead = (calendar.component(.weekday, from: start) - calendar.firstWeekday + 7) % 7
+        let days = calendar.range(of: .day, in: .month, for: start)?.count ?? 30
+        var cells: [Date?] = Array(repeating: nil, count: lead)
+        for d in 0..<days { cells.append(calendar.date(byAdding: .day, value: d, to: start)) }
+        while cells.count % 7 != 0 { cells.append(nil) }
+        return cells
+    }
+
     var body: some View {
         if fill {
             GeometryReader { geo in
-                let fit = fitted(to: geo.size)
-                heatmap(weeks: fit.weeks, cell: fit.cell)
+                heatmap(cell: fittedCell(to: geo.size))
             }
         } else {
-            // As many weeks as fit across (up to 14).
-            ViewThatFits(in: .horizontal) {
-                heatmap(weeks: 14, cell: 20)
-                heatmap(weeks: 12, cell: 20)
-                heatmap(weeks: 10, cell: 20)
-                heatmap(weeks: 8, cell: 20)
-                heatmap(weeks: 6, cell: 20)
-            }
+            heatmap(cell: 26)
         }
     }
 
-    /// The most weeks (up to 14) with squares about 16–24pt, sized to
-    /// fill the space exactly.
-    private func fitted(to size: CGSize) -> (weeks: Int, cell: CGFloat) {
-        let width = max(0, size.width - labelWidth - gap)
-        let byHeight = max(10, (size.height - chrome - 6 * gap) / 7)
-        let target = min(max(byHeight, 16), 24)
-        let weeks = min(14, max(4, Int((width + gap) / (target + gap))))
-        let byWidth = (width - CGFloat(weeks - 1) * gap) / CGFloat(weeks)
-        return (weeks, max(10, min(byWidth, byHeight, 28)))
+    /// Squares as big as fit: seven across the width, every week down the height.
+    private func fittedCell(to size: CGSize) -> CGFloat {
+        let rows = CGFloat(monthCells.count / 7)
+        let byWidth = (size.width - 6 * gap) / 7
+        let byHeight = (size.height - chrome - (rows - 1) * gap) / rows
+        return max(12, min(byWidth, byHeight, 44))
     }
 
-    private func heatmap(weeks: Int, cell: CGFloat) -> some View {
-        let start = firstDay(weeks)
-        let sets = setsByDay(from: start)
+    private func heatmap(cell: CGFloat) -> some View {
+        let cells = monthCells
+        let sets = setsByDay(from: monthStart)
         let today = calendar.startOfDay(for: Date())
         let streak = store.dayStreak
         let corner = max(3, cell * 0.25)
+        let trained = cells.compactMap { $0 }.filter { (sets[$0] ?? 0) > 0 }.count
         return VStack(alignment: .leading, spacing: 8) {
             // Non-breaking hyphen, so "0-day" never splits across lines.
-            Text("Last \(weeks) weeks · \(streak)\u{2011}day streak")
+            Text("\(monthStart.formatted(.dateTime.month(.wide))) · \(trained) day\(trained == 1 ? "" : "s") trained · \(streak)\u{2011}day streak")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            // Month labels over the week a month starts in.
+            // Weekday initials over the columns.
             HStack(spacing: gap) {
-                Color.clear.frame(width: labelWidth, height: 1)
-                ForEach(0..<weeks, id: \.self) { week in
-                    let weekStart = calendar.date(byAdding: .day, value: week * 7, to: start) ?? start
-                    // The first column is labeled only when the next one
-                    // doesn't start a month (or the two labels collide).
-                    let nextStart = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
-                    let label = monthLabel(weekStart: weekStart,
-                                           first: week == 0 && monthLabel(weekStart: nextStart, first: false) == nil)
-                    Text(label ?? " ")
+                ForEach(0..<7, id: \.self) { column in
+                    Text(weekdayInitial(column))
                         .font(.caption2)
                         .foregroundStyle(Theme.secondaryText)
-                        .fixedSize()
-                        .frame(width: cell, alignment: .leading)
+                        .frame(width: cell)
                 }
             }
             .frame(height: 14)
-            HStack(alignment: .top, spacing: gap) {
-                // Weekday initials on alternate rows.
-                VStack(spacing: gap) {
-                    ForEach(0..<7, id: \.self) { row in
-                        Text(row % 2 == 1 ? weekdayInitial(row) : "")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(width: labelWidth, height: cell, alignment: .leading)
-                    }
-                }
-                ForEach(0..<weeks, id: \.self) { week in
-                    VStack(spacing: gap) {
-                        ForEach(0..<7, id: \.self) { weekday in
-                            let day = calendar.date(byAdding: .day, value: week * 7 + weekday, to: start) ?? start
-                            square(day: day, sets: sets[day] ?? 0, today: today, cell: cell, corner: corner)
+            VStack(alignment: .leading, spacing: gap) {
+                ForEach(0..<(cells.count / 7), id: \.self) { row in
+                    HStack(spacing: gap) {
+                        ForEach(0..<7, id: \.self) { column in
+                            if let day = cells[row * 7 + column] {
+                                square(day: day, sets: sets[day] ?? 0, today: today, cell: cell, corner: corner)
+                                    .overlay {
+                                        // The day number, small, so it reads like the calendar.
+                                        Text("\(calendar.component(.day, from: day))")
+                                            .font(.system(size: max(8, cell * 0.32), weight: .medium))
+                                            .foregroundStyle((sets[day] ?? 0) >= 12 ? Color.white : Theme.secondaryText)
+                                            .allowsHitTesting(false)
+                                    }
+                                    .overlay {
+                                        if calendar.isDate(day, inSameDayAs: selectedDay) && day <= today {
+                                            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                                .stroke(Theme.text.opacity(0.8), lineWidth: 1.5)
+                                        }
+                                    }
+                            } else {
+                                Color.clear.frame(width: cell, height: cell)
+                            }
                         }
                     }
                 }
@@ -1064,7 +1063,7 @@ struct TrainingHeatmap: View {
             .frame(height: 16)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Training over the last \(weeks) weeks: \(sets.count) workout days, \(store.dayText(streak)) streak")
+        .accessibilityLabel("\(monthStart.formatted(.dateTime.month(.wide))): \(trained) days trained, \(store.dayText(streak)) streak")
     }
 
     private func keySquare(_ color: Color) -> some View {
@@ -1073,26 +1072,22 @@ struct TrainingHeatmap: View {
             .frame(width: 11, height: 11)
     }
 
-    /// "Nov" over the first week of a month (and the first column).
-    private func monthLabel(weekStart: Date, first: Bool) -> String? {
-        let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
-        let startsMonth = calendar.component(.month, from: weekStart) != calendar.component(.month, from: weekEnd)
-            || calendar.component(.day, from: weekStart) == 1
-        guard first || startsMonth else { return nil }
-        let date = startsMonth && !first ? weekEnd : weekStart
-        return date.formatted(.dateTime.month(.abbreviated))
-    }
-
-    private func weekdayInitial(_ row: Int) -> String {
+    private func weekdayInitial(_ column: Int) -> String {
         let symbols = calendar.veryShortWeekdaySymbols
-        return symbols[(calendar.firstWeekday - 1 + row) % 7]
+        return symbols[(calendar.firstWeekday - 1 + column) % 7]
     }
 
     @ViewBuilder
     private func square(day: Date, sets: Int, today: Date, cell: CGFloat, corner: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
         if day > today {
-            Color.clear.frame(width: cell, height: cell)
+            // Days still to come: a faint outline, so the month reads whole.
+            shape.stroke(Theme.border, lineWidth: 1)
+                .frame(width: cell, height: cell)
+                .contentShape(shape)
+                .onTapGesture {
+                    withAnimation(AppAnimation.snappy) { selectedDay = day }
+                }
         } else if let setup = store.setupDate, day < calendar.startOfDay(for: setup) {
             // Before you set the app up: a faint, inert square.
             shape.fill(Theme.cardElevated.opacity(0.35))
