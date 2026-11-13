@@ -102,7 +102,7 @@ struct ContentView: View {
                         // blend can't see through the blur — under it, it
                         // drew a flat grey band); the blur on top then
                         // blurs the greyed content.
-                        StatusBarFade(height: stripHeight)
+                        StatusBarFade(height: stripHeight, statusBarHeight: proxy.safeAreaInsets.top)
                         StatusBarBlur(height: stripHeight)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {

@@ -815,22 +815,46 @@ private struct ControlBorder<S: Shape>: ViewModifier {
 /// mode is the LAST modifier so it mixes with the page below instead of
 /// inside its own layer.
 struct StatusBarFade: View {
-    /// A third of the original 30pt strip (DaRon: "cut the black and
-    /// white space in 1/3rd") — just the very top edge.
-    var height: CGFloat = 10
+    /// The thin full-width strip along the top edge.
+    var height: CGFloat = 30
+    /// The status bar's own height (the safe-area top). Content passing
+    /// under the clock / signal / battery cluster loses its color too
+    /// (DaRon, Nov 12: "anything that goes underneath the status bar").
+    var statusBarHeight: CGFloat = 0
+    /// How far in from the right edge the status icons reach.
+    var clusterWidth: CGFloat = 210
 
     var body: some View {
-        Rectangle()
-            .fill(Color(white: 0.5))
-            // Ombre all the way down — no visible edge where color
-            // comes back.
-            .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
-            .frame(height: height)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .blendMode(.saturation)
+        ZStack(alignment: .topTrailing) {
+            Rectangle()
+                .fill(Color(white: 0.5))
+                .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
+                .frame(height: height)
+                .frame(maxWidth: .infinity, alignment: .top)
+            if statusBarHeight > 0 {
+                // The status-icon block: solid where the icons are, soft
+                // fade on its left and bottom edges.
+                Rectangle()
+                    .fill(Color(white: 0.5))
+                    .mask(LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.25),
+                        .init(color: .black, location: 1),
+                    ], startPoint: .leading, endPoint: .trailing))
+                    .mask(LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.75),
+                        .init(color: .clear, location: 1),
+                    ], startPoint: .top, endPoint: .bottom))
+                    .frame(width: clusterWidth, height: statusBarHeight + 14)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        // Last: blend with the page beneath (keeps brightness, drops color).
+        .blendMode(.saturation)
     }
 }
 
