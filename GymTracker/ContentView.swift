@@ -191,6 +191,8 @@ struct ContentView: View {
             }
         }
         .disableVerticalBar()
+        // Hinge read from launch, 0° to 180°, the whole time.
+        .hingeReader()
         // Full-bleed: the navigation bar background extends under the
         // status bar, which sits on top of it, always visible and
         // horizontal (TikTok-style). The page content itself respects the

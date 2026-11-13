@@ -462,62 +462,67 @@ extension View {
 /// unfold looks like it was already there, waiting. No layout changes —
 /// only opacity/scale, so nothing moves or reflows. Devices without a
 /// hinge (or iOS < 27.1) show the view as-is.
+/// The Duo's hinge, read the whole time the app runs (DaRon, Nov 12: "read
+/// the hinge at 0° when opening and stay on the whole time"). One shared
+/// value, fed from the app's root, so a pane that appears mid-opening
+/// already knows the angle instead of popping in at full brightness.
+final class HingeState: ObservableObject {
+    static let shared = HingeState()
+    /// 0° = closed, 180° = flat. Devices without a hinge stay at 180.
+    @Published var degrees: Double = 180
+    /// 0…1 across the whole travel, closed to flat.
+    var openness: Double { min(max(degrees / 180, 0), 1) }
+}
+
+/// Attach once at the root: keeps HingeState current from 0° to 180°.
+struct HingeReader: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.onHingeChange { _, context in
+                let deg = context.hinge?.angle.degrees ?? 180
+                withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 1)) {
+                    HingeState.shared.degrees = deg
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Waiting pane revealed by the unfold: dim and slightly small while the
+/// phone is closed, full as it reaches flat — across the whole 0–180°.
 struct HingeReveal: ViewModifier {
-    @State private var openness: Double = 1   // 0 = closed, 1 = flat
+    @ObservedObject private var hinge = HingeState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The edge toward the hinge (the pane grows out from it).
     var anchor: UnitPoint = .trailing
 
     func body(content: Content) -> some View {
-        if #available(iOS 27.1, *) {
-            content
-                .opacity(0.25 + 0.75 * openness)
-                .scaleEffect(reduceMotion ? 1 : 0.96 + 0.04 * openness, anchor: anchor)
-                .onHingeChange { _, context in
-                    guard let hinge = context.hinge else { openness = 1; return }
-                    // Map 90°…180° to 0…1: the inner screen is only really
-                    // in view once the phone is past half open.
-                    let t = (hinge.angle.degrees - 90) / 90
-                    let next = min(max(t, 0), 1)
-                    withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 1)) {
-                        openness = next
-                    }
-                }
-        } else {
-            content
-        }
+        let t = hinge.openness
+        content
+            .opacity(0.25 + 0.75 * t)
+            .scaleEffect(reduceMotion ? 1 : 0.96 + 0.04 * t, anchor: anchor)
     }
 }
 
-/// Rises out of the dark as the Duo opens (the swap button, Nov 12):
-/// invisible, blurred and a little small while the hinge is folded,
-/// fully there as it reaches flat — tied to the real hinge angle, so it
-/// emerges with the opening instead of popping in afterward.
+/// Rises out of the dark as the Duo opens (the swap button): invisible,
+/// blurred and small when closed, fully there at flat — whole 0–180°.
 struct HingeEmerge: ViewModifier {
-    @State private var openness: Double = 1
+    @ObservedObject private var hinge = HingeState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        if #available(iOS 27.1, *) {
-            content
-                .opacity(openness * openness)
-                .blur(radius: reduceMotion ? 0 : 10 * (1 - openness))
-                .scaleEffect(reduceMotion ? 1 : 0.8 + 0.2 * openness)
-                .onHingeChange { _, context in
-                    guard let hinge = context.hinge else { openness = 1; return }
-                    // Starts emerging past half open (120°), clear at flat.
-                    let t = (hinge.angle.degrees - 120) / 60
-                    withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 1)) {
-                        openness = min(max(t, 0), 1)
-                    }
-                }
-        } else {
-            content
-        }
+        let t = hinge.openness
+        content
+            .opacity(t * t)
+            .blur(radius: reduceMotion ? 0 : 10 * (1 - t))
+            .scaleEffect(reduceMotion ? 1 : 0.8 + 0.2 * t)
     }
 }
 
 extension View {
+    func hingeReader() -> some View { modifier(HingeReader()) }
     func hingeEmerge() -> some View { modifier(HingeEmerge()) }
     func hingeReveal(anchor: UnitPoint = .trailing) -> some View { modifier(HingeReveal(anchor: anchor)) }
 }
