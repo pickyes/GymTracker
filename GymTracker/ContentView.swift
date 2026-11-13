@@ -181,6 +181,10 @@ struct ContentView: View {
                         .ignoresSafeArea(.keyboard)
                     }
                 }
+                // On Today the keyboard doesn't shrink the app: the workout
+                // column scrolls clear of it itself, and shrinking lifted the
+                // body pane off the top (and flipped the pose before).
+                .ignoresSafeArea(selectedPage == .today ? .keyboard : [], edges: .bottom)
             } else {
                 OnboardingFlowView()
             }
@@ -228,6 +232,10 @@ struct ContentView: View {
             ZStack {
                 TodayView()
                     .environment(\.pageContainerSize, size)
+                    // Today makes room for the keyboard itself (its column
+                    // scrolls clear of it); the page as a whole doesn't get
+                    // squeezed or lifted, so the body pane stays in place.
+                    .ignoresSafeArea(.keyboard)
                     .opacity(selectedPage == .today ? 1 : 0)
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)

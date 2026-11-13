@@ -139,6 +139,11 @@ struct TodayView: View {
                     // shrinks to the real page height, never grows.
                     .frame(height: (rawKind == .tent || rawKind == .propped || rawKind == .split) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
+                    // The keyboard doesn't squeeze the page: the workout
+                    // column already scrolls clear of it on its own
+                    // (contentBottomPadding), so the body pane and the
+                    // fixed layouts stay put.
+                    .ignoresSafeArea(.keyboard)
                     .transaction { $0.animation = nil }
                     // Calendar open: the page behind blurs and goes black
                     // and white, like behind the open menu (DaRon, Nov 12).
@@ -489,16 +494,20 @@ struct TodayView: View {
         case compact, split, regular, propped, tent
     }
 
+    /// The real page height (keyboard ignored), capped by what was measured
+    /// only when there's no container size to go on.
     private func visibleHeight(_ measured: CGFloat) -> CGFloat {
-        pageContainerSize == .zero ? measured : min(measured, pageContainerSize.height)
+        pageContainerSize == .zero ? measured : pageContainerSize.height
     }
 
     private func layoutKind(for measured: CGSize) -> TodayLayoutKind {
         // Trust the page container when ContentView provides it (see
         // PageContainerSizeKey): never larger than what's really on screen.
-        let size = pageContainerSize == .zero ? measured
-            : CGSize(width: min(measured.width, pageContainerSize.width),
-                     height: min(measured.height, pageContainerSize.height))
+        // The real page size, measured without the keyboard: a keyboard
+        // coming up shortened the measured height, so the folded screen
+        // looked "sideways" and flipped to the tent view mid-typing (seen
+        // on the phone, Nov 12). The keyboard never changes the pose.
+        let size = pageContainerSize == .zero ? measured : pageContainerSize
         if size.width > size.height * 1.2 {
             // Propped (Seated / Tent): landscape and much wider than tall.
             if size.height < 520 {
