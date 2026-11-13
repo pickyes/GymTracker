@@ -1594,6 +1594,11 @@ final class WorkoutStore: ObservableObject {
     @Published var calendarDropdownOpen = false
     /// Bumped by the Notes compose button in the corner (Notes opens a new note).
     @Published var composeNoteRequest = 0
+    /// Today's + actions, shared so the + can also live in the side rail
+    /// (Settings → Status bar on the side).
+    @Published var todayEditing = false
+    @Published var todayAddExercise = false
+    @Published var todaySessionMod = false
     /// Set to open the Calendar page on a day (a note's linked workout).
     @Published var calendarJumpRequest: Date?
         @Published var showColdStartGreeting = false

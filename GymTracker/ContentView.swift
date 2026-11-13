@@ -191,16 +191,18 @@ struct ContentView: View {
                             // fabBottomPadding). The rest-timer panel
                             // shares the same right edge, stacked above
                             // the button.
+                            // In the rail: centered on the strip, measured from
+                            // the screen's own edge (DaRon: they sat in the
+                            // page, short of the rail, on the phone).
                             .padding(rail == .leading ? .leading : .trailing,
-                                     rail != nil ? 0 : fabTrailingPadding(screenWidth: proxy.size.width))
-                            // In the rail: centered on its strip, out in the
-                            // safe area beside the pages.
-                            .offset(x: rail == nil ? 0
-                                    : (rail == .leading ? -1 : 1) * (systemRail - railTotal / 2 + 28))
+                                     rail != nil ? (railTotal - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.
                             .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: rail == .leading ? .bottomLeading : .bottomTrailing)
+                            .ignoresSafeArea(.container, edges: rail == nil ? [] : (rail == .leading ? .leading : .trailing))
                             // Fold (Debug Pass 2): the bottom safe-area
                             // inset jumps discretely when the pose flips,
                             // which used to snap the button to its new
@@ -655,6 +657,11 @@ struct ContentView: View {
             // Swap sides (open Duo only): above the menu button (and
             // above the rest pill while one runs). Hidden while the menu
             // is open.
+            // Today's + joins the rail too, above swap (DaRon).
+            if rail != nil && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
+                railTodayActions
+                    .transition(.scale.combined(with: .opacity))
+            }
             if showSwapButton && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
                 swapSidesButton
                     // Always fully there and tappable while the Duo is
@@ -675,6 +682,36 @@ struct ContentView: View {
     /// rule TodayView uses for its tent layout).
     private var isTentPose: Bool {
         selectedPage == .today && steadySize.width > steadySize.height * 1.2 && steadySize.height < 520
+    }
+
+    /// Today's + (Edit / Add exercise / Modify today, ✓ while editing),
+    /// in the side rail. Same actions as the + in Today's title row.
+    @ViewBuilder private var railTodayActions: some View {
+        Group {
+            if store.todayEditing {
+                Button { store.todayEditing = false } label: { railActionIcon("checkmark") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Done editing")
+            } else {
+                Menu {
+                    Button("Edit") { store.todayEditing = true }
+                    Button("Add exercise") { store.todayAddExercise = true }
+                    Button("Modify today") { store.todaySessionMod = true }
+                } label: { railActionIcon("plus") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Workout actions")
+            }
+        }
+        .animation(AppAnimation.snappy, value: store.todayEditing)
+    }
+
+    private func railActionIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .scaledFont(size: 26, weight: .bold)
+            .foregroundStyle(.white)
+            .frame(width: 56, height: 56)
+            .background(Color.accentColor, in: Circle())
+            .shadow(color: Color.accentColor.opacity(0.5), radius: 10, x: 0, y: 4)
     }
 
     /// Tent pose shows the rest timer in its own tile (no pill there).

@@ -8,6 +8,7 @@ struct TodayView: View {
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoSwapProgress) private var duoSwapProgress
     @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
+    @Environment(\.cornerButtonsInRail) private var inRail
     @AppStorage("duoSideShift") private var sideShift: Double = 0
     @Environment(\.duoWide) private var duoWide
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -15,9 +16,6 @@ struct TodayView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var saved = false
     @State private var selectedExerciseID: String?
-    @State private var isEditing = false
-    @State private var showAddExercise = false
-    @State private var showSessionMod = false
     /// Tap / long-press the date (or the "Today" title) opens the
     /// workout calendar as a compact dropdown card over the Today page
     /// (DaRon 21:22; dropdown presentation DaRon 22:28) — never a
@@ -241,12 +239,12 @@ struct TodayView: View {
         } message: {
             Text("Nice work. Come back tomorrow — same time, same place.")
         }
-        .sheet(isPresented: $showAddExercise) {
+        .sheet(isPresented: $store.todayAddExercise) {
             AddExerciseSheet { template in
                 store.addDraftExercise(template)
             }
         }
-        .sheet(isPresented: $showSessionMod) {
+        .sheet(isPresented: $store.todaySessionMod) {
             SessionModSheet { mod in
                 applySessionMod(mod)
             }
@@ -635,7 +633,7 @@ struct TodayView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                     .multilineTextAlignment(.center)
-                Button("Add exercise") { showAddExercise = true }
+                Button("Add exercise") { store.todayAddExercise = true }
                     .buttonStyle(.borderedProminent)
                     .frame(minHeight: 44)
             }
@@ -1132,7 +1130,7 @@ struct TodayView: View {
                                         hint: store.progressionHint(for: template),
                                         previousLog: store.lastLog(for: template.id),
                                         isCurrent: template.id == displayedExerciseID(for: plan),
-                                        isEditing: isEditing,
+                                        isEditing: store.todayEditing,
                                         onMoveUp: { moveExercise(id: template.id, up: true) },
                                         onMoveDown: { moveExercise(id: template.id, up: false) },
                                         onRemove: { store.removeDraftExercise(id: template.id) },
@@ -1288,7 +1286,7 @@ struct TodayView: View {
                                                 hint: store.progressionHint(for: template),
                                                 previousLog: store.lastLog(for: template.id),
                                                 isCurrent: template.id == displayedExerciseID(for: plan),
-                                                isEditing: isEditing,
+                                                isEditing: store.todayEditing,
                                                 onMoveUp: { moveExercise(id: template.id, up: true) },
                                                 onMoveDown: { moveExercise(id: template.id, up: false) },
                                                 onRemove: { store.removeDraftExercise(id: template.id) },
@@ -1474,7 +1472,7 @@ struct TodayView: View {
                                     hint: store.progressionHint(for: current),
                                     previousLog: store.lastLog(for: current.id),
                                     isCurrent: true,
-                                    isEditing: isEditing,
+                                    isEditing: store.todayEditing,
                                     onMoveUp: { moveExercise(id: current.id, up: true) },
                                     onMoveDown: { moveExercise(id: current.id, up: false) },
                                     onRemove: { store.removeDraftExercise(id: current.id) },
@@ -1892,17 +1890,17 @@ struct TodayView: View {
     /// right; supersedes "by the title" from 21:19.)
     private var workoutActionsMenu: some View {
         Group {
-            if isEditing {
-                Button { isEditing = false } label: {
+            if store.todayEditing {
+                Button { store.todayEditing = false } label: {
                     actionButtonIcon("checkmark")
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Done editing")
             } else {
                 Menu {
-                    Button("Edit") { isEditing = true }
-                    Button("Add exercise") { showAddExercise = true }
-                    Button("Modify today") { showSessionMod = true }
+                    Button("Edit") { store.todayEditing = true }
+                    Button("Add exercise") { store.todayAddExercise = true }
+                    Button("Modify today") { store.todaySessionMod = true }
                 } label: {
                     actionButtonIcon("plus")
                 }
@@ -1910,7 +1908,7 @@ struct TodayView: View {
                 .accessibilityLabel("Workout actions")
             }
         }
-        .animation(AppAnimation.snappy, value: isEditing)
+        .animation(AppAnimation.snappy, value: store.todayEditing)
         // Open Duo with the workout on the clock's side: the + sits on the
         // same center line as the swap/menu buttons, under the Wi-Fi icon
         // (47pt from the edge; the column's own 16pt inset + 3 + 28).
@@ -1920,6 +1918,11 @@ struct TodayView: View {
         // DS layout, page beside the corner buttons: the + moves out into
         // their column (DaRon: "with the other buttons").
         .modifier(CornerColumnOffset())
+        // Side status bar on: the + lives in the rail (ContentView); the
+        // title row keeps its space.
+        .opacity(inRail ? 0 : 1)
+        .allowsHitTesting(!inRail)
+        .accessibilityHidden(inRail)
     }
 
     /// The vivid circular action button (56pt, accent fill, glow):
