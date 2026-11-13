@@ -145,12 +145,11 @@ struct ProfileView: View {
                 // The list keeps the front screen's exact width and side
                 // (right, like Today) for a seamless unfold; the section
                 // waits on the other page. Swap mirrors it.
-                HStack(spacing: 0) {
-                    if !swapped { detailPane }
+                DuoPagePair(wide: true, swapped: swapped) {
+                    detailPane
+                } main: {
                     sidebar
-                        .frame(width: TodayView.outerDisplayWidth)
                         .background(Theme.card.opacity(0.45))
-                    if swapped { detailPane }
                 }
             } else {
                 NavigationStack(path: $path) {

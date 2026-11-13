@@ -213,6 +213,9 @@ private struct PageContainerSizeKey: EnvironmentKey {
 /// page on the left instead of the right.
 private struct DuoWideKey: EnvironmentKey { static let defaultValue = false }
 private struct DuoSwappedKey: EnvironmentKey { static let defaultValue = false }
+/// True for the moment the two pages are lifted into cards while they
+/// trade sides (the swap button), like swapping two apps on iPhone Duo.
+private struct DuoSwapLiftedKey: EnvironmentKey { static let defaultValue = false }
 
 extension EnvironmentValues {
     var fabBottomOffset: CGFloat {
@@ -230,6 +233,76 @@ extension EnvironmentValues {
     var duoSwapped: Bool {
         get { self[DuoSwappedKey.self] }
         set { self[DuoSwappedKey.self] = newValue }
+    }
+    var duoSwapLifted: Bool {
+        get { self[DuoSwapLiftedKey.self] }
+        set { self[DuoSwapLiftedKey.self] = newValue }
+    }
+}
+
+// MARK: - Duo page pair (swap like two apps, Nov 12)
+
+/// The open Duo's two pages: the waiting `pane` and the front screen's
+/// `main` page. Unswapped the pane is on the left; swapped, the right.
+///
+/// Swapping works like trading two apps' sides on iPhone Duo: both pages
+/// lift into rounded cards over grey, slide past each other to the other
+/// side, then settle back to full screen. Both pages keep their identity
+/// the whole time (the HStack's direction flips, not its children), so
+/// they really move — scroll positions, text and state come along.
+struct DuoPagePair<Pane: View, Main: View>: View {
+    var wide: Bool
+    var swapped: Bool
+    /// The main page's width (the front screen's), nil to share equally.
+    var mainWidth: CGFloat? = TodayView.outerDisplayWidth
+    @ViewBuilder var pane: () -> Pane
+    @ViewBuilder var main: () -> Main
+
+    @Environment(\.layoutDirection) private var direction
+    @Environment(\.duoSwapLifted) private var lifted
+
+    private var flipped: LayoutDirection {
+        direction == .leftToRight ? .rightToLeft : .leftToRight
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if wide {
+                pane()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .environment(\.layoutDirection, direction)
+                    .modifier(DuoSwapCard(lifted: lifted))
+            }
+            main()
+                .frame(width: wide ? mainWidth : nil)
+                .frame(maxWidth: wide ? nil : .infinity)
+                .environment(\.layoutDirection, direction)
+                .modifier(DuoSwapCard(lifted: lifted && wide))
+                // The front screen's page passes over the other one.
+                .zIndex(1)
+        }
+        // Swapped = the same two pages laid out the other way round.
+        .environment(\.layoutDirection, wide && swapped ? flipped : direction)
+        // A grey backdrop behind the cards, like the Duo's multitasking.
+        .background(Color(.systemGray3).opacity(lifted && wide ? 1 : 0).ignoresSafeArea())
+    }
+}
+
+/// One page lifted into a card mid-swap: smaller, rounded, shadowed.
+/// At rest it's the page as normal (the mask sits well outside it).
+struct DuoSwapCard: ViewModifier {
+    var lifted: Bool
+    func body(content: Content) -> some View {
+        content
+            // Each card carries the page colour so it reads as a card
+            // against the backdrop (pages are otherwise see-through).
+            .background(Theme.background.opacity(lifted ? 1 : 0))
+            .mask {
+                RoundedRectangle(cornerRadius: lifted ? 38 : 0, style: .continuous)
+                    .padding(lifted ? 0 : -80)
+            }
+            .shadow(color: .black.opacity(lifted ? 0.45 : 0), radius: lifted ? 20 : 0, y: lifted ? 10 : 0)
+            .scaleEffect(lifted ? 0.88 : 1)
     }
 }
 

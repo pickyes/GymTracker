@@ -46,6 +46,9 @@ struct ContentView: View {
     /// area shrinks, which flipped the open Duo to the folded layout
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
+    /// The two pages are lifted into cards mid-swap (see swapSidesButton).
+    @State private var swapLifted = false
+    @State private var swapInFlight = false
     private var showSwapButton: Bool { duo.showSwapButton }
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
@@ -254,6 +257,7 @@ struct ContentView: View {
             }
             .environment(\.duoWide, wide)
             .environment(\.duoSwapped, wide && swapSides)
+            .environment(\.duoSwapLifted, swapLifted)
         }
     }
 
@@ -280,7 +284,7 @@ struct ContentView: View {
     /// Mirrors the two pages on the open Duo.
     private var swapSidesButton: some View {
         Button {
-            withAnimation(AppAnimation.snappy) { duo.swapSides.toggle() }
+            swapPages()
         } label: {
             Image(systemName: "arrow.left.arrow.right")
                 .scaledFont(size: 20, weight: .semibold, maxScale: 1.3)
@@ -296,6 +300,28 @@ struct ContentView: View {
         .focusable(false)
         .accessibilityLabel("Swap sides")
         .accessibilityHint(swapSides ? "Puts the front-screen page back on the right" : "Puts the front-screen page on the left")
+    }
+
+    /// Trades the two pages' sides like swapping two apps on iPhone Duo:
+    /// both lift into rounded cards, slide past each other, then settle
+    /// back to full screen. Reduce Motion: a plain cross-fade.
+    private func swapPages() {
+        guard !swapInFlight else { return }
+        if reduceMotion {
+            withAnimation(.easeInOut(duration: 0.25)) { duo.swapSides.toggle() }
+            return
+        }
+        swapInFlight = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { swapLifted = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(170))
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.84)) { duo.swapSides.toggle() }
+            try? await Task.sleep(for: .milliseconds(430))
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) { swapLifted = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            swapInFlight = false
+        }
     }
 
     @ViewBuilder
@@ -318,21 +344,15 @@ struct ContentView: View {
         @ViewBuilder companion: () -> Side
     ) -> some View {
         let swapped = wide && swapSides
-        HStack(spacing: 0) {
-            if wide && !swapped {
-                companion()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .hingeReveal(anchor: .trailing)
-            }
-            main()
+        let companionPage = companion()
+        let mainPage = main()
+        DuoPagePair(wide: wide, swapped: swapped) {
+            companionPage
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .hingeReveal()
+        } main: {
+            mainPage
                 .modifier(CompactWhen(wide))
-                .frame(width: wide ? TodayView.outerDisplayWidth : nil)
-                .frame(maxWidth: wide ? nil : .infinity)
-            if swapped {
-                companion()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .hingeReveal(anchor: .leading)
-            }
         }
         .opacity(selectedPage == page ? 1 : 0)
         .allowsHitTesting(selectedPage == page)

@@ -941,15 +941,15 @@ struct TodayView: View {
         // Swapped (open Duo, swap button): the workout column moves to
         // the left page and the body waits on the right.
         let swapped = split && duoSwapped
-        return HStack(alignment: .top, spacing: 0) {
-            if split && !swapped { splitBodyPane(for: plan, anchor: .trailing) }
+        // One pair of pages that trade sides like two apps (DuoPagePair).
+        return DuoPagePair(wide: split, swapped: swapped) {
+            splitBodyPane(for: plan, anchor: swapped ? .leading : .trailing)
+        } main: {
             compactColumn(for: plan, showBody: !split)
                 // The column keeps the folded screen's sizing on the open
                 // Duo (compact fields), or the set rows got crushed to
                 // "S…  P…" at its 466pt width.
                 .environment(\.horizontalSizeClass, split ? .compact : horizontalSizeClass)
-                .frame(width: split ? Self.outerDisplayWidth : nil)
-            if swapped { splitBodyPane(for: plan, anchor: .leading) }
         }
     }
 

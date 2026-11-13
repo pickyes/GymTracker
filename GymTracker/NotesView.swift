@@ -97,12 +97,13 @@ struct NotesView: View {
                 // The list keeps the front screen's exact width and side
                 // (right, like Today), so opening the Duo is seamless —
                 // the note waits on the other page. Swap mirrors it.
-                HStack(spacing: 0) {
-                    if !swapped { detailPane; Divider() }
+                DuoPagePair(wide: true, swapped: swapped) {
+                    detailPane
+                        // The line between the pages, on the hinge side.
+                        .overlay(alignment: swapped ? .leading : .trailing) { Divider() }
+                } main: {
                     listPane
-                        .frame(width: TodayView.outerDisplayWidth)
                         .background(Theme.card.opacity(0.35))
-                    if swapped { Divider(); detailPane }
                 }
             } else {
                 NavigationStack(path: $path) {
