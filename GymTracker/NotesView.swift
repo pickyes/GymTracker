@@ -27,6 +27,8 @@ struct NotesView: View {
     /// (which rebuilds the list in its other container) lands on the
     /// same spot instead of the top (red team).
     @State private var listOffset: CGFloat = 0
+    @State private var addingFolder = false
+    @State private var newFolderName = ""
     @EnvironmentObject var store: WorkoutStore
     @State private var searchText = ""
     @State private var notePendingDelete: UserNote?
@@ -232,6 +234,17 @@ struct NotesView: View {
         .onChange(of: store.noteCategories) { _, _ in closeMissingFolder() }
         // The corner compose button (ContentView).
         .onChange(of: store.composeNoteRequest) { _, _ in compose() }
+        .alert("New Folder", isPresented: $addingFolder) {
+            TextField("Name", text: $newFolderName)
+            Button("Create") {
+                let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                withAnimation(AppAnimation.snappy) { store.addNoteCategory(name) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Notes you file here show up in this folder.")
+        }
         .alert("Delete this note?", isPresented: Binding(
             get: { notePendingDelete != nil },
             set: { if !$0 { notePendingDelete = nil } }
@@ -360,6 +373,14 @@ struct NotesView: View {
     /// The ⋯ menu: view style, icon size, sort, folders on top.
     private var viewMenu: some View {
         Menu {
+            // Like Files: make a folder right from the list (DaRon).
+            Button {
+                newFolderName = ""
+                addingFolder = true
+            } label: {
+                Label("New Folder", systemImage: "folder.badge.plus")
+            }
+            Divider()
             Picker("View", selection: $viewStyleRaw) {
                 Label("Icons", systemImage: "square.grid.2x2").tag(NotesViewStyle.icons.rawValue)
                 Label("List", systemImage: "list.bullet").tag(NotesViewStyle.list.rawValue)
