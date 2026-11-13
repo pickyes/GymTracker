@@ -7,6 +7,7 @@ struct TodayView: View {
     @Environment(\.pageContainerSize) private var pageContainerSize
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoSwapProgress) private var duoSwapProgress
+    @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
     @AppStorage("duoSideShift") private var sideShift: Double = 0
     @Environment(\.duoWide) private var duoWide
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -440,9 +441,13 @@ struct TodayView: View {
     /// row. The per-field toolbar is gone; each layout below declares
     /// this once, and only one layout is ever on screen.)
     private var keyboardDoneToolbar: some ToolbarContent {
+        // The app floats its own Done above the keyboard (ContentView);
+        // the system's sat right on the keys (DaRon).
         ToolbarItemGroup(placement: .keyboard) {
-            Spacer()
-            Button("Done") { hideKeyboard() }
+            if !appDrawsKeyboardDone {
+                Spacer()
+                Button("Done") { hideKeyboard() }
+            }
         }
     }
 

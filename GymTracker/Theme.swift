@@ -261,6 +261,11 @@ extension EnvironmentValues {
         get { self[RailEdgeKey.self] }
         set { self[RailEdgeKey.self] = newValue }
     }
+    /// ContentView draws the keyboard's Done button itself (main pages).
+    var appDrawsKeyboardDone: Bool {
+        get { self[AppDrawsKeyboardDoneKey.self] }
+        set { self[AppDrawsKeyboardDoneKey.self] = newValue }
+    }
     /// This page is the one on screen (hidden pages stay mounted).
     var pageVisible: Bool {
         get { self[PageVisibleKey.self] }
@@ -276,6 +281,7 @@ extension EnvironmentValues {
 private struct DuoStackedKey: EnvironmentKey { static let defaultValue = false }
 private struct RailEdgeKey: EnvironmentKey { static let defaultValue: HorizontalEdge? = nil }
 private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
+private struct AppDrawsKeyboardDoneKey: EnvironmentKey { static let defaultValue = false }
 
 // MARK: - Duo page pair (swap like two apps, Nov 12)
 
@@ -692,13 +698,9 @@ extension View {
     /// contains an editable field — the toolbar only appears while the
     /// keyboard is up. (DaRon 2026-11-10 08:49: Profile bodyweight had
     /// no Done button at all — the keyboard had no way out.)
-    func withKeyboardDoneToolbar() -> some View {
-        toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { dismissKeyboard() }
-            }
-        }
+    /// `system: true` for sheets: the app's floating Done sits behind them.
+    func withKeyboardDoneToolbar(system: Bool = false) -> some View {
+        modifier(KeyboardDoneToolbar(forceSystem: system))
     }
 
     /// Tap-outside-to-dismiss: a tap on empty space dismisses the
@@ -711,6 +713,26 @@ extension View {
     /// Notes, where it is verified working on screen.
     func dismissKeyboardOnTapOutside() -> some View {
         onTapGesture { dismissKeyboard() }
+    }
+}
+
+/// The system's keyboard Done (its toolbar sat right on the keys, DaRon).
+/// Skipped on the main pages, where ContentView floats its own Done with
+/// a gap above the keyboard.
+private struct KeyboardDoneToolbar: ViewModifier {
+    var forceSystem = false
+    @Environment(\.appDrawsKeyboardDone) private var appDraws
+    func body(content: Content) -> some View {
+        if appDraws && !forceSystem {
+            content
+        } else {
+            content.toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { content.dismissKeyboard() }
+                }
+            }
+        }
     }
 }
 

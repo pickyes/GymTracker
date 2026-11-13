@@ -793,6 +793,7 @@ private struct NoteDetailView: View {
     @State private var newCategoryName = ""
     @FocusState private var focus: Field?
     @Environment(\.pageVisible) private var pageVisible
+    @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
     /// Pending autosave: typing saves after a short pause, not on every
     /// keystroke (each save re-sorts and writes every note).
     @State private var saveTask: Task<Void, Never>?
@@ -850,8 +851,10 @@ private struct NoteDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { if !wide { actionsMenu } }
             ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { focus = nil }
+                if !appDrawsKeyboardDone {
+                    Spacer()
+                    Button("Done") { focus = nil }
+                }
             }
         }
         .onAppear {

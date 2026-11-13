@@ -384,7 +384,7 @@ struct InviteRedeemSection: View {
                 .onChange(of: codeText) { _, newValue in
                     codeText = InviteCode.formattedInput(newValue)
                 }
-                .withKeyboardDoneToolbar()
+                .withKeyboardDoneToolbar(system: true)
             Button("Redeem 7 days free") { redeem() }
                 .font(.headline)
                 .frame(maxWidth: .infinity)

@@ -49,6 +49,8 @@ struct ContentView: View {
     @State private var swapInFlight = false
     /// The software keyboard is on screen.
     @State private var keyboardShown = false
+    /// The software keyboard's height, from its own notification.
+    @State private var keyboardHeight: CGFloat = 0
     /// Where the system puts the vertical status bar (nil: nowhere).
     @State private var verticalBarEdge: HorizontalEdge?
     /// Settings → Status bar on the side, on a screen that has one: the
@@ -102,6 +104,7 @@ struct ContentView: View {
                             .frame(width: rail == nil ? proxy.size.width : proxy.size.width - extraRail - 1)
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
                             .environment(\.railEdge, rail)
+                            .environment(\.appDrawsKeyboardDone, true)
                             .environment(\.fabBottomOffset,
                                          fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom,
                                                           size: proxy.size))
@@ -205,6 +208,25 @@ struct ContentView: View {
                         // down from the menu instead of a sheet sliding
                         // up. Tap outside to close; Done inside the
                         // calendar closes it too.
+                        // Done for the keyboard, floating a clear gap above
+                        // it (the system's sat right on the keys, DaRon).
+                        if keyboardShown && !navExpanded {
+                            Button { dismissKeyboard() } label: {
+                                Text("Done")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .padding(.horizontal, 22)
+                                    .frame(height: 44)
+                                    .liquidGlass(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Done typing")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, keyboardHeight + 14)
+                            .ignoresSafeArea(.all)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottomTrailing)))
+                        }
                         if showCalendar {
                             Color.black.opacity(0.35)
                                 .ignoresSafeArea()
@@ -249,8 +271,9 @@ struct ContentView: View {
             }
         }
         .disableVerticalBar()
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            withAnimation(AppAnimation.snappy) { keyboardShown = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+            let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+            withAnimation(AppAnimation.snappy) { keyboardShown = true; keyboardHeight = frame.height }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(AppAnimation.snappy) { keyboardShown = false }

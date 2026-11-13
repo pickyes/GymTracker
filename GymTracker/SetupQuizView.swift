@@ -337,7 +337,7 @@ struct SetupQuizView: View {
             BodyDiagramView(selected: $profile.injuredParts)
             TextField("Something else? Tell us briefly (stays on this phone)", text: $profile.otherLimitText)
                 .textFieldStyle(.roundedBorder)
-                .withKeyboardDoneToolbar()
+                .withKeyboardDoneToolbar(system: true)
             ForEach(Array(profile.limits).sorted { $0.label < $1.label }, id: \.self) { limit in
                 if !limit.hint.isEmpty {
                     Text("\(limit.label): \(limit.hint)")
@@ -355,7 +355,7 @@ struct SetupQuizView: View {
                 TextField("Enter your weight", text: $weightText)
                     .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
-                    .withKeyboardDoneToolbar()
+                    .withKeyboardDoneToolbar(system: true)
                 Picker("Unit", selection: $isKg) {
                     Text("lb").tag(false)
                     Text("kg").tag(true)

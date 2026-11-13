@@ -601,7 +601,7 @@ struct GymProfileEditorView: View {
             // ate the equipment Toggle rows' taps (same class as D20/D24).
             // Keyboard dismissal stays covered by the native Done
             // toolbar + .scrollDismissesKeyboard(.interactively).
-            .withKeyboardDoneToolbar()
+            .withKeyboardDoneToolbar(system: true)
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -765,7 +765,7 @@ struct CustomExerciseEditorView: View {
             // ate the Muscle/Type Picker rows' and equipment Toggle rows'
             // taps. Keyboard dismissal stays covered by the native Done
             // toolbar + .scrollDismissesKeyboard(.interactively).
-            .withKeyboardDoneToolbar()
+            .withKeyboardDoneToolbar(system: true)
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1152,7 +1152,7 @@ struct CustomProgramBuilderView: View {
                     .disabled(!canSave || atFreeLimit)
             }
         }
-        .withKeyboardDoneToolbar()
+        .withKeyboardDoneToolbar(system: true)
         .scrollDismissesKeyboard(.interactively)
         // NOTE (D24, 2026-11-10): the .dismissKeyboardOnTapOutside()
         // that used to sit here is REMOVED — the parent .onTapGesture
