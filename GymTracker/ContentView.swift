@@ -353,7 +353,6 @@ struct ContentView: View {
         .accessibilityAddTraits(active ? .isSelected : [])
     }
     /// The Calendar companion page's width (narrow when upright).
-    @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
@@ -917,67 +916,12 @@ struct ContentView: View {
 
     /// Calendar's companion (open Duo): the chosen day, with the
     /// training heatmap pinned under it (Nov 12 layout DaRon picked).
+    /// The open Duo's companion to Calendar: the chosen day's workout,
+    /// using the whole page (the training heatmap is part of the calendar
+    /// now, DaRon: combined to save space).
     private var historyCompanion: some View {
-        // DS layout (the Duo open and upright): the Calendar's half is wide
-        // and short, so the day's workout and the heatmap sit side by side
-        // (DaRon). Landscape keeps the heatmap under the workout.
-        let clockSide = swapSides
-        // DS mode (open and upright): always side by side, however the
-        // line is dragged (DaRon); the half's shape alone flipped it.
-        let dsHalf = Self.isWide(steadySize) && steadySize.height > steadySize.width
-            || companionSize.width > companionSize.height * 1.2
-        return Group {
-            if dsHalf {
-                HStack(alignment: .top, spacing: 0) {
-                    historyCompanionDay
-                        .frame(width: companionSize.width * 0.55)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                    // Fills the rest of the half, below the clock row and
-                    // clear of the corner buttons when they're on this half.
-                    TrainingHeatmap(selectedDay: $calendarDay, fill: true)
-                        .padding(.top, 104)
-                        .padding(.bottom, 20)
-                        .padding(.leading, 8)
-                        .padding(.trailing, 16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-            } else {
-                historyCompanionWithHeatmapBelow(clockSide: clockSide)
-            }
-        }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { companionSize = $0 }
-    }
-
-    private func historyCompanionWithHeatmapBelow(clockSide: Bool) -> some View {
         historyCompanionDay
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                TrainingHeatmap(selectedDay: $calendarDay)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 24)
-                    // Clear of the swap and menu buttons on their side.
-                    .padding(.trailing, clockSide && rail == nil ? 56 : 0)
-                    .padding(.top, 12)
-                    .padding(.bottom, 20)
-                    .background(Theme.background)
-                    // The workout above fades out into the heatmap, the
-                    // same eased fade as the top of the screen (DaRon: the
-                    // cards were cut off flat against it).
-                    .background(alignment: .top) {
-                        LinearGradient(stops: [
-                            .init(color: Theme.background.opacity(0), location: 0),
-                            .init(color: Theme.background.opacity(0.1), location: 0.2),
-                            .init(color: Theme.background.opacity(0.26), location: 0.4),
-                            .init(color: Theme.background.opacity(0.52), location: 0.6),
-                            .init(color: Theme.background.opacity(0.8), location: 0.8),
-                            .init(color: Theme.background, location: 1),
-                        ], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 64)
-                        .offset(y: -64)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                    }
-            }
     }
 
     /// The chosen day's workout in full, or what was planned that day.

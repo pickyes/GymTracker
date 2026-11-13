@@ -135,12 +135,7 @@ struct HistoryView: View {
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
-            if !duoWide {
-                TrainingHeatmap(selectedDay: $selectedDay)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-            }
+            // (The training heatmap is part of the calendar above now.)
             listHeading(Text("Personal records"))
             personalRecordsView
             // A plain heading row: a section header stays pinned to
@@ -259,6 +254,7 @@ struct HistoryView: View {
             if let tool = openTool {
                 switch tool {
                 case .strength: StrengthGraphView()
+                case .progress: TrainingProgressView()
                 case .body: BodyView()
                 }
             } else if let id = selectedSessionID,
@@ -292,6 +288,7 @@ struct HistoryView: View {
                         Group {
                             switch tool {
                             case .strength: StrengthGraphView()
+                            case .progress: TrainingProgressView()
                             case .body: BodyView()
                             }
                         }
@@ -358,34 +355,55 @@ struct HistoryView: View {
 
     /// One row of three tiles instead of three list rows.
     private var toolTiles: some View {
-        HStack(spacing: 10) {
-            Button { openTool = .strength } label: {
-                // "Strength" so all three labels share one size (the
-                // longer one shrank to fit); the icon shows it's a graph.
-                toolTile("Strength", systemImage: "chart.line.uptrend.xyaxis")
+        // Four across when they fit, else two by two (DaRon: Progress sits
+        // right next to Strength).
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { strengthTile; progressTile; bodyTile; exportTile }
+            Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+                GridRow { strengthTile; progressTile }
+                GridRow { bodyTile; exportTile }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Strength graph")
-            Button { openTool = .body } label: {
-                toolTile("Body", systemImage: "figure.stand")
-            }
-            .buttonStyle(.plain)
-            // Export the whole history, or a date range — the sheet's
-            // scope picker offers both.
-            Button {
-                exportRequest = ExportRequest(
-                    initialScope: .all,
-                    scopeOptions: [
-                        .all,
-                        .range(from: Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date(), to: Date()),
-                    ]
-                )
-            } label: {
-                toolTile("Export", systemImage: "square.and.arrow.up")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Export history")
         }
+    }
+
+    private var strengthTile: some View {
+        Button { openTool = .strength } label: {
+            toolTile("Strength", systemImage: "chart.line.uptrend.xyaxis")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Strength graph")
+    }
+
+    private var progressTile: some View {
+        Button { openTool = .progress } label: {
+            toolTile("Progress", systemImage: "chart.bar.fill")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var bodyTile: some View {
+        Button { openTool = .body } label: {
+            toolTile("Body", systemImage: "figure.stand")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var exportTile: some View {
+        // Export the whole history, or a date range — the sheet's scope
+        // picker offers both.
+        Button {
+            exportRequest = ExportRequest(
+                initialScope: .all,
+                scopeOptions: [
+                    .all,
+                    .range(from: Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date(), to: Date()),
+                ]
+            )
+        } label: {
+            toolTile("Export", systemImage: "square.and.arrow.up")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Export history")
     }
 
     /// A section title as an ordinary row, so it scrolls away with its
@@ -1568,7 +1586,7 @@ func liftWeightText(_ lb: Double, isPair: Bool, unit: WeightUnit) -> String {
 }
 
 /// The Calendar page's tool tiles that open a page.
-enum HistoryTool: Hashable { case strength, body }
+enum HistoryTool: Hashable { case strength, progress, body }
 
 
 // MARK: - All sessions: sort and filter choices

@@ -379,10 +379,11 @@ struct CalendarView: View {
     private func monthGrid(_ dayIndex: CalendarDayIndex) -> some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
         let cells = monthCells
+        let sets = setsByDay(cells)
         return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(cells.indices, id: \.self) { index in
                 if let date = cells[index] {
-                    dayCell(for: date, index: dayIndex)
+                    dayCell(for: date, index: dayIndex, sets: sets[calendar.startOfDay(for: date)])
                 } else {
                     Color.clear.frame(height: 52)
                         .accessibilityHidden(true)
@@ -416,13 +417,38 @@ struct CalendarView: View {
         )
     }
 
-    private func dayCell(for date: Date, index: CalendarDayIndex) -> some View {
+    /// Done working sets per day this month (the heat). Every day with a
+    /// saved session has an entry, 0 when no set was ticked: a saved
+    /// session still counts as trained, like the calendar's done status.
+    private func setsByDay(_ cells: [Date?]) -> [Date: Int] {
+        let days = cells.compactMap { $0 }
+        guard let first = days.first, let last = days.last,
+              let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last)) else { return [:] }
+        let start = calendar.startOfDay(for: first)
+        var result: [Date: Int] = [:]
+        for session in store.sessions where session.date >= start && session.date < end {
+            let sets = session.exercises.reduce(0) { $0 + $1.sets.filter { $0.done && $0.kind != .warmup }.count }
+            result[calendar.startOfDay(for: session.date), default: 0] += sets
+        }
+        return result
+    }
+
+    /// Heat (the training heatmap, merged into the calendar to save room,
+    /// DaRon): a trained day sits on an accent square, light for a short
+    /// workout, solid for a full one (12+ sets).
+    static func heatFill(_ sets: Int) -> Color {
+        sets >= 12 ? Color.accentColor : Color.accentColor.opacity(0.45)
+    }
+
+    private func dayCell(for date: Date, index: CalendarDayIndex, sets: Int?) -> some View {
         let isToday = calendar.isDateInToday(date)
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         // One status rule (CalendarDayIndex.status): a past planned day
         // with no session is a miss only from the day tracking started
         // — never before setup (same as the month summary).
         let status = index.status(for: date)
+        let trained = sets != nil
+        let solid = (sets ?? 0) >= 12
         return Button {
             withAnimation(AppAnimation.snappy) {
                 selectedDate = calendar.startOfDay(for: date)
@@ -430,28 +456,35 @@ struct CalendarView: View {
         } label: {
             VStack(spacing: 4) {
                 Text("\(calendar.component(.day, from: date))")
-                    .font(.body.weight(isToday ? .bold : .regular))
-                    .foregroundStyle(isToday ? Color.accentColor : Theme.text)
-                    // Large Dynamic Type: the number shrinks to its circle
+                    .font(.body.weight(isToday || trained ? .bold : .regular))
+                    .foregroundStyle(solid ? Color.white : (isToday ? Color.accentColor : Theme.text))
+                    // Large Dynamic Type: the number shrinks to its square
                     // instead of truncating to "…".
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
-                    .frame(width: 34, height: 34)
-                    .background(
-                        isSelected
-                            ? Theme.cardElevated
-                            : (isToday ? Color.accentColor.opacity(0.15) : Color.clear),
-                        in: Circle()
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(isToday ? Color.accentColor : Color.clear, lineWidth: 1.5)
-                    )
-                // One dot tells the whole story: green = a workout was
-                // logged that day, accent = one is planned, orange = one
-                // was planned and missed. Rest days get no dot.
+                    .frame(width: 36, height: 36)
+                    .background {
+                        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        if let sets {
+                            shape.fill(Self.heatFill(sets))
+                        } else if isSelected {
+                            shape.fill(Theme.cardElevated)
+                        } else if isToday {
+                            shape.fill(Color.accentColor.opacity(0.15))
+                        }
+                    }
+                    .overlay {
+                        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        if isSelected && trained {
+                            shape.stroke(Theme.text, lineWidth: 2)
+                        } else if isToday {
+                            shape.stroke(Color.accentColor, lineWidth: 1.5)
+                        }
+                    }
+                // Planned (accent) and missed (orange) keep their dot; a
+                // trained day shows by its square, rest days by nothing.
                 Circle()
-                    .fill(Self.dotColor(status))
+                    .fill(status == .done ? Color.clear : Self.dotColor(status))
                     .frame(width: 6, height: 6)
             }
             .frame(maxWidth: .infinity)
@@ -475,7 +508,7 @@ struct CalendarView: View {
     private func dayAccessibilityLabel(for date: Date, status: CalendarDayStatus, isToday: Bool) -> String {
         let day = (isToday ? "Today, " : "") + date.formatted(.dateTime.weekday(.wide).month().day())
         switch status {
-        case .done: return "\(day), workout done"
+        case .done: return "\(day), trained"
         case .missed: return "\(day), workout missed"
         case .planned: return "\(day), workout planned"
         case .beforeStart: return "\(day), before you started"
@@ -500,7 +533,7 @@ struct CalendarView: View {
         }
         let streak = store.dayStreak
         let stats = [
-            ("\(done)", "Done", Theme.vividGreen),
+            ("\(done)", "Trained", Color.accentColor),
             ("\(missed)", "Missed", Theme.vividOrange),
             ("\(planned)", "Planned", Color.accentColor),
             (store.dayText(streak), "Streak", Theme.text),
@@ -573,7 +606,7 @@ struct CalendarView: View {
             HStack(spacing: 14) { legendItems }
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                 GridRow {
-                    legendItem(color: Theme.vividGreen, label: "Done")
+                    heatLegendItem
                     legendItem(color: Color.accentColor, label: "Planned")
                 }
                 GridRow {
@@ -587,15 +620,30 @@ struct CalendarView: View {
     }
 
     @ViewBuilder private var legendItems: some View {
-        legendItem(color: Theme.vividGreen, label: "Done")
+        heatLegendItem
         legendItem(color: Color.accentColor, label: "Planned")
         legendItem(color: Theme.vividOrange, label: "Missed")
         todayLegendItem
     }
 
+    /// A trained day: the heat square, light and solid.
+    private var heatLegendItem: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 2) {
+                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                    .fill(Self.heatFill(1)).frame(width: 10, height: 10)
+                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                    .fill(Self.heatFill(12)).frame(width: 10, height: 10)
+            }
+            Text("Trained")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+    }
+
     private var todayLegendItem: some View {
         HStack(spacing: 6) {
-            Circle()
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .stroke(Color.accentColor, lineWidth: 1.5)
                 .frame(width: 10, height: 10)
             Text("Today")
@@ -614,7 +662,7 @@ struct CalendarView: View {
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                 GridRow {
-                    legendItem(color: Theme.vividGreen, label: "Done")
+                    heatLegendItem
                     legendItem(color: Color.accentColor, label: "Planned")
                 }
                 GridRow {
