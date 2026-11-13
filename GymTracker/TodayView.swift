@@ -5,6 +5,7 @@ import UIKit
 struct TodayView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.pageContainerSize) private var pageContainerSize
+    @Environment(\.screenIsOpen) private var screenIsOpen
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoSwapProgress) private var duoSwapProgress
     @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
@@ -576,7 +577,7 @@ struct TodayView: View {
         // Open inner display held upright (~669pt): the outer display's
         // column at its own width on the right, the body revealed on the
         // left (Nov 12: "the other side is just waiting to be seen").
-        if size.width >= Self.outerDisplayWidth + 150 { return .split }
+        if size.width >= Self.outerDisplayWidth + 150 || screenIsOpen { return .split }
         // Outer display: single column, one-handed.
         return .compact
     }

@@ -284,6 +284,11 @@ extension EnvironmentValues {
         get { self[DuoHingeXKey.self] }
         set { self[DuoHingeXKey.self] = newValue }
     }
+    /// The phone is open (whole screen, not the page beside a side bar).
+    var screenIsOpen: Bool {
+        get { self[ScreenIsOpenKey.self] }
+        set { self[ScreenIsOpenKey.self] = newValue }
+    }
     /// This page is the one on screen (hidden pages stay mounted).
     var pageVisible: Bool {
         get { self[PageVisibleKey.self] }
@@ -300,6 +305,7 @@ private struct DuoStackedKey: EnvironmentKey { static let defaultValue = false }
 private struct RailEdgeKey: EnvironmentKey { static let defaultValue: HorizontalEdge? = nil }
 private struct CornerButtonsInRailKey: EnvironmentKey { static let defaultValue = false }
 private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
+private struct ScreenIsOpenKey: EnvironmentKey { static let defaultValue = false }
 private struct DuoHingeXKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 private struct CornerColumnTopKey: EnvironmentKey { static let defaultValue: CGFloat = .infinity }
 private struct AppDrawsKeyboardDoneKey: EnvironmentKey { static let defaultValue = false }

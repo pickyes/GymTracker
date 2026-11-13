@@ -75,8 +75,15 @@ struct ContentView: View {
     }
     /// Settings → Status bar on the side, on a screen that has one: the
     /// buttons move into a rail along that edge (DaRon, like Reddit).
-    /// Only where the status bar really runs down the side (DaRon).
-    private var rail: HorizontalEdge? { duo.sideStatusBar ? verticalBarEdge : nil }
+    /// Where the status bar runs down the side, on that edge. Open and
+    /// upright (DS), where iOS keeps it on top, the bar still shows on the
+    /// right (DaRon picked this).
+    private var rail: HorizontalEdge? {
+        guard duo.sideStatusBar else { return nil }
+        if let verticalBarEdge { return verticalBarEdge }
+        let dsMode = Self.isWide(steadySize) && steadySize.height > steadySize.width
+        return dsMode && duo.sideStrip ? .trailing : nil
+    }
     private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
     static let railWidth: CGFloat = 84
     /// Side status bar on: the buttons' own column beside the strip.
@@ -560,10 +567,13 @@ struct ContentView: View {
             // A width change (unfold, rotate) is never the keyboard: take
             // the live size at once instead of a frame late (red team).
             let size = steadyOK && abs(steadySize.width - geo.size.width) < 1 ? steadySize : geo.size
-            let wide = Self.isWide(size)
+            // Open or folded comes from the whole screen: the side bar's
+            // width narrowed the pages under the "open" cut-off in DS mode.
+            let wide = Self.isWide(steadyOK ? steadySize : size)
             ZStack {
                 TodayView()
                     .environment(\.pageContainerSize, size)
+                    .environment(\.screenIsOpen, wide)
                     // Today makes room for the keyboard itself (its column
                     // scrolls clear of it); the page as a whole doesn't get
                     // squeezed or lifted, so the body pane stays in place.
