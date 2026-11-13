@@ -884,8 +884,11 @@ struct LiveBodyView: View {
     var sideBinding: Binding<BodyDiagramSide>? = nil
     var userFlippedBinding: Binding<Bool>? = nil
     @EnvironmentObject var store: WorkoutStore
+    /// Starts on the last side shown (Today keeps it), not always Front.
     @State private var side: BodyDiagramSide = .front
     @State private var userFlipped = false
+    /// Set once the side is settled on appear; until then nothing animates.
+    @State private var settled = false
 
     /// The exercise (library or custom) for the current id, if it resolves.
     private var resolvedExercise: LibraryExercise? {
@@ -994,8 +997,10 @@ struct LiveBodyView: View {
             BodyFigureView(side: side, highlighted: litMuscles,
                            litColor: accent, primary: primaryLitMuscles)
                 .modifier(LiveBodyFigureHeight(height: figureHeight))
-                .animation(AppAnimation.snappy, value: side)
-                .animation(AppAnimation.snappy, value: litMuscles)
+                // No animation until the first side is settled, so the
+                // figure never plays a flip as it appears.
+                .animation(settled ? AppAnimation.snappy : nil, value: side)
+                .animation(settled ? AppAnimation.snappy : nil, value: litMuscles)
             if !litGroups.isEmpty {
                 litCaption
                     .font(.caption)
@@ -1009,19 +1014,23 @@ struct LiveBodyView: View {
             }
         }
         .onAppear {
-            // Restore a user-chosen flip from the hoisted state BEFORE
-            // the auto-side logic below runs, so a fold never snaps the
-            // figure back to the auto side. Runs first: onAppear
-            // modifiers fire in attachment order, and this one is
-            // attached before the auto-side one.
-            if userFlippedBinding?.wrappedValue == true, let sideBinding {
-                side = sideBinding.wrappedValue
-                userFlipped = true
+            // Opening the Duo builds this view afresh: it must appear
+            // already on its side, still (DaRon: the body flickered as it
+            // flipped from the default Front to Back, animated). So the
+            // side is settled with animation off: the last side shown
+            // (Today keeps it), a hand-picked flip, else the auto side.
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) {
+                if userFlippedBinding?.wrappedValue == true, let sideBinding {
+                    side = sideBinding.wrappedValue
+                    userFlipped = true
+                } else {
+                    side = bestSide
+                }
             }
         }
-        .onAppear {
-            if !userFlipped { side = bestSide }
-        }
+        .task { settled = true }
         .onChange(of: exerciseID) { _, _ in
             if !userFlipped {
                 withAnimation(AppAnimation.snappy) { side = bestSide }
