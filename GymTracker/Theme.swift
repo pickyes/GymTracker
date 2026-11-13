@@ -309,6 +309,10 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// The page size without the keyboard: the keyboard must never flip
     /// the DS layout or move its split off the hinge (red team).
     @State private var steady: CGSize = .zero
+    /// DS layout: where the line between the halves sits, as a share of
+    /// the height from the top. DaRon can drag it; 0.5 is the hinge.
+    /// One setting for every page.
+    @AppStorage("duoFoldSplit") private var split: Double = 0.5
 
     var body: some View {
         GeometryReader { geo in
@@ -331,6 +335,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          // halves stay on the hinge; pages still get the
                          // keyboard's safe area and scroll above it.
                          size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
+                         split: $split,
                          mainWidth: mainWidth, direction: direction,
                          pane: pane, main: main)
         }
@@ -362,6 +367,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var paneClearsCorner = true
     var mainClearsCorner = true
     var size: CGSize
+    @Binding var split: Double
     var mainWidth: CGFloat?
     var direction: LayoutDirection
     var pane: () -> Pane
@@ -375,12 +381,13 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
 
     var body: some View {
         let total = size.width
-        let halfH = size.height / 2
+        // DS: the line between the halves (draggable, 0.5 = the hinge).
+        let topH = stacked ? size.height * DuoSplitHandle.clamp(split) : size.height / 2
+        let botH = size.height - topH
         // Side by side: the main page keeps the front screen's width.
         // Stacked (DS): both pages are full width, half height each.
         let mainW = stacked ? total : (wide ? min(mainWidth ?? total / 2, total) : total)
         let paneW = stacked ? total : max(total - mainW, 0)
-        let pageH = stacked ? halfH : size.height
         let p = min(max(progress, 0), 1)
         // One continuous motion in three overlapping beats: the cards lift
         // in place (side by side, even gaps), slide past each other, and
@@ -393,9 +400,12 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // Left-to-right x of each page, then mirrored for RTL languages.
         var paneX = stacked ? 0 : slide * mainW
         var mainX = stacked ? 0 : (1 - slide) * paneW
-        // Stacked: the companion page starts on top and slides down.
-        let paneY = stacked ? slide * halfH : 0
-        let mainY = stacked ? (1 - slide) * halfH : 0
+        // Stacked: the companion page starts on top and slides down. Each
+        // page takes the size of the half it's moving into.
+        let paneY = stacked ? slide * topH : 0
+        let mainY = stacked ? (1 - slide) * topH : 0
+        let paneH = stacked ? topH + (botH - topH) * slide : size.height
+        let mainH = stacked ? botH + (topH - botH) * slide : size.height
         if direction == .rightToLeft && !stacked {
             paneX = total - paneX - paneW
             mainX = total - mainX - mainW
@@ -432,9 +442,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     // Follows the slide, so nothing jumps mid-swap (red team).
                     .safeAreaPadding(.trailing, stacked && paneClearsCorner ? 76 * slide : 0)
                     .environment(\.duoCornerInset, stacked && paneClearsCorner ? 76 * slide : 0)
-                    .frame(width: paneW, height: pageH, alignment: .top)
+                    .frame(width: paneW, height: paneH, alignment: .top)
                     .clipped()
-                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: pageH),
+                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: paneH),
                                           leading: paneLead, trailing: paneTrail))
                     // Real layout position (not a visual-only offset), so
                     // safe areas and hit areas match where the page is.
@@ -445,9 +455,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 .environment(\.layoutDirection, direction)
                 .safeAreaPadding(.trailing, stacked && mainClearsCorner ? 76 * (1 - slide) : 0)
                 .environment(\.duoCornerInset, stacked && mainClearsCorner ? 76 * (1 - slide) : 0)
-                .frame(width: mainW, height: pageH, alignment: .top)
+                .frame(width: mainW, height: mainH, alignment: .top)
                 .clipped(antialiased: stacked)
-                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: pageH),
+                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: mainH),
                                       leading: mainLead, trailing: mainTrail))
                 .alignmentGuide(.leading) { _ in wide ? -mainX : 0 }
                 .alignmentGuide(.top) { _ in -mainY }
@@ -468,13 +478,19 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // (DaRon), on both sides of the line: content loses its
                 // color and fades into the page as it nears the hinge.
                 FoldFade(width: total)
-                    .offset(y: halfH - FoldFade.reach)
+                    .offset(y: topH - FoldFade.reach)
                     // Off for the whole swap, never half faded: a blend
                     // under a partial opacity draws a grey band (red team).
                     .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                     .zIndex(2)
+                // Drag the line to give either half more room (DaRon).
+                DuoSplitHandle(split: $split, height: size.height, width: total)
+                    .offset(y: topH - DuoSplitHandle.grab / 2)
+                    .opacity(lift > 0 ? 0 : 1)
+                    .allowsHitTesting(lift == 0)
+                    .zIndex(3)
             }
         }
         .frame(width: total, height: size.height, alignment: .topLeading)
@@ -1168,6 +1184,59 @@ private struct ControlBorder<S: Shape>: ViewModifier {
 /// The DS fold: a hairline with, on each side, the top bar's two
 /// effects mirrored toward the line: a black-and-white strip (keeps
 /// brightness, drops color) and an eased fade into the page color.
+/// The DS layout's line between the halves, made draggable: a grab band
+/// along the line with a small pill in the middle. It snaps to the hinge
+/// when dragged close, and a double tap puts it back there.
+struct DuoSplitHandle: View {
+    @Binding var split: Double
+    var height: CGFloat
+    var width: CGFloat
+    /// Height of the touch band centred on the line.
+    static let grab: CGFloat = 28
+    static func clamp(_ v: Double) -> Double { min(max(v, 0.28), 0.72) }
+
+    @State private var start: Double?
+    @State private var dragging = false
+
+    var body: some View {
+        Color.clear
+            .frame(width: width, height: Self.grab)
+            .contentShape(Rectangle())
+            .overlay {
+                Capsule()
+                    .fill(Theme.secondaryText.opacity(dragging ? 0.9 : 0.45))
+                    .frame(width: dragging ? 56 : 40, height: 5)
+                    .animation(.snappy(duration: 0.2), value: dragging)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        if start == nil { start = split; dragging = true }
+                        var next = Self.clamp((start ?? split) + value.translation.height / max(height, 1))
+                        // Sticks to the hinge when close.
+                        if abs(next - 0.5) < 0.02 { next = 0.5 }
+                        if (next == 0.5) != (split == 0.5) {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
+                        var t = Transaction(); t.animation = nil
+                        withTransaction(t) { split = next }
+                    }
+                    .onEnded { _ in start = nil; dragging = false }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.snappy) { split = 0.5 }
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Divider")
+            .accessibilityValue("\(Int((Self.clamp(split) * 100).rounded())) percent from the top")
+            .accessibilityAdjustableAction { dir in
+                withAnimation(.snappy) {
+                    split = Self.clamp(split + (dir == .increment ? 0.05 : -0.05))
+                }
+            }
+    }
+}
+
 struct FoldFade: View {
     var width: CGFloat
     /// How far each effect reaches from the line.
