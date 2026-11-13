@@ -50,6 +50,8 @@ final class CalendarSyncManager: ObservableObject {
     @Published private(set) var syncedEventCount: Int = 0
     /// Last time a sync ran.
     @Published private(set) var lastSync: Date?
+    /// Feedback from the last "Remove events" (e.g. it needs full access).
+    @Published private(set) var removalMessage: String?
 
     private let eventStore = EKEventStore()
 
@@ -116,22 +118,40 @@ final class CalendarSyncManager: ObservableObject {
     /// removed. Offered when the user turns the integration off.
     @discardableResult
     func removeAllEvents() async -> Int {
-        var removed = 0
+        removalMessage = nil
+        refreshAuthorization()
         var eventIDs = loadEventIDs()
+        guard !eventIDs.isEmpty else { return 0 }
+        // Write-only access can't read events back, so it can't find
+        // them to remove them. Forgetting the ids anyway (as before)
+        // orphaned every event for good — keep them and say why.
+        guard authorization == .fullAccess else {
+            removalMessage = "Removing events needs full calendar access. Allow Full Access for Status in Settings → Privacy & Security → Calendars, then try again — or delete the events in the Calendar app."
+            return 0
+        }
+        var removed = 0
+        var failed = 0
         for (key, eventID) in eventIDs {
             if let event = eventStore.event(withIdentifier: eventID) {
                 do {
                     try eventStore.remove(event, span: .thisEvent)
                     removed += 1
+                    eventIDs.removeValue(forKey: key)
                 } catch {
-                    // The event is gone or can't be removed — forget it
-                    // either way so the map doesn't grow stale entries.
+                    // Couldn't remove it: keep the id so a retry can.
+                    failed += 1
                 }
+            } else {
+                // With full access, a missing event is already gone
+                // (deleted in Calendar) — forget the stale id.
+                eventIDs.removeValue(forKey: key)
             }
-            eventIDs.removeValue(forKey: key)
         }
         saveEventIDs(eventIDs)
-        syncedEventCount = 0
+        syncedEventCount = upcomingCount(from: eventIDs)
+        if failed > 0 {
+            removalMessage = "\(failed) event\(failed == 1 ? "" : "s") couldn't be removed. Try again, or delete \(failed == 1 ? "it" : "them") in the Calendar app."
+        }
         return removed
     }
 

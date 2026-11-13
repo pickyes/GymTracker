@@ -5,33 +5,74 @@ import SwiftUI
 /// says what it changes. One screen per question, big tappable cards,
 /// progress dots, Back on every screen. Goal has a default (Build muscle),
 /// so it's skippable; bodyweight is optional.
+/// The quiz's answers + position, owned by OnboardingFlowView so going
+/// Back from the plan reveal returns to the quiz with every answer kept
+/// (the quiz view is recreated on each flow step).
+struct SetupQuizState {
+    var step = 0
+    var profile = UserProfile()
+    var weightText = ""
+    var isKg = false
+}
+
 struct SetupQuizView: View {
     @EnvironmentObject var subscription: SubscriptionState
+    @Binding var state: SetupQuizState
     var onComplete: (UserProfile) -> Void
     var onBack: () -> Void
 
-    @State private var step = 0
-    @State private var profile = UserProfile()
-    @State private var weightText = ""
-    @State private var isKg = false
+    @State private var isRequestingNotifications = false
 
-    private let totalSteps = 9
+    /// The quiz's screens in order. The invite screen only appears while
+    /// invites are enabled — otherwise it was a dead screen in the flow.
+    enum QuizStep {
+        case goal, targetAreas, experience, days, equipment, limits, bodyweight, invite, notifications
+    }
+
+    private var steps: [QuizStep] {
+        var all: [QuizStep] = [.goal, .targetAreas, .experience, .days, .equipment, .limits, .bodyweight]
+        if InviteCode.isEnabled { all.append(.invite) }
+        all.append(.notifications)
+        return all
+    }
+
+    private var totalSteps: Int { steps.count }
+
+    private var step: Int {
+        get { min(max(state.step, 0), totalSteps - 1) }
+        nonmutating set { state.step = newValue }
+    }
+
+    private var currentStep: QuizStep { steps[step] }
+
+    private var profile: UserProfile {
+        get { state.profile }
+        nonmutating set { state.profile = newValue }
+    }
+    private var weightText: String {
+        get { state.weightText }
+        nonmutating set { state.weightText = newValue }
+    }
+    private var isKg: Bool {
+        get { state.isKg }
+        nonmutating set { state.isKg = newValue }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             progressHeader
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    switch step {
-                    case 0: goalStep
-                    case 1: targetAreasStep
-                    case 2: experienceStep
-                    case 3: daysStep
-                    case 4: equipmentStep
-                    case 5: limitsStep
-                    case 6: bodyweightStep
-                    case 7: inviteStep
-                    default: notificationsStep
+                    switch currentStep {
+                    case .goal: goalStep
+                    case .targetAreas: targetAreasStep
+                    case .experience: experienceStep
+                    case .days: daysStep
+                    case .equipment: equipmentStep
+                    case .limits: limitsStep
+                    case .bodyweight: bodyweightStep
+                    case .invite: inviteStep
+                    case .notifications: notificationsStep
                     }
                 }
                 .padding()
@@ -93,7 +134,7 @@ struct SetupQuizView: View {
     }
 
     private func goNext() {
-        if step == 6 {
+        if currentStep == .bodyweight {
             // Bodyweight is optional — save it if entered, then move on.
             saveBodyweight()
         }
@@ -109,13 +150,24 @@ struct SetupQuizView: View {
     }
 
     private func saveBodyweight() {
-        let cleaned = weightText.trimmingCharacters(in: .whitespaces)
-        guard let value = Double(cleaned), value > 0 else {
+        guard let value = Self.parseDecimal(weightText), value > 0 else {
             profile.bodyweightLb = nil
             return
         }
-        profile.bodyweightLb = isKg ? value * 2.20462 : value
+        profile.bodyweightLb = isKg ? value / 0.45359237 : value
         profile.bodyweightIsKg = isKg
+    }
+
+    /// Locale-aware decimal parsing: "72,5" works in comma locales (the
+    /// decimal pad types the locale's separator), and "72.5" still works.
+    static func parseDecimal(_ text: String) -> Double? {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let formatter = NumberFormatter()
+        formatter.locale = .current
+        formatter.numberStyle = .decimal
+        if let number = formatter.number(from: cleaned) { return number.doubleValue }
+        return Double(cleaned.replacingOccurrences(of: ",", with: "."))
     }
 
     // MARK: - Steps
@@ -334,8 +386,8 @@ struct SetupQuizView: View {
             } label: {
                 Text("None").font(.headline)
             }
-            BodyDiagramView(selected: $profile.injuredParts)
-            TextField("Something else? Tell us briefly (stays on this phone)", text: $profile.otherLimitText)
+            BodyDiagramView(selected: $state.profile.injuredParts)
+            TextField("Something else? Tell us briefly (stays on this phone)", text: $state.profile.otherLimitText)
                 .textFieldStyle(.roundedBorder)
                 .withKeyboardDoneToolbar(system: true)
             ForEach(Array(profile.limits).sorted { $0.label < $1.label }, id: \.self) { limit in
@@ -352,11 +404,11 @@ struct SetupQuizView: View {
         VStack(alignment: .leading, spacing: 20) {
             question("Your bodyweight? (optional)", "A baseline for tracking only. Never required, never leaves this phone.")
             HStack(spacing: 8) {
-                TextField("Enter your weight", text: $weightText)
+                TextField("Enter your weight", text: $state.weightText)
                     .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
                     .withKeyboardDoneToolbar(system: true)
-                Picker("Unit", selection: $isKg) {
+                Picker("Unit", selection: $state.isKg) {
                     Text("lb").tag(false)
                     Text("kg").tag(true)
                 }
@@ -381,10 +433,15 @@ struct SetupQuizView: View {
         VStack(alignment: .leading, spacing: 20) {
             question("Rest timer + trial reminders?", "We'll ping you when rest is over — and before a trial ends.")
             Button {
+                // One request only: a second tap while the system prompt
+                // is up used to complete the quiz twice.
+                guard !isRequestingNotifications else { return }
+                isRequestingNotifications = true
                 Task {
                     let granted = await subscription.requestNotificationPermission()
                     profile.notificationsAllowed = granted
                     onComplete(profile)
+                    isRequestingNotifications = false
                 }
             } label: {
                 Text("Allow notifications")
@@ -396,6 +453,7 @@ struct SetupQuizView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
+            .disabled(isRequestingNotifications)
             Text("Local notifications only, on this phone. No email, no account.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)

@@ -16,6 +16,9 @@ struct SettingsView: View {
     /// D40 (2026-11-10): confirmation text shown after "Schedule
     /// reminders now" is tapped — the button used to give no feedback.
     @State private var remindersScheduledMessage: String?
+    /// Real notification permission, refreshed on appear and on return
+    /// from system Settings.
+    @State private var reminderAuthStatus: UNAuthorizationStatus?
     /// Show the swap-sides button on the open Duo (Nov 12). Saved with the
     /// swap itself, straight to disk, so it survives updates and power-off.
     @ObservedObject private var duo = DuoSettings.shared
@@ -30,6 +33,8 @@ struct SettingsView: View {
     var body: some View {
         Form {
             if let leadingSections { leadingSections }
+            // Test data is a developer tool — never in release builds.
+            #if DEBUG
             Section {
                 ForEach(SampleProfile.allCases) { profile in
                     Button("Load \(profile.label)") { pendingSample = profile }
@@ -51,6 +56,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) { pendingSample = nil }
             }
+            #endif
             Section("Rest timer") {
                 HStack {
                     Text("Default rest")
@@ -100,16 +106,16 @@ struct SettingsView: View {
             Section {
                 Toggle("Swap button", isOn: $duo.showSwapButton)
                 Toggle("Status bar on the side", isOn: $duo.sideStatusBar)
+                // The strip is always on with the side status bar (DaRon),
+                // so the tint option shows whenever the side bar does (an
+                // old saved "strip off" no longer hides it).
                 if duo.sideStatusBar {
-                    Toggle("Side bar strip", isOn: $duo.sideStrip)
-                    if duo.sideStrip {
-                        Toggle("Accent tint on side bar", isOn: $duo.sideTint)
-                    }
+                    Toggle("Accent tint on side bar", isOn: $duo.sideTint)
                 }
             } header: {
                 Text("Open display")
             } footer: {
-                Text("Swap button: switches which side each page is on when the phone is open. Turning it off keeps the sides the way you left them. Status bar on the side: the time and icons run down the edge. Side bar strip: a dark grey bar behind them that the pages stop at; off, the pages run underneath.")
+                Text("Swap button: switches which side each page is on when the phone is open. Turning it off keeps the sides the way you left them. Status bar on the side: the time and icons run down the edge.")
             }
 
             Section("Appearance") {
@@ -149,9 +155,27 @@ struct SettingsView: View {
                 Text("Local notifications only, on this phone. Rest days stay quiet.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
+                if reminderAuthStatus == .denied {
+                    Text("Notifications are off for Status. Turn them on in Settings → Notifications → Status, then tap Schedule again.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                }
                 Button("Schedule reminders now") {
-                    ReminderScheduler.scheduleAll(store: store)
-                    remindersScheduledMessage = "Reminders scheduled — you'll be reminded at \(reminderTimeText) on workout days."
+                    Task { @MainActor in
+                        let outcome = await ReminderScheduler.scheduleAll(store: store)
+                        reminderAuthStatus = await ReminderScheduler.authorizationStatus()
+                        switch outcome {
+                        case .scheduled:
+                            remindersScheduledMessage = "Reminders scheduled — you'll be reminded at \(reminderTimeText) on workout days."
+                        case .denied:
+                            remindersScheduledMessage = "Reminders weren't scheduled — notifications are off for Status."
+                        }
+                    }
                 }
                 if let remindersScheduledMessage {
                     Text(remindersScheduledMessage)
@@ -181,6 +205,14 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
+                if let removalMessage = calendarSync.removalMessage {
+                    Text(removalMessage)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    if !calendarSync.accessDenied {
+                        Button("Open Settings") { calendarSync.openSystemSettings() }
+                    }
+                }
             }
             .confirmationDialog("Remove calendar events?", isPresented: $showRemoveCalendarEvents) {
                 Button("Remove events", role: .destructive) {
@@ -192,15 +224,19 @@ struct SettingsView: View {
             }
 
             Section("Plate calculator (barbell)") {
-                HStack {
-                    Text("Bar weight")
-                    Spacer()
-                    Picker("Bar weight", selection: barWeightBinding) {
-                        Text("45 lb").tag(45.0)
-                        Text("20 kg").tag(20.0)
+                // Stacks at large text sizes instead of truncating the
+                // segments (the old fixed 160pt width clipped them).
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        Text("Bar weight")
+                        Spacer()
+                        barWeightPicker
+                            .fixedSize()
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Bar weight")
+                        barWeightPicker
+                    }
                 }
                 Text("Plate inventory: \(store.settings.plateInventoryLb.map { roundedWeightText($0) }.joined(separator: ", ")) lb")
                     .font(.caption)
@@ -226,8 +262,12 @@ struct SettingsView: View {
         .onChange(of: scenePhase) { _, phase in
             // Back from system Settings after enabling the camera: clear
             // the "access is off" message without needing a relaunch.
-            if phase == .active { flashlightSignal.refreshAuthorization() }
+            if phase == .active {
+                flashlightSignal.refreshAuthorization()
+                Task { @MainActor in reminderAuthStatus = await ReminderScheduler.authorizationStatus() }
+            }
         }
+        .task { reminderAuthStatus = await ReminderScheduler.authorizationStatus() }
         .sheet(isPresented: $showPaywall) {
             PaywallView(
                 programName: store.activeProgram?.name ?? "Your plan",
@@ -319,6 +359,8 @@ struct SettingsView: View {
                 s.reminderTimeHour = Calendar.current.component(.hour, from: date)
                 s.reminderTimeMinute = Calendar.current.component(.minute, from: date)
                 store.updateSettings(s)
+                // Pending reminders carry the old time — move them.
+                ReminderScheduler.rescheduleIfAuthorized(store: store)
             }
         )
     }
@@ -332,7 +374,10 @@ struct SettingsView: View {
     private var missedNudgeBinding: Binding<Bool> {
         Binding(
             get: { store.settings.missedDayNudgeEnabled },
-            set: { var s = store.settings; s.missedDayNudgeEnabled = $0; store.updateSettings(s) }
+            set: {
+                var s = store.settings; s.missedDayNudgeEnabled = $0; store.updateSettings(s)
+                ReminderScheduler.rescheduleIfAuthorized(store: store)
+            }
         )
     }
 
@@ -350,9 +395,26 @@ struct SettingsView: View {
         )
     }
 
+    /// 20 kg bar stored in lb (the setting is lb). The old tag was
+    /// 20.0 — a 20 lb bar mislabeled "20 kg".
+    static let kgBarLb: Double = 20 / 0.45359237
+
+    private var barWeightPicker: some View {
+        Picker("Bar weight", selection: barWeightBinding) {
+            Text("45 lb").tag(45.0)
+            Text("20 kg").tag(Self.kgBarLb)
+        }
+        .pickerStyle(.segmented)
+    }
+
     private var barWeightBinding: Binding<Double> {
         Binding(
-            get: { store.settings.barWeightLb },
+            get: {
+                // Older builds saved the 20 kg choice as 20.0 (lb);
+                // show it as the kg bar so the picker has a selection.
+                let lb = store.settings.barWeightLb
+                return abs(lb - 45) < 0.01 ? 45 : (lb < 30 ? Self.kgBarLb : lb)
+            },
             set: { var s = store.settings; s.barWeightLb = $0; store.updateSettings(s) }
         )
     }
@@ -468,38 +530,48 @@ struct GymProfilesView: View {
     @State private var showEditor = false
     @State private var editingProfile: GymProfile?
     @State private var showPaywall = false
+    /// The active profile awaiting delete confirmation.
+    @State private var pendingDeleteProfile: GymProfile?
 
     var body: some View {
         List {
             Section {
                 ForEach(store.gymProfiles) { profile in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(profile.name)
-                                .font(.headline)
-                            Text(profile.equipment.map { $0.label }.sorted().joined(separator: ", "))
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        Spacer()
-                        if store.activeGymProfileID == profile.id {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
+                    let isActive = store.activeGymProfileID == profile.id
+                    // A real Button (not onTapGesture) so VoiceOver and
+                    // Switch Control can pick it, with the selected trait.
+                    Button {
                         store.activeGymProfileID = profile.id
                         store.persistCustomization()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(profile.name)
+                                    .font(.headline)
+                                    .foregroundStyle(Theme.text)
+                                Text(profile.equipment.map { $0.label }.sorted().joined(separator: ", "))
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            Spacer()
+                            if isActive {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color.accentColor)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isActive ? .isSelected : [])
                     .swipeActions {
                         Button("Edit") { editingProfile = profile }
                         Button(role: .destructive) {
-                            store.gymProfiles.removeAll { $0.id == profile.id }
-                            if store.activeGymProfileID == profile.id {
-                                store.activeGymProfileID = nil
+                            if isActive {
+                                pendingDeleteProfile = profile
+                            } else {
+                                deleteProfile(profile)
                             }
-                            store.persistCustomization()
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -542,6 +614,18 @@ struct GymProfilesView: View {
         }
         .oledList()
         .navigationTitle("Gym Profiles")
+        .confirmationDialog("Delete \(pendingDeleteProfile?.name ?? "this profile")?",
+                            isPresented: Binding(get: { pendingDeleteProfile != nil },
+                                                 set: { if !$0 { pendingDeleteProfile = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let profile = pendingDeleteProfile { deleteProfile(profile) }
+                pendingDeleteProfile = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteProfile = nil }
+        } message: {
+            Text("This is your active gym profile. Programs will use your quiz equipment instead.")
+        }
         .sheet(item: $editingProfile) { profile in
             GymProfileEditorView(profile: profile) { updated in
                 if let index = store.gymProfiles.firstIndex(where: { $0.id == updated.id }) {
@@ -559,6 +643,16 @@ struct GymProfilesView: View {
                 onPurchased: { showPaywall = false }
             )
         }
+    }
+}
+
+extension GymProfilesView {
+    fileprivate func deleteProfile(_ profile: GymProfile) {
+        store.gymProfiles.removeAll { $0.id == profile.id }
+        if store.activeGymProfileID == profile.id {
+            store.activeGymProfileID = nil
+        }
+        store.persistCustomization()
     }
 }
 
@@ -652,6 +746,8 @@ struct CustomExercisesView: View {
     @State private var showEditor = false
     @State private var editingExercise: CustomExercise?
     @State private var showPaywall = false
+    /// Custom exercise awaiting delete confirmation.
+    @State private var pendingDelete: CustomExercise?
     /// Sections shown above the custom exercises (Profile puts Working
     /// Weights here, so it's one Exercises page).
     var leadingSections: AnyView? = nil
@@ -674,10 +770,11 @@ struct CustomExercisesView: View {
                     }
                     .swipeActions {
                         Button(role: .destructive) {
-                            store.deleteCustomExercise(id: exercise.id)
+                            pendingDelete = exercise
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                        .tint(.red)
                     }
                 }
                 if store.customExercises.isEmpty {
@@ -709,10 +806,29 @@ struct CustomExercisesView: View {
         }
         .oledList()
         .navigationTitle(leadingSections == nil ? "Custom exercises" : "Exercises")
+        .confirmationDialog("Delete \(pendingDelete?.name ?? "this exercise")?",
+                            isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let exercise = pendingDelete { store.deleteCustomExercise(id: exercise.id) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            if let exercise = pendingDelete, isUsedInPrograms(exercise) {
+                Text("\(exercise.name) is used in one of your programs. Deleting it can leave that program with an exercise it can't show.")
+            } else {
+                Text("This can't be undone.")
+            }
+        }
         .sheet(item: $editingExercise) { exercise in
             CustomExerciseEditorView(exercise: exercise) { updated in
                 if let index = store.customExercises.firstIndex(where: { $0.id == updated.id }) {
                     store.customExercises[index] = updated
+                    // Editing used to change memory only — the edit was
+                    // lost on relaunch. Persist like add/delete do.
+                    store.persistCustomization()
                 } else {
                     store.addCustomExercise(updated)
                 }
@@ -724,6 +840,19 @@ struct CustomExercisesView: View {
                 onClose: { showPaywall = false },
                 onPurchased: { showPaywall = false }
             )
+        }
+    }
+}
+
+extension CustomExercisesView {
+    /// True when any program (active, generated, or extra) lists this
+    /// custom exercise — the delete confirmation warns about it.
+    fileprivate func isUsedInPrograms(_ exercise: CustomExercise) -> Bool {
+        var programs = store.extraPrograms
+        if let active = store.activeProgram { programs.append(active) }
+        if let generated = store.generatedProgram { programs.append(generated) }
+        return programs.contains { program in
+            program.days.contains { day in day.exercises.contains { $0.id == exercise.id } }
         }
     }
 }
@@ -852,22 +981,30 @@ struct ProgramsView: View {
             }
             Section {
                 ForEach(store.allPrograms) { program in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(program.name)
-                                .font(.headline)
-                            Text("\(program.days.count) days · \(programKindLabel(program))")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondaryText)
+                    let isActive = store.activeProgram?.id == program.id
+                    Button {
+                        store.setActiveProgram(program)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(program.name)
+                                    .font(.headline)
+                                    .foregroundStyle(Theme.text)
+                                Text("\(program.days.count) days · \(programKindLabel(program))")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            Spacer()
+                            if isActive {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color.accentColor)
+                                    .accessibilityHidden(true)
+                            }
                         }
-                        Spacer()
-                        if store.activeProgram?.id == program.id {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { store.setActiveProgram(program) }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isActive ? .isSelected : [])
                     .swipeActions {
                         if !program.isPreset {
                             Button("Duplicate") {
@@ -978,11 +1115,13 @@ struct ProgramsView: View {
         )) {
             TextField("Name", text: $newName)
             Button("Save") {
-                if let program = renaming {
-                    store.renameProgram(program, to: newName)
+                let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let program = renaming, !trimmed.isEmpty {
+                    store.renameProgram(program, to: trimmed)
                 }
                 renaming = nil
             }
+            .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) { renaming = nil }
         }
         .sheet(isPresented: $showPaywall) {
@@ -1147,15 +1286,20 @@ struct CustomProgramBuilderView: View {
 
             ForEach(dayExercises.indices, id: \.self) { day in
                 Section("\(dayTitle(at: day)) · \(weekday(at: day))") {
-                    ForEach(dayExercises[day].indices, id: \.self) { index in
-                        exerciseRow(day: day, index: index)
+                    // Bounds-checked: after a remove(at:) or a days
+                    // decrease SwiftUI can still evaluate a row (or a
+                    // binding) for an index that no longer exists.
+                    ForEach(exercises(atDay: day).indices, id: \.self) { index in
+                        if let template = template(day: day, index: index) {
+                            exerciseRow(day: day, index: index, template: template)
+                        }
                     }
                     Button {
                         addingToDay = day
                     } label: {
                         Label("Add exercise", systemImage: "plus")
                     }
-                    if dayExercises[day].isEmpty {
+                    if exercises(atDay: day).isEmpty {
                         Text("Add at least one exercise to this day.")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
@@ -1197,7 +1341,9 @@ struct CustomProgramBuilderView: View {
             set: { if !$0 { addingToDay = nil } }
         )) {
             AddExerciseSheet { template in
-                if let day = addingToDay { dayExercises[day].append(template) }
+                if let day = addingToDay, dayExercises.indices.contains(day) {
+                    dayExercises[day].append(template)
+                }
             }
         }
         .sheet(isPresented: $showPaywall) {
@@ -1259,7 +1405,7 @@ struct CustomProgramBuilderView: View {
 
     private func daySubtitle(at index: Int) -> String {
         let weekday = weekday(at: index)
-        let muscles = dayExercises[index].compactMap {
+        let muscles = exercises(atDay: index).compactMap {
             ExerciseLibrary.byId($0.id, plus: store.customExercises)?.muscle.label
         }
         let unique = Array(Set(muscles)).sorted()
@@ -1315,14 +1461,16 @@ struct CustomProgramBuilderView: View {
         guard canSave, !atFreeLimit else { return }
         let program = draftProgram
         if editing != nil {
+            // Editing never changes which program is active: the store
+            // swaps in the new content if this one was already active.
             store.updateExtraProgram(program)
         } else {
             store.addExtraProgram(program)
+            // Same confirmation gate as any program switch (see the
+            // header comment): when the preset is active this only
+            // stages the switch — the Programs screen's alert decides it.
+            store.setActiveProgram(program)
         }
-        // Same confirmation gate as any program switch (see the header
-        // comment): when the preset is active this only stages the
-        // switch — the Programs screen's alert decides it.
-        store.setActiveProgram(program)
         dismiss()
     }
 
@@ -1363,17 +1511,33 @@ struct CustomProgramBuilderView: View {
 
     // MARK: - Exercise rows
 
-    private func setsBinding(day: Int, index: Int) -> Binding<Int> {
+    private func exercises(atDay day: Int) -> [ExerciseTemplate] {
+        dayExercises.indices.contains(day) ? dayExercises[day] : []
+    }
+
+    private func template(day: Int, index: Int) -> ExerciseTemplate? {
+        let list = exercises(atDay: day)
+        return list.indices.contains(index) ? list[index] : nil
+    }
+
+    private func isValid(day: Int, index: Int) -> Bool {
+        dayExercises.indices.contains(day) && dayExercises[day].indices.contains(index)
+    }
+
+    // Bindings re-check the index on every get/set: a row's binding can
+    // outlive the row after a remove, and a stale index must never trap.
+    private func setsBinding(day: Int, index: Int, fallback: ExerciseTemplate) -> Binding<Int> {
         Binding(
-            get: { dayExercises[day][index].sets },
-            set: { dayExercises[day][index].sets = $0 }
+            get: { template(day: day, index: index)?.sets ?? fallback.sets },
+            set: { if isValid(day: day, index: index) { dayExercises[day][index].sets = $0 } }
         )
     }
 
-    private func repBinding(day: Int, index: Int) -> Binding<String> {
+    private func repBinding(day: Int, index: Int, fallback: ExerciseTemplate) -> Binding<String> {
         Binding(
-            get: { dayExercises[day][index].repRange },
+            get: { template(day: day, index: index)?.repRange ?? fallback.repRange },
             set: { newValue in
+                guard isValid(day: day, index: index) else { return }
                 dayExercises[day][index].repRange = newValue
                 if let top = Self.repRanges.first(where: { $0.0 == newValue })?.1 {
                     dayExercises[day][index].topReps = top
@@ -1385,9 +1549,8 @@ struct CustomProgramBuilderView: View {
     /// One added exercise: name + remove, then sets and reps on their
     /// own lines — two controls side by side would crowd the narrowest
     /// pose, so they stack instead (no control may clip at any edge).
-    private func exerciseRow(day: Int, index: Int) -> some View {
-        let template = dayExercises[day][index]
-        return VStack(alignment: .leading, spacing: 8) {
+    private func exerciseRow(day: Int, index: Int, template: ExerciseTemplate) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(template.name)
                     .font(.subheadline)
@@ -1395,7 +1558,7 @@ struct CustomProgramBuilderView: View {
                     .minimumScaleFactor(0.85)
                 Spacer()
                 Button {
-                    dayExercises[day].remove(at: index)
+                    if isValid(day: day, index: index) { dayExercises[day].remove(at: index) }
                 } label: {
                     Image(systemName: "trash")
                         .foregroundStyle(Theme.vividRed)
@@ -1409,7 +1572,7 @@ struct CustomProgramBuilderView: View {
                 Text("Sets")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                RowStepper(value: setsBinding(day: day, index: index), range: 1...6, step: 1) { "\($0)" }
+                RowStepper(value: setsBinding(day: day, index: index, fallback: template), range: 1...6, step: 1) { "\($0)" }
                 Spacer()
             }
             HStack {
@@ -1417,7 +1580,7 @@ struct CustomProgramBuilderView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                 MenuPill(label: template.repRange) {
-                    Picker("Reps", selection: repBinding(day: day, index: index)) {
+                    Picker("Reps", selection: repBinding(day: day, index: index, fallback: template)) {
                         ForEach(Self.repRanges, id: \.0) { label, _ in
                             Text(label).tag(label)
                         }
@@ -1476,6 +1639,15 @@ struct ProgramLibraryView: View {
     @State private var equipmentFilter: EquipmentAccess? = nil
     @State private var sortOption: ProgramSort = .name
     @State private var favoritesOnly = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Pill rows go side by side, or stack at accessibility text sizes
+    /// where two pills can't fit across the screen.
+    private var pillRowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+    }
 
     /// Sort order for the library. "Newest" has no creation date on
     /// catalog programs, so it is defined as reverse catalog order
@@ -1526,7 +1698,7 @@ struct ProgramLibraryView: View {
     var body: some View {
         List {
             Section {
-                HStack(spacing: 12) {
+                pillRowLayout {
                     filterMenu(title: "Goal", allLabel: "All goals",
                                options: CatalogGoal.allCases.map { ($0.label, $0) },
                                selection: $goalFilter)
@@ -1536,7 +1708,7 @@ struct ProgramLibraryView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
-                HStack(spacing: 12) {
+                pillRowLayout {
                     filterMenu(title: "Days / week", allLabel: "Any days",
                                options: [1, 2, 3, 4, 5, 6, 7].map { ("\($0) day\($0 == 1 ? "" : "s")", $0) },
                                selection: $daysFilter)
@@ -1548,7 +1720,7 @@ struct ProgramLibraryView: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 // Sort + favorites-only: the same single-pill row as the
                 // filters above — no card behind the pills.
-                HStack(spacing: 12) {
+                pillRowLayout {
                     sortMenu
                     favoritesToggle
                 }
@@ -1746,15 +1918,41 @@ struct CatalogProgramDetailView: View {
                     Text(catalog.focus)
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
-                    HStack(spacing: 6) {
-                        metaPill(catalog.goal.label)
-                        metaPill(catalog.level.label)
-                        metaPill(daysPerWeekText(catalog.daysPerWeek))
-                        metaPill("\(catalog.durationWeeks) weeks")
+                    // Large Dynamic Type: the four-pill row overflowed the
+                    // screen. Fall back to 2+2, then one per line.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            metaPill(catalog.goal.label)
+                            metaPill(catalog.level.label)
+                            metaPill(daysPerWeekText(catalog.daysPerWeek))
+                            metaPill("\(catalog.durationWeeks) weeks")
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                metaPill(catalog.goal.label)
+                                metaPill(catalog.level.label)
+                            }
+                            HStack(spacing: 6) {
+                                metaPill(daysPerWeekText(catalog.daysPerWeek))
+                                metaPill("\(catalog.durationWeeks) weeks")
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            metaPill(catalog.goal.label)
+                            metaPill(catalog.level.label)
+                            metaPill(daysPerWeekText(catalog.daysPerWeek))
+                            metaPill("\(catalog.durationWeeks) weeks")
+                        }
                     }
-                    HStack(spacing: 6) {
-                        metaPill(catalog.equipment.label)
-                        metaPill(catalog.split.label)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            metaPill(catalog.equipment.label)
+                            metaPill(catalog.split.label)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            metaPill(catalog.equipment.label)
+                            metaPill(catalog.split.label)
+                        }
                     }
                 }
                 .padding(.top, 8)
@@ -1838,6 +2036,7 @@ struct CatalogProgramDetailView: View {
     private func metaPill(_ text: String) -> some View {
         Text(text)
             .font(.caption)
+            .fixedSize()
             .bold()
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -1909,29 +2108,70 @@ enum ReminderScheduler {
     private static let reminderIDPrefix = "gymtracker.reminder."
     private static let nudgeID = "gymtracker.missed-day-nudge"
     private static let missedCountKey = "gymtracker.missedDays.v1"
+    /// The last missed training date ("yyyy-MM-dd") already counted, so
+    /// re-scheduling the same day never counts the same miss twice.
+    private static let lastCountedMissKey = "gymtracker.missedDays.lastCounted.v1"
+    /// Every weekday key a program day can use — removed on reschedule so
+    /// days dropped from the program (or a switched program) never keep
+    /// firing.
+    private static let weekdayMap: [String: Int] = ["Mon": 2, "Tue": 3, "Wed": 4, "Thu": 5, "Fri": 6, "Sat": 7, "Sun": 1]
 
-    /// Schedule a reminder on each training day this week at the chosen time,
-    /// plus a missed-day nudge the morning after a training day (stops after
-    /// 3 missed days). All local, on-device.
-    static func scheduleAll(store: WorkoutStore) {
+    enum Outcome: Equatable {
+        case scheduled
+        case denied
+    }
+
+    /// Current notification permission (for the Settings status line).
+    static func authorizationStatus() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    /// Schedule a reminder on each training day at the chosen time, plus
+    /// a missed-day nudge (stops after 3 missed days). Asks for
+    /// permission first when it has never been asked. All store values
+    /// are read on the main actor. All local, on-device.
+    @MainActor
+    @discardableResult
+    static func scheduleAll(store: WorkoutStore, requestIfNeeded: Bool = true) async -> Outcome {
         let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized else { return }
-            center.removePendingNotificationRequests(withIdentifiers:
-                pendingIDs(for: store) + [nudgeID])
-            scheduleTrainingReminders(store: store, center: center)
-            scheduleMissedDayNudgeIfNeeded(store: store, center: center)
+        var status = await center.notificationSettings().authorizationStatus
+        if status == .notDetermined && requestIfNeeded {
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            status = granted ? .authorized : .denied
+        }
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return .denied
+        }
+        await removeAllPending(center: center)
+        scheduleTrainingReminders(store: store, center: center)
+        scheduleMissedDayNudgeIfNeeded(store: store, center: center)
+        return .scheduled
+    }
+
+    /// Re-schedule only when permission is already granted (used when the
+    /// reminder time or nudge setting changes — never prompts).
+    @MainActor
+    static func rescheduleIfAuthorized(store: WorkoutStore) {
+        Task { @MainActor in
+            await scheduleAll(store: store, requestIfNeeded: false)
         }
     }
 
-    private static func pendingIDs(for store: WorkoutStore) -> [String] {
-        guard let program = store.activeProgram else { return [] }
-        return program.days.map { reminderIDPrefix + $0.key }
+    /// Removes every pending reminder this app scheduled: anything with
+    /// the reminder prefix, every weekday id, and the nudge.
+    private static func removeAllPending(center: UNUserNotificationCenter) async {
+        let pending = await center.pendingNotificationRequests()
+        var ids = Set(pending.map(\.identifier).filter { $0.hasPrefix(reminderIDPrefix) })
+        ids.formUnion(weekdayMap.keys.map { reminderIDPrefix + $0 })
+        ids.insert(nudgeID)
+        center.removePendingNotificationRequests(withIdentifiers: Array(ids))
     }
 
+    @MainActor
     private static func scheduleTrainingReminders(store: WorkoutStore, center: UNUserNotificationCenter) {
         guard let program = store.activeProgram else { return }
-        let weekdayMap: [String: Int] = ["Mon": 2, "Tue": 3, "Wed": 4, "Thu": 5, "Fri": 6, "Sat": 7, "Sun": 1]
+        let hour = store.settings.reminderTimeHour
+        let minute = store.settings.reminderTimeMinute
         for day in program.days {
             guard let weekday = weekdayMap[day.key] else { continue }
             let content = UNMutableNotificationContent()
@@ -1940,8 +2180,8 @@ enum ReminderScheduler {
             content.sound = .default
             var components = DateComponents()
             components.weekday = weekday
-            components.hour = store.settings.reminderTimeHour
-            components.minute = store.settings.reminderTimeMinute
+            components.hour = hour
+            components.minute = minute
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
             let request = UNNotificationRequest(
                 identifier: reminderIDPrefix + day.key, content: content, trigger: trigger)
@@ -1949,30 +2189,49 @@ enum ReminderScheduler {
         }
     }
 
+    @MainActor
     private static func scheduleMissedDayNudgeIfNeeded(store: WorkoutStore, center: UNUserNotificationCenter) {
         guard store.settings.missedDayNudgeEnabled else { return }
-        let missed = SharedDefaults.store.integer(forKey: missedCountKey)
-        guard missed < 3 else { return }
+        let calendar = Calendar.current
+        let now = Date()
         // If yesterday was a training day and no session was logged, nudge
-        // tomorrow morning. Checked at schedule time; a saved session cancels it.
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        // at the next 9:00. Checked at schedule time; a saved session
+        // cancels it.
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
         guard let key = Program.dayKey(for: yesterday),
               store.activeProgram?.day(forKey: key) != nil else { return }
         let loggedYesterday = store.sessions.contains {
-            Calendar.current.isDate($0.date, inSameDayAs: yesterday)
+            calendar.isDate($0.date, inSameDayAs: yesterday)
         }
         guard !loggedYesterday else { return }
-        SharedDefaults.store.set(missed + 1, forKey: missedCountKey)
+
+        // Count each missed date once, however many times this runs.
+        var missed = SharedDefaults.store.integer(forKey: missedCountKey)
+        let yesterdayID = dayID(yesterday, calendar: calendar)
+        if SharedDefaults.store.string(forKey: lastCountedMissKey) != yesterdayID {
+            missed += 1
+            SharedDefaults.store.set(missed, forKey: missedCountKey)
+            SharedDefaults.store.set(yesterdayID, forKey: lastCountedMissKey)
+        }
+        guard missed <= 3 else { return }
+
         let content = UNMutableNotificationContent()
         content.title = "Missed yesterday's workout?"
         content.body = "No pressure — today is a fresh start. Your next session is ready."
         content.sound = .default
-        var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        components.hour = 9
-        components.minute = 0
+        // The next 9:00 that is still in the future (today's 9:00 if it
+        // hasn't passed, else tomorrow's) — a past date never fires.
+        var fire = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now
+        if fire <= now { fire = calendar.date(byAdding: .day, value: 1, to: fire) ?? fire }
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         let request = UNNotificationRequest(identifier: nudgeID, content: content, trigger: trigger)
         center.add(request)
+    }
+
+    private static func dayID(_ date: Date, calendar: Calendar) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     /// Call when a session is saved: clears the missed-day count and any

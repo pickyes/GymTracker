@@ -24,6 +24,14 @@ final class SubscriptionState: ObservableObject {
     @Published var purchasedProductIDs: Set<String> = []
     @Published var isLoadingProducts = false
     @Published var purchaseError: String?
+    /// Non-error purchase/restore feedback ("pending approval",
+    /// "nothing to restore").
+    @Published var purchaseNotice: String?
+    @Published var isRestoring = false
+    /// Whether this Apple Account can still get each subscription's
+    /// introductory offer. A free trial is only advertised when true —
+    /// someone who already used it is charged right away.
+    @Published var introOfferEligibility: [String: Bool] = [:]
 
     /// When the current Pro entitlement ends, if it ends (nil for
     /// lifetime, or when Pro isn't active). Set by the invite-redemption
@@ -64,6 +72,7 @@ final class SubscriptionState: ObservableObject {
     /// doesn't exist (P0-5: the paywall used to hardcode "7-day").
     func trialDays(for productID: String) -> Int? {
         guard let product = product(for: productID),
+              introOfferEligibility[productID] == true,
               let offer = product.subscription?.introductoryOffer,
               offer.paymentMode == .freeTrial else { return nil }
         let daysPerUnit: Int
@@ -106,11 +115,23 @@ final class SubscriptionState: ObservableObject {
         do {
             let fetched = try await Product.products(for: [Self.monthlyID, Self.yearlyID, Self.lifetimeID])
             products = fetched.sorted { $0.id < $1.id }
+            await refreshIntroOfferEligibility()
         } catch {
             // Products aren't configured yet (simulator / App Store Connect).
             // The paywall falls back to the proposed prices.
             products = []
         }
+    }
+
+    /// Reads each subscription's intro-offer eligibility from StoreKit.
+    func refreshIntroOfferEligibility() async {
+        var eligibility: [String: Bool] = [:]
+        for product in products {
+            if let subscription = product.subscription {
+                eligibility[product.id] = await subscription.isEligibleForIntroOffer
+            }
+        }
+        introOfferEligibility = eligibility
     }
 
     func updatePurchasedProducts() async {
@@ -147,6 +168,7 @@ final class SubscriptionState: ObservableObject {
     /// Returns true if the purchase succeeded.
     func purchase(_ product: Product) async -> Bool {
         purchaseError = nil
+        purchaseNotice = nil
         do {
             let result = try await product.purchase()
             switch result {
@@ -154,14 +176,25 @@ final class SubscriptionState: ObservableObject {
                 if case .verified(let transaction) = verification {
                     purchasedProductIDs.insert(transaction.productID)
                     await transaction.finish()
-                    if let expiry = transaction.expirationDate {
-                        scheduleTrialReminder(expiry: expiry)
+                    // Only a free-trial (introductory offer) purchase has
+                    // a "trial ends" moment — a paid subscription would
+                    // get a false "your trial ends tomorrow".
+                    if Self.isIntroductoryOffer(transaction), let expiry = transaction.expirationDate {
+                        scheduleTrialReminder(expiry: expiry, product: product)
                     }
                     await updatePurchasedProducts()
+                    await refreshIntroOfferEligibility()
                     return true
                 }
+                purchaseError = "The App Store couldn't verify this purchase. Try Restore Purchases."
                 return false
-            case .userCancelled, .pending:
+            case .pending:
+                // Ask to Buy / Strong Customer Authentication: the
+                // purchase completes later and arrives through
+                // Transaction.updates.
+                purchaseNotice = "Your purchase is waiting for approval. Pro turns on as soon as it's approved."
+                return false
+            case .userCancelled:
                 return false
             @unknown default:
                 return false
@@ -173,12 +206,31 @@ final class SubscriptionState: ObservableObject {
     }
 
     func restore() async {
+        guard !isRestoring else { return }
         purchaseError = nil
+        purchaseNotice = nil
+        isRestoring = true
+        defer { isRestoring = false }
         do {
             try await AppStore.sync()
             await updatePurchasedProducts()
+            if !isPro {
+                purchaseNotice = "Nothing to restore — no Pro purchase was found for this Apple Account."
+            }
+        } catch StoreKitError.userCancelled {
+            // Cancelled the sign-in sheet: no message.
         } catch {
             purchaseError = error.localizedDescription
+        }
+    }
+
+    /// True when the transaction was bought with the subscription's
+    /// introductory offer (the free trial).
+    private static func isIntroductoryOffer(_ transaction: Transaction) -> Bool {
+        if #available(iOS 17.2, *) {
+            return transaction.offer?.type == .introductory
+        } else {
+            return transaction.offerType == .introductory
         }
     }
 
@@ -195,16 +247,18 @@ final class SubscriptionState: ObservableObject {
 
     /// Local notification 1 day before a trial/subscription ends. On-device
     /// only — no email, no server.
-    func scheduleTrialReminder(expiry: Date) {
+    func scheduleTrialReminder(expiry: Date, product: Product) {
         let center = UNUserNotificationCenter.current()
-        // Hoisted out of the escaping closure below: calling a method
-        // on self inside it is an implicit-self error (Swift 6).
-        let yearlyPrice = displayPrice(for: Self.yearlyID)
+        // The purchased product's own price and billing period (it used
+        // to always say the yearly price, even for monthly).
+        let price = product.displayPrice
+        let period = Self.periodWord(product.subscription?.subscriptionPeriod)
+        let priceText = period.map { "\(price)/\($0)" } ?? price
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent()
             content.title = "Your Status trial ends tomorrow"
-            content.body = "Pro renews at \(yearlyPrice)/year unless you cancel. Cancel anytime in Settings."
+            content.body = "Pro renews at \(priceText) unless you cancel. Cancel anytime in Settings."
             content.sound = .default
             let reminderDate = expiry.addingTimeInterval(-24 * 60 * 60)
             guard reminderDate > Date() else { return }
@@ -215,5 +269,19 @@ final class SubscriptionState: ObservableObject {
                 identifier: "gymtracker.trial-reminder", content: content, trigger: trigger)
             center.add(request)
         }
+    }
+
+    /// "year" / "month" / "week" / "day" (or "3 months") for a period.
+    nonisolated static func periodWord(_ period: Product.SubscriptionPeriod?) -> String? {
+        guard let period else { return nil }
+        let unit: String
+        switch period.unit {
+        case .day: unit = "day"
+        case .week: unit = "week"
+        case .month: unit = "month"
+        case .year: unit = "year"
+        @unknown default: return nil
+        }
+        return period.value == 1 ? unit : "\(period.value) \(unit)s"
     }
 }

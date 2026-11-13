@@ -31,6 +31,11 @@ struct NotesView: View {
     @State private var listOffset: CGFloat = 0
     @State private var addingFolder = false
     @State private var newFolderName = ""
+    /// Long-press a folder: rename it or delete it (its notes are kept).
+    @State private var folderToRename: String?
+    @State private var renameFolderName = ""
+    @State private var folderToDelete: String?
+    @State private var renameFailed = false
     @EnvironmentObject var store: WorkoutStore
     @State private var searchText = ""
     @State private var notePendingDelete: UserNote?
@@ -73,6 +78,11 @@ struct NotesView: View {
             switch sort {
             case .name:
                 let r = a.displayTitle.localizedStandardCompare(b.displayTitle)
+                // Same name: newest first, then id, so equal titles never
+                // trade places while you type elsewhere.
+                if r == .orderedSame {
+                    return a.updatedAt != b.updatedAt ? a.updatedAt > b.updatedAt : a.id.uuidString < b.id.uuidString
+                }
                 return up ? r == .orderedAscending : r == .orderedDescending
             case .edited:
                 return up ? a.updatedAt < b.updatedAt : a.updatedAt > b.updatedAt
@@ -86,7 +96,7 @@ struct NotesView: View {
                     let r = ca.localizedStandardCompare(cb)
                     return up ? r == .orderedAscending : r == .orderedDescending
                 }
-                return a.updatedAt > b.updatedAt
+                return up ? a.updatedAt < b.updatedAt : a.updatedAt > b.updatedAt
             }
         }
     }
@@ -258,6 +268,43 @@ struct NotesView: View {
         } message: {
             Text("Notes you file here show up in this folder.")
         }
+        .alert("Rename Folder", isPresented: Binding(
+            get: { folderToRename != nil },
+            set: { if !$0 { folderToRename = nil } }
+        )) {
+            TextField("Name", text: $renameFolderName)
+            Button("Rename") {
+                guard let old = folderToRename else { return }
+                let ok = withAnimation(AppAnimation.snappy) { store.renameNoteCategory(old, to: renameFolderName) }
+                if ok, openFolder == old {
+                    openFolder = renameFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                renameFailed = !ok
+                folderToRename = nil
+            }
+            Button("Cancel", role: .cancel) { folderToRename = nil }
+        }
+        .alert("Can't use that name", isPresented: $renameFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The name is empty or another folder already has it.")
+        }
+        .confirmationDialog("Delete \(folderToDelete ?? "this folder")?", isPresented: Binding(
+            get: { folderToDelete != nil },
+            set: { if !$0 { folderToDelete = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete Folder", role: .destructive) {
+                guard let name = folderToDelete else { return }
+                withAnimation(AppAnimation.snappy) {
+                    store.deleteNoteCategory(name)
+                    if openFolder == name { openFolder = nil }
+                }
+                folderToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { folderToDelete = nil }
+        } message: {
+            Text("The notes inside are kept and move out of the folder.")
+        }
         .alert("Delete this note?", isPresented: Binding(
             get: { notePendingDelete != nil },
             set: { if !$0 { notePendingDelete = nil } }
@@ -279,7 +326,10 @@ struct NotesView: View {
     private func syncSelection() {
         guard wide else { return }
         if let selectedID, store.userNotes.contains(where: { $0.id == selectedID }) { return }
-        selectedID = firstNoteID
+        // The next note from what's on screen (the open folder / search),
+        // and it doesn't count as picked by the user.
+        selectedID = notesHere.first?.id ?? firstNoteID
+        userPicked = false
     }
 
     private func open(_ id: UUID) {
@@ -359,7 +409,7 @@ struct NotesView: View {
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            if store.userNotes.isEmpty && openFolder == nil {
+            if store.userNotes.isEmpty && openFolder == nil && !searching && store.noteCategories.isEmpty {
                 emptyStateView
             } else if items.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -488,6 +538,18 @@ struct NotesView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            // Pinned is the page's own folder: nothing to rename or delete.
+            if name != Self.pinnedFolder {
+                Button {
+                    renameFolderName = name
+                    folderToRename = name
+                } label: { Label("Rename", systemImage: "pencil") }
+                Button(role: .destructive) { folderToDelete = name } label: {
+                    Label("Delete Folder", systemImage: "trash")
+                }
+            }
+        }
         .accessibilityLabel("\(name) folder, \(itemsText(count))")
     }
 
@@ -524,7 +586,7 @@ struct NotesView: View {
             Text(note.displayTitle)
                 .font(.system(size: max(4, size.width / 8), weight: .bold))
                 .lineLimit(2)
-            Text(note.body)
+            Text(String(note.body.prefix(300)))
                 .font(.system(size: max(3, size.width / 11)))
                 .lineLimit(nil)
         }
@@ -644,6 +706,7 @@ struct NotesView: View {
             Button(role: .destructive) { notePendingDelete = note } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
         }
         .contextMenu { noteActions(note) }
     }
@@ -828,6 +891,9 @@ private struct NoteDetailView: View {
     @State private var newCategoryName = ""
     @FocusState private var focus: Field?
     @Environment(\.pageVisible) private var pageVisible
+    @Environment(\.scenePhase) private var scenePhase
+    /// The note was empty when it opened (a fresh compose).
+    @State private var startedBlank = false
     @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
     /// Pending autosave: typing saves after a short pause, not on every
     /// keystroke (each save re-sorts and writes every note).
@@ -897,6 +963,7 @@ private struct NoteDetailView: View {
         .onAppear {
             guard !loaded, let note else { return }
             loaded = true
+            startedBlank = note.isBlank
             title = note.title
             bodyText = note.body
             // A brand-new note starts with the cursor in the title — only
@@ -909,11 +976,19 @@ private struct NoteDetailView: View {
         }
         .onChange(of: title) { _, _ in scheduleSave() }
         .onChange(of: bodyText) { _, _ in scheduleSave() }
+        // Leaving the page (it stays mounted) or the app: save now and let
+        // go of the keyboard, so typing never lands in a hidden note.
+        .onChange(of: pageVisible) { _, visible in
+            if !visible { focus = nil; flush() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { flush() }
+        }
         .onDisappear {
-            saveTask?.cancel()
-            save()
-            // Leaving a blank note removes it (nothing was written).
-            if let note, note.isBlank { store.deleteUserNote(id: note.id) }
+            flush()
+            // Leaving a note that was blank from the start removes it; a
+            // note you emptied yourself is kept (no silent delete).
+            if let note, note.isBlank, startedBlank { store.deleteUserNote(id: note.id) }
         }
         .alert("Delete this note?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
@@ -977,6 +1052,11 @@ private struct NoteDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Linked to \(title) on \(day.formatted(.dateTime.weekday(.wide).month().day())). Open in Calendar")
         }
+    }
+
+    private func flush() {
+        saveTask?.cancel()
+        save()
     }
 
     private func save() {

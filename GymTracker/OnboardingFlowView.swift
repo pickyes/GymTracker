@@ -17,6 +17,9 @@ struct OnboardingFlowView: View {
     @State private var step: Step = .welcome
     @State private var profile = UserProfile()
     @State private var program: UserProgram?
+    /// Quiz answers live here, not in the quiz view, so Back from the
+    /// plan reveal returns to the quiz with every answer intact.
+    @State private var quizState = SetupQuizState()
 
     var body: some View {
         Group {
@@ -35,6 +38,7 @@ struct OnboardingFlowView: View {
                 .transition(.opacity)
             case .quiz:
                 SetupQuizView(
+                    state: $quizState,
                     onComplete: { finishedProfile in
                         profile = finishedProfile
                         program = ProgramGenerator.generate(
@@ -90,6 +94,12 @@ struct OnboardingFlowView: View {
     /// Paywall closed (X) or purchase succeeded — land on the program.
     private func finish() {
         if let program {
+            // Picked kg for bodyweight in the quiz: show the app in kg.
+            if profile.bodyweightIsKg && profile.bodyweightLb != nil && store.settings.weightUnit != .kg {
+                var settings = store.settings
+                settings.weightUnit = .kg
+                store.updateSettings(settings)
+            }
             store.completeOnboarding(profile: profile, program: program)
         }
     }

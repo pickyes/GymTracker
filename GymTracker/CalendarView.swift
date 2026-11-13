@@ -62,7 +62,11 @@ struct CalendarView: View {
     /// date recorded yet (setup not finished) means the current month
     /// is the floor — never earlier.
     private var earliestMonth: Date {
-        let creation = store.setupDate ?? Date()
+        // min(setup date, oldest session): sessions logged before setup
+        // (sample data, imports) must stay reachable. store.sessions is
+        // kept newest-first, so the oldest is the last.
+        let creation = CalendarDayIndex.trackingStart(setupDate: store.setupDate,
+                                                      oldestSession: store.sessions.last?.date) ?? Date()
         return calendar.date(
             from: calendar.dateComponents([.year, .month], from: creation)
         ) ?? creation
@@ -81,13 +85,17 @@ struct CalendarView: View {
     var embeddedInNavigation: Bool = false
     /// The page grid's width, to see if the legend fits after the month.
     @State private var gridWidth: CGFloat = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        // Sessions by day + the program's plans, worked out ONCE per
+        // render and shared by every cell, the summary and the detail.
+        let index = CalendarDayIndex(store: store)
         if gridOnly {
             VStack(alignment: .leading, spacing: 14) {
                 monthHeader
                 weekdayHeader
-                monthGrid
+                monthGrid(index)
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
                     // The legend sits in the empty days after the month's
                     // last day when there's room (DaRon), else under it.
@@ -102,7 +110,7 @@ struct CalendarView: View {
                         }
                     }
                 if !legendFitsInGrid { legend }
-                if showsMonthSummary { monthSummary.padding(.trailing, summaryTrailingInset) }
+                if showsMonthSummary { monthSummary(index).padding(.trailing, summaryTrailingInset) }
             }
             .onAppear {
                 // Show the month of the chosen day.
@@ -118,7 +126,7 @@ struct CalendarView: View {
                 }
             }
         } else if embeddedInNavigation {
-            calendarContent
+            calendarContent(index)
                 .background(Theme.background)
                 .navigationTitle("Calendar")
                 .navigationBarTitleDisplayMode(.inline)
@@ -133,14 +141,14 @@ struct CalendarView: View {
             // ScrollView's .safeAreaInset (see calendarContent), pinned
             // above the scroll content, so scrollTo("dayDetail",
             // anchor: .top) always lands the title BELOW the header.
-            calendarContent
+            calendarContent(index)
                 .background(Theme.background)
         } else {
             // Sheet fallback (no live call sites): the native toolbar
             // supplies Done + title, and the explicit header stays off.
             NavigationStack {
                 VStack(spacing: 0) {
-                    calendarContent
+                    calendarContent(index)
                 }
                 .background(Theme.background)
                 .navigationTitle("Calendar")
@@ -195,7 +203,7 @@ struct CalendarView: View {
     }
 
     /// The month grid + day detail, shared by both presentations.
-    private var calendarContent: some View {
+    private func calendarContent(_ index: CalendarDayIndex) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 Group {
@@ -204,11 +212,11 @@ struct CalendarView: View {
                             VStack(alignment: .leading, spacing: 16) {
                                 monthHeader
                                 weekdayHeader
-                                monthGrid
+                                monthGrid(index)
                                 legend
                             }
                             .frame(maxWidth: .infinity)
-                            dayDetail(for: selectedDate)
+                            dayDetail(for: selectedDate, index: index)
                                 .id("dayDetail")
                                 .frame(width: 320)
                         }
@@ -216,9 +224,9 @@ struct CalendarView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             monthHeader
                             weekdayHeader
-                            monthGrid
+                            monthGrid(index)
                             legend
-                            dayDetail(for: selectedDate)
+                            dayDetail(for: selectedDate, index: index)
                                 .id("dayDetail")
                         }
                     }
@@ -368,14 +376,16 @@ struct CalendarView: View {
         return cells
     }
 
-    private var monthGrid: some View {
+    private func monthGrid(_ dayIndex: CalendarDayIndex) -> some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
+        let cells = monthCells
         return LazyVGrid(columns: columns, spacing: 6) {
-            ForEach(monthCells.indices, id: \.self) { index in
-                if let date = monthCells[index] {
-                    dayCell(for: date)
+            ForEach(cells.indices, id: \.self) { index in
+                if let date = cells[index] {
+                    dayCell(for: date, index: dayIndex)
                 } else {
                     Color.clear.frame(height: 52)
+                        .accessibilityHidden(true)
                 }
             }
         }
@@ -406,17 +416,13 @@ struct CalendarView: View {
         )
     }
 
-    private func dayCell(for date: Date) -> some View {
+    private func dayCell(for date: Date, index: CalendarDayIndex) -> some View {
         let isToday = calendar.isDateInToday(date)
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
-        let session = session(for: date)
-        let hasPlan = store.programDay(for: date) != nil
-        let isPast = date < calendar.startOfDay(for: Date())
-        // Future planned day; a past planned day with no session is a
-        // miss, not a plan — it gets its own dot so past and future
-        // never read the same.
-        let planned = session == nil && hasPlan && !isPast
-        let missed = session == nil && hasPlan && isPast
+        // One status rule (CalendarDayIndex.status): a past planned day
+        // with no session is a miss only from the day tracking started
+        // — never before setup (same as the month summary).
+        let status = index.status(for: date)
         return Button {
             withAnimation(AppAnimation.snappy) {
                 selectedDate = calendar.startOfDay(for: date)
@@ -426,6 +432,10 @@ struct CalendarView: View {
                 Text("\(calendar.component(.day, from: date))")
                     .font(.body.weight(isToday ? .bold : .regular))
                     .foregroundStyle(isToday ? Color.accentColor : Theme.text)
+                    // Large Dynamic Type: the number shrinks to its circle
+                    // instead of truncating to "…".
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                     .frame(width: 34, height: 34)
                     .background(
                         isSelected
@@ -441,9 +451,7 @@ struct CalendarView: View {
                 // logged that day, accent = one is planned, orange = one
                 // was planned and missed. Rest days get no dot.
                 Circle()
-                    .fill(session != nil ? Theme.vividGreen
-                          : (missed ? Theme.vividOrange
-                          : (planned ? Color.accentColor : Color.clear)))
+                    .fill(Self.dotColor(status))
                     .frame(width: 6, height: 6)
             }
             .frame(maxWidth: .infinity)
@@ -451,42 +459,65 @@ struct CalendarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(dayAccessibilityLabel(for: date, session: session, planned: planned, missed: missed))
+        .accessibilityLabel(dayAccessibilityLabel(for: date, status: status, isToday: isToday))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func dayAccessibilityLabel(for date: Date, session: SessionLog?, planned: Bool, missed: Bool) -> String {
-        let day = date.formatted(.dateTime.weekday(.wide).month().day())
-        if session != nil { return "\(day), workout done" }
-        if missed { return "\(day), workout missed" }
-        if planned { return "\(day), workout planned" }
-        return "\(day), rest day"
+    private static func dotColor(_ status: CalendarDayStatus) -> Color {
+        switch status {
+        case .done: return Theme.vividGreen
+        case .missed: return Theme.vividOrange
+        case .planned: return Color.accentColor
+        case .beforeStart, .rest: return Color.clear
+        }
+    }
+
+    private func dayAccessibilityLabel(for date: Date, status: CalendarDayStatus, isToday: Bool) -> String {
+        let day = (isToday ? "Today, " : "") + date.formatted(.dateTime.weekday(.wide).month().day())
+        switch status {
+        case .done: return "\(day), workout done"
+        case .missed: return "\(day), workout missed"
+        case .planned: return "\(day), workout planned"
+        case .beforeStart: return "\(day), before you started"
+        case .rest: return "\(day), rest day"
+        }
     }
 
     /// The displayed month at a glance: workouts done, planned days
     /// missed, planned days still ahead (from today), and the streak of
     /// weeks with at least one workout.
-    private var monthSummary: some View {
-        let days = monthCells.compactMap { $0 }
-        let today = calendar.startOfDay(for: Date())
-        // Days before you set the app up can't be missed (red team #3).
-        let start = calendar.startOfDay(for: store.setupDate ?? .distantPast)
-        let sessionDays = Set(store.sessions.map { calendar.startOfDay(for: $0.date) })
+    private func monthSummary(_ index: CalendarDayIndex) -> some View {
         var done = 0, missed = 0, planned = 0
-        for day in days {
-            if sessionDays.contains(calendar.startOfDay(for: day)) { done += 1; continue }
-            guard store.programDay(for: day) != nil else { continue }
-            if day >= today { planned += 1 } else if day >= start { missed += 1 }
+        // Same status rule as the dots: days before tracking started
+        // can't be missed (red team #3).
+        for day in monthCells.compactMap({ $0 }) {
+            switch index.status(for: day) {
+            case .done: done += 1
+            case .missed: missed += 1
+            case .planned: planned += 1
+            case .beforeStart, .rest: break
+            }
         }
         let streak = store.dayStreak
+        let stats = [
+            ("\(done)", "Done", Theme.vividGreen),
+            ("\(missed)", "Missed", Theme.vividOrange),
+            ("\(planned)", "Planned", Color.accentColor),
+            (store.dayText(streak), "Streak", Theme.text),
+        ]
         return VStack(alignment: .leading, spacing: 8) {
             Text(displayedMonth, format: .dateTime.month(.wide))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
-            HStack(spacing: 0) {
-                summaryStat("\(done)", "Done", Theme.vividGreen)
-                summaryStat("\(missed)", "Missed", Theme.vividOrange)
-                summaryStat("\(planned)", "Planned", Color.accentColor)
-                summaryStat(store.dayText(streak), "Streak", Theme.text)
+            if dynamicTypeSize.isAccessibilitySize {
+                // Accessibility sizes: two per row so nothing truncates.
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(stats.indices, id: \.self) { i in summaryStat(stats[i].0, stats[i].1, stats[i].2) }
+                }
+            } else {
+                HStack(spacing: 0) {
+                    ForEach(stats.indices, id: \.self) { i in summaryStat(stats[i].0, stats[i].1, stats[i].2) }
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -501,9 +532,14 @@ struct CalendarView: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(color)
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(label)
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
     }
@@ -517,7 +553,10 @@ struct CalendarView: View {
     /// Room after the last day: the legend on one line needs about 330pt,
     /// in two rows about 170pt. Otherwise it goes under the grid.
     private var legendFitsInGrid: Bool {
-        gridOnly && gridWidth * CGFloat(trailingBlanks) / 7 >= 170
+        // Accessibility text sizes never fit in the blank cells: the
+        // legend falls back below the grid.
+        gridOnly && !dynamicTypeSize.isAccessibilitySize
+            && gridWidth * CGFloat(trailingBlanks) / 7 >= 170
     }
 
     /// The legend for the grid's last row: one line, or two when narrow.
@@ -588,12 +627,13 @@ struct CalendarView: View {
     // MARK: - Day detail
 
     @ViewBuilder
-    private func dayDetail(for date: Date) -> some View {
+    private func dayDetail(for date: Date, index: CalendarDayIndex) -> some View {
         // D14 (2026-11-10): ALL sessions that day, newest first — the
         // old single-session lookup hid Nov 9's second session entirely.
-        let sessions = sessions(for: date)
-        let plan = sessions.isEmpty ? store.programDay(for: date) : nil
-        let isPast = date < calendar.startOfDay(for: Date())
+        let sessions = index.sessions(on: date)
+        let status = index.status(for: date)
+        // Before tracking started there's no plan to show (or miss).
+        let plan = (status == .planned || status == .missed) ? index.plan(for: date) : nil
         // Notes for this day: addUserNote stamps createdAt from the typed
         // date, so a same-day match is exactly this day's notes.
         let dayNotes = store.userNotes.filter { Calendar.current.isDate($0.createdAt, inSameDayAs: date) }
@@ -602,14 +642,12 @@ struct CalendarView: View {
                 Text(date, format: .dateTime.weekday(.wide).month().day())
                     .font(.headline)
                 Spacer()
-                if !sessions.isEmpty {
-                    statusChip("Done", color: Theme.vividGreen)
-                } else if plan != nil && !isPast {
-                    statusChip("Planned", color: Color.accentColor)
-                } else if plan != nil {
-                    statusChip("Missed", color: Theme.vividOrange)
-                } else {
-                    statusChip("Rest day", color: Theme.tertiaryText)
+                switch status {
+                case .done: statusChip("Done", color: Theme.vividGreen)
+                case .planned: statusChip("Planned", color: Color.accentColor)
+                case .missed: statusChip("Missed", color: Theme.vividOrange)
+                case .beforeStart: statusChip("Before you started", color: Theme.tertiaryText)
+                case .rest: statusChip("Rest day", color: Theme.tertiaryText)
                 }
             }
 
@@ -745,18 +783,83 @@ struct CalendarView: View {
         }
         .padding(.vertical, 2)
     }
+}
 
-    // MARK: - Store lookups
+// MARK: - Shared day rules (calendar grid, History's chosen day, heatmap)
 
-    private func session(for date: Date) -> SessionLog? {
-        store.sessions.first { calendar.isDate($0.date, inSameDayAs: date) }
+/// What a calendar day is, by the ONE rule every screen uses (the
+/// calendar dot, the day-detail chip, VoiceOver, the month summary,
+/// History's chosen-day rows and the heatmap):
+/// - done: at least one saved session that day (any saved session
+///   counts as trained — the heatmap uses this too);
+/// - planned: no session, the program plans a workout, today or later;
+/// - missed: no session, planned, before today and on/after the day
+///   tracking started;
+/// - beforeStart: planned but before tracking started — never "missed";
+/// - rest: nothing planned, nothing logged.
+enum CalendarDayStatus: Equatable {
+    case done, planned, missed, beforeStart, rest
+}
+
+/// Built once per render: sessions bucketed by day (no per-cell linear
+/// scans) and the program's day plans looked up once (the adapted
+/// program is rebuilt on every `store.programDay(for:)` call).
+struct CalendarDayIndex {
+    let calendar: Calendar
+    let today: Date
+    /// The first day a planned workout can count as missed: the setup
+    /// date, pulled back to the oldest saved session (sample data or an
+    /// import can predate setup). No setup and no sessions = today.
+    let trackingStart: Date
+    private let sessionsByDay: [Date: [SessionLog]]
+    private let plansByKey: [String: DayPlan]
+
+    init(store: WorkoutStore, calendar: Calendar = .current) {
+        self.calendar = calendar
+        let today = calendar.startOfDay(for: Date())
+        self.today = today
+        var byDay: [Date: [SessionLog]] = [:]
+        var oldest: Date?
+        // store.sessions is newest-first, so each day's list stays newest-first.
+        for session in store.sessions {
+            byDay[calendar.startOfDay(for: session.date), default: []].append(session)
+            if oldest == nil || session.date < oldest! { oldest = session.date }
+        }
+        sessionsByDay = byDay
+        trackingStart = Self.trackingStart(setupDate: store.setupDate, oldestSession: oldest, calendar: calendar) ?? today
+        var plans: [String: DayPlan] = [:]
+        if let program = store.adaptedActiveProgram {
+            for day in program.days where plans[day.key] == nil { plans[day.key] = day }
+        }
+        plansByKey = plans
     }
 
-    /// Every session logged on a day, newest first (store.sessions is
-    /// kept newest-first). D14 (2026-11-10): dayDetail renders all of
-    /// these; session(for:) stays ONLY for the day-cell dot check, so
-    /// the two lookups can never drift apart.
-    private func sessions(for date: Date) -> [SessionLog] {
-        store.sessions.filter { calendar.isDate($0.date, inSameDayAs: date) }
+    /// min(setupDate, oldest session), start of day; nil when neither exists.
+    static func trackingStart(setupDate: Date?, oldestSession: Date?, calendar: Calendar = .current) -> Date? {
+        let candidates = [setupDate, oldestSession].compactMap { $0 }
+        return candidates.min().map { calendar.startOfDay(for: $0) }
+    }
+
+    /// Every session logged on a day, newest first.
+    func sessions(on date: Date) -> [SessionLog] {
+        sessionsByDay[calendar.startOfDay(for: date)] ?? []
+    }
+
+    func hasSession(on date: Date) -> Bool {
+        sessionsByDay[calendar.startOfDay(for: date)] != nil
+    }
+
+    /// Same as `store.programDay(for:)`, without rebuilding the program.
+    func plan(for date: Date) -> DayPlan? {
+        guard let key = Program.dayKey(for: date) else { return nil }
+        return plansByKey[key]
+    }
+
+    func status(for date: Date) -> CalendarDayStatus {
+        let day = calendar.startOfDay(for: date)
+        if sessionsByDay[day] != nil { return .done }
+        guard plan(for: day) != nil else { return .rest }
+        if day >= today { return .planned }
+        return day >= trackingStart ? .missed : .beforeStart
     }
 }

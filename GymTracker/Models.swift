@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 
 // MARK: - Log models (stored on-device in UserDefaults)
 
@@ -33,7 +34,11 @@ enum SetKind: String, Codable, CaseIterable, Equatable {
     }
 }
 
-struct SetLog: Codable, Equatable {
+struct SetLog: Codable, Equatable, Identifiable {
+    /// Stable row identity (set rows were keyed by index, so deleting a
+    /// focused row re-bound its field to the next set or crashed).
+    /// Older saves have no id: a fresh one is made on decode.
+    var id: UUID = UUID()
     var weightLb: Double?
     var reps: Int
     var done: Bool
@@ -46,9 +51,10 @@ struct SetLog: Codable, Equatable {
         self.kind = kind
     }
 
-    // Custom decoder: older saved sessions have no `kind` key — default to .working.
+    // Custom decoder: older saved sessions have no `kind` / `id` key.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         weightLb = try container.decodeIfPresent(Double.self, forKey: .weightLb)
         reps = try container.decode(Int.self, forKey: .reps)
         done = try container.decode(Bool.self, forKey: .done)
@@ -56,7 +62,7 @@ struct SetLog: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case weightLb, reps, done, kind
+        case id, weightLb, reps, done, kind
     }
 }
 
@@ -105,13 +111,41 @@ struct UserNote: Identifiable, Codable, Equatable {
     /// WorkoutStore.noteCategories. (DaRon 22:42.)
     var category: String? = nil
 
+    enum CodingKeys: String, CodingKey {
+        case id, title, body, createdAt, updatedAt, workoutTitle, isPinned, category
+    }
+
+    init(id: UUID, title: String, body: String, createdAt: Date, updatedAt: Date,
+         workoutTitle: String? = nil, isPinned: Bool = false, category: String? = nil) {
+        self.id = id; self.title = title; self.body = body
+        self.createdAt = createdAt; self.updatedAt = updatedAt
+        self.workoutTitle = workoutTitle; self.isPinned = isPinned; self.category = category
+    }
+
+    /// Every field but the id is optional on load: a note saved before a
+    /// field existed (isPinned) threw, and the whole list loaded empty
+    /// and was then overwritten (red team, data loss).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        let created = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        createdAt = created
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? created
+        workoutTitle = try c.decodeIfPresent(String.self, forKey: .workoutTitle)
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        category = try c.decodeIfPresent(String.self, forKey: .category)
+    }
+
     /// Display title: the title as written, or the first line of the
     /// body when the title is blank (a note is never untitled on screen).
     var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
-        let firstLine = body.components(separatedBy: .newlines).first ?? ""
-        let line = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        // First line only (splitting a long body ran on every sort compare).
+        let line = String(body.drop(while: \.isWhitespace).prefix(while: { !$0.isNewline }))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return line.isEmpty ? "New Note" : line
     }
 
@@ -188,6 +222,16 @@ struct DraftSession: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case dayKey, date, logs, finisherChecks, templates, sessionMod, notes, noteTimes, sourcePlan
     }
+}
+
+/// The user's own per-exercise settings from Today → Options, kept by
+/// exercise id in the store (they used to live only on the draft's
+/// template copy and were lost when the day's draft was rebuilt).
+struct ExerciseOverride: Codable, Equatable {
+    var restSeconds: TimeInterval?
+    var unitOverride: WeightUnit?
+    var note: String?
+    var isEmpty: Bool { restSeconds == nil && unitOverride == nil && (note ?? "").isEmpty }
 }
 
 /// One-off per-workout overrides (Fitbod "Training Session Mods" pattern).
@@ -298,7 +342,9 @@ enum WeightUnit: String, Codable, CaseIterable, Equatable {
         guard let weightLb, weightLb > 0 else { return nil }
         switch self {
         case .lb: return weightLb
-        case .kg: return (weightLb * 0.45359237 * 2).rounded() / 2
+        // Nearest 0.25 kg: the smallest plates, and what a kg
+        // progression bump (1.25 kg) lands on.
+        case .kg: return (weightLb * 0.45359237 * 4).rounded() / 4
         }
     }
 
@@ -1298,6 +1344,15 @@ func weekStartDate(for date: Date) -> Date {
     ) ?? date
 }
 
+/// The weight a logged exercise was worked at: the heaviest done
+/// non-warm-up set; if nothing was checked off, the heaviest logged
+/// weight. The progression base for the store and the Siri intents.
+func lastWorkingWeight(in log: ExerciseLog) -> Double? {
+    let working = log.sets.filter { $0.done && $0.kind != .warmup }.compactMap(\.weightLb).filter { $0 > 0 }
+    if let best = working.max() { return best }
+    return log.sets.compactMap(\.weightLb).filter { $0 > 0 }.max()
+}
+
 /// Total load moved by one done working set. Per-hand dumbbell loads
 /// are doubled: a pair of 40s × 10 moves 800 lb, the same as a
 /// 80 lb barbell × 10 — counting the per-hand 400 would make DB
@@ -1337,7 +1392,8 @@ func formattedVolumeLb(_ volume: Double) -> String {
 /// verbatim via "%g" — every user-visible weight formatter routes
 /// through here so the decimals can never resurface elsewhere.
 func roundedWeightText(_ value: Double) -> String {
-    let rounded = (value * 10).rounded() / 10
+    // Two decimals, so 1.25 / 0.25 kg read as typed ("%g" drops trailing zeros).
+    let rounded = (value * 100).rounded() / 100
     if rounded == rounded.rounded() { return String(Int(rounded)) }
     return String(format: "%g", rounded)
 }
@@ -1477,7 +1533,9 @@ extension MuscleGroup {
 // MARK: - Store
 
 final class WorkoutStore: ObservableObject {
-    @Published var sessions: [SessionLog] = []
+    @Published var sessions: [SessionLog] = [] {
+        didSet { dayStreakCache = nil }
+    }
     /// User notes for the Notes page: workout notes saved from the
     /// per-exercise note field on Today, plus free notes written on
     /// the Notes page. On-device only.
@@ -1491,9 +1549,46 @@ final class WorkoutStore: ObservableObject {
     // MARK: - Onboarding + program (on-device only)
 
     /// The user's setup answers. Nil until they finish the quiz (or skip it).
-    @Published var profile: UserProfile?
+    @Published var profile: UserProfile? {
+        didSet { invalidateProgramCaches() }
+    }
     /// The program Today renders: the user's active program.
-    @Published var activeProgram: UserProgram?
+    @Published var activeProgram: UserProgram? {
+        didSet {
+            invalidateProgramCaches()
+            // A different program from now on: days before today are
+            // never judged by it (see `activeProgramSince`).
+            if !isLoadingState, oldValue?.id != activeProgram?.id {
+                activeProgramSince = activeProgram == nil ? nil : Date()
+                persistActiveProgramSince()
+            }
+        }
+    }
+    /// When the current active program became active. Days before this
+    /// are never called "missed" by it (it wasn't the plan then). Nil for
+    /// a program activated before this was recorded — no limit.
+    @Published private(set) var activeProgramSince: Date?
+    private let activeProgramSinceKey = "gymtracker.activeProgramSince.v1"
+    /// True only while init loads saved state (loading the program must
+    /// not stamp a new activation date).
+    private var isLoadingState = true
+
+    private func persistActiveProgramSince() {
+        if let activeProgramSince {
+            SharedDefaults.store.set(activeProgramSince.timeIntervalSince1970, forKey: activeProgramSinceKey)
+        } else {
+            SharedDefaults.store.removeObject(forKey: activeProgramSinceKey)
+        }
+    }
+
+    // Caches for values read per calendar cell / per render.
+    private var adaptedProgramCache: (valid: Bool, value: UserProgram?) = (false, nil)
+    private var dayStreakCache: (day: Date, value: Int)?
+
+    private func invalidateProgramCaches() {
+        adaptedProgramCache = (false, nil)
+        dayStreakCache = nil
+    }
     /// The program generated from the user's quiz, kept so they can switch
     /// back to it.
     @Published var generatedProgram: UserProgram?
@@ -1514,7 +1609,9 @@ final class WorkoutStore: ObservableObject {
     /// when onboarding completes, or at adoption for a returning user
     /// from before onboarding existed. The calendar never goes back
     /// before this month. Nil only until setup finishes.
-    @Published var setupDate: Date?
+    @Published var setupDate: Date? {
+        didSet { dayStreakCache = nil }
+    }
     /// The one-time privacy screen. Once seen it never appears again.
     @Published var hasSeenPrivacy: Bool = false
 
@@ -1557,11 +1654,23 @@ final class WorkoutStore: ObservableObject {
     /// until he marks an injury, and marking one never rewrites the
     /// preset. Removing a mark restores the original exercises.
     var adaptedActiveProgram: UserProgram? {
-        guard let program = activeProgram else { return nil }
-        guard let profile else { return program }
-        return InjuryAdaptation.adapt(program: program, profile: profile,
-                                      customExercises: customExercises,
-                                      equipment: effectiveEquipment)
+        // Cached: read for every calendar cell and every streak day.
+        // Invalidated when the program, profile, customs or equipment change.
+        if adaptedProgramCache.valid { return adaptedProgramCache.value }
+        let value: UserProgram?
+        if let program = activeProgram {
+            if let profile {
+                value = InjuryAdaptation.adapt(program: program, profile: profile,
+                                               customExercises: customExercises,
+                                               equipment: effectiveEquipment)
+            } else {
+                value = program
+            }
+        } else {
+            value = nil
+        }
+        adaptedProgramCache = (true, value)
+        return value
     }
 
     /// One-line swap note for one exercise in the adapted program, for
@@ -1614,10 +1723,21 @@ final class WorkoutStore: ObservableObject {
 
     // MARK: - Customization (on-device only)
 
-    @Published var customExercises: [CustomExercise] = []
+    @Published var customExercises: [CustomExercise] = [] {
+        didSet { invalidateProgramCaches() }
+    }
     @Published var exercisePreferences: [String: ExercisePreference] = [:]
-    @Published var gymProfiles: [GymProfile] = []
-    @Published var activeGymProfileID: String?
+    @Published var gymProfiles: [GymProfile] = [] {
+        didSet { invalidateProgramCaches() }
+    }
+    @Published var activeGymProfileID: String? {
+        didSet { invalidateProgramCaches() }
+    }
+    /// Per-exercise settings the user made on Today (routine note, rest
+    /// override, unit override), kept by exercise id so they apply every
+    /// time the exercise appears — not just in today's draft.
+    @Published private(set) var exerciseOverrides: [String: ExerciseOverride] = [:]
+    private let exerciseOverridesKey = "gymtracker.exerciseOverrides.v1"
     @Published var settings: AppSettings = .default
 
     /// All programs the user can switch between: generated + extras.
@@ -1683,7 +1803,11 @@ final class WorkoutStore: ObservableObject {
         didSet { persistDraft() }
     }
     @Published var draftLogs: [String: [SetLog]] = [:] {
-        didSet { persistDraft() }
+        didSet {
+            persistDraft()
+            // The lock screen's set boxes follow a set checked in the app.
+            if isRestActive, oldValue != draftLogs { syncRestLiveActivity() }
+        }
     }
     @Published var draftFinisherChecks: [Bool] = [] {
         didSet { persistDraft() }
@@ -1724,7 +1848,32 @@ final class WorkoutStore: ObservableObject {
             // start, pause, resume, stop and expiry all flow through here
             // (expiry and the Siri intent set this directly).
             syncRestLiveActivity()
+            // The end-of-rest alert when the app is in the background
+            // (the in-app chime can't play there). Rescheduled on every
+            // change: pause/stop/finish clear it, adjust moves it.
+            if oldValue != restEndsAt { scheduleRestEndNotification() }
         }
+    }
+
+    static let restEndNotificationID = "gymtracker.restEnd"
+
+    /// Schedules (or cancels) the local notification for the end of the
+    /// running rest. Only posts when notifications are already allowed —
+    /// never asks for permission from here.
+    private func scheduleRestEndNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.restEndNotificationID])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.restEndNotificationID])
+        guard let endsAt = restEndsAt else { return }
+        let interval = endsAt.timeIntervalSinceNow
+        guard interval > 1 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Rest's over"
+        content.body = restExerciseName == "Rest" ? "Time for your next set." : "Time for your next set of \(restExerciseName)."
+        if settings.restSoundEnabled { content.sound = .default }
+        content.interruptionLevel = .timeSensitive
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        center.add(UNNotificationRequest(identifier: Self.restEndNotificationID, content: content, trigger: trigger))
     }
     /// The exercise this rest belongs to. Persisted like `restEndsAt` so
     /// a rest (and its Live Activity label) survives an app restart — and
@@ -1850,7 +1999,9 @@ final class WorkoutStore: ObservableObject {
         loadCustomization()
         adoptReturningUserIfNeeded()
         ensureSetupDate()
+        reconcileSetupDateWithHistory()
         loadRestTimer()
+        isLoadingState = false
         // Restore the Live Activity if a rest was running/paused when the
         // app closed (loadRestTimer restored it above).
         syncRestLiveActivity()
@@ -1873,6 +2024,29 @@ final class WorkoutStore: ObservableObject {
         sessions.append(session)
         sessions.sort { $0.date > $1.date }
         persistSessions()
+        // A workout logged: no "you missed a day" nudge for it.
+        ReminderScheduler.cancelMissedDayNudge()
+    }
+
+    /// The exercises a finished draft saves: only exercises with at
+    /// least one done set, and only their done sets (an unchecked set
+    /// was never lifted — it must not count in History, volume or the
+    /// progression gate). Shared by Today and the Finish Workout intent.
+    static func sessionExercises(templates: [ExerciseTemplate], logs: [String: [SetLog]]) -> [ExerciseLog] {
+        templates.compactMap { template in
+            let done = (logs[template.id] ?? []).filter(\.done)
+            guard !done.isEmpty else { return nil }
+            return ExerciseLog(exerciseId: template.id, name: template.name, isPair: template.isPair,
+                               sets: done, unitOverride: template.unitOverride)
+        }
+    }
+
+    /// The date a finished draft is saved under: the draft's own day. A
+    /// workout that runs past midnight (or is finished the next morning)
+    /// belongs to the day it was started, not the day it was saved.
+    func draftSessionDate(now: Date = Date()) -> Date {
+        guard let draftDate, !Calendar.current.isDate(draftDate, inSameDayAs: now) else { return now }
+        return draftDate
     }
 
     /// Delete a saved session (P1-5). The caller confirms before calling
@@ -2019,8 +2193,8 @@ final class WorkoutStore: ObservableObject {
         // during the edit.
         updated.isPinned = isPinned
         updated.updatedAt = Date()
-        userNotes[index] = updated
-        userNotes.sort { $0.updatedAt > $1.updatedAt }
+        userNotes.remove(at: index)
+        userNotes.insert(updated, at: 0)
         persistUserNotes()
     }
 
@@ -2046,7 +2220,9 @@ final class WorkoutStore: ObservableObject {
         userNotes[index].title = title
         userNotes[index].body = body
         userNotes[index].updatedAt = Date()
-        userNotes.sort { $0.updatedAt > $1.updatedAt }
+        // Newest edit first: move it to the top (no full re-sort per
+        // keystroke — the Notes page sorts what it shows).
+        if index != 0 { userNotes.insert(userNotes.remove(at: index), at: 0) }
         persistUserNotes()
     }
 
@@ -2093,9 +2269,95 @@ final class WorkoutStore: ObservableObject {
         SharedDefaults.store.set(noteCategories, forKey: noteCategoriesKey)
     }
 
+    /// Rename a note folder. Trims the name; rejects an empty name,
+    /// "Pinned" (the Notes page's own folder), and a case-insensitive
+    /// duplicate of another folder. Every note filed under the old name
+    /// moves with it. Returns false when the rename was rejected.
+    @discardableResult
+    func renameNoteCategory(_ old: String, to new: String) -> Bool {
+        let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.localizedCaseInsensitiveCompare("Pinned") != .orderedSame,
+              let index = noteCategories.firstIndex(of: old) else { return false }
+        if trimmed == old { return true }
+        let clash = noteCategories.enumerated().contains { i, name in
+            i != index && name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
+        }
+        guard !clash else { return false }
+        noteCategories[index] = trimmed
+        for i in userNotes.indices where userNotes[i].category == old {
+            userNotes[i].category = trimmed
+        }
+        persistNoteCategories()
+        persistUserNotes()
+        return true
+    }
+
+    /// Delete a note folder. Its notes are kept and move to the top
+    /// level (category nil).
+    func deleteNoteCategory(_ name: String) {
+        noteCategories.removeAll { $0 == name }
+        for i in userNotes.indices where userNotes[i].category == name {
+            userNotes[i].category = nil
+        }
+        persistNoteCategories()
+        persistUserNotes()
+    }
+
+    /// Delete notes left completely blank (a compose that was never
+    /// typed into — the app was closed before the Notes page could
+    /// remove it). `except` keeps one note (the one open right now).
+    func sweepBlankNotes(except keep: UUID? = nil) {
+        let before = userNotes.count
+        userNotes.removeAll { note in
+            note.id != keep
+                && note.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if userNotes.count != before { persistUserNotes() }
+    }
+
+    /// Notes live in a file in the App Group container (they used to
+    /// be one UserDefaults blob, rewritten on the main thread on every
+    /// keystroke). Written off the main thread, in order.
+    static var userNotesFileURL: URL {
+        let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedDefaults.suiteName)
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("user-notes.json")
+    }
+    private static let notesWriteQueue = DispatchQueue(label: "gymtracker.notes.write", qos: .utility)
+
     private func persistUserNotes() {
-        if let data = try? JSONEncoder().encode(userNotes) {
-            SharedDefaults.store.set(data, forKey: userNotesKey)
+        let snapshot = userNotes
+        let url = Self.userNotesFileURL
+        Self.notesWriteQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Load notes from the file; on the first launch of this build, read
+    /// the old UserDefaults blob once, write it to the file, then drop it.
+    private func loadUserNotes() {
+        let url = Self.userNotesFileURL
+        if let data = try? Data(contentsOf: url),
+           let decoded = SafeDecode.array(UserNote.self, from: data, key: userNotesKey) {
+            userNotes = decoded.sorted { $0.updatedAt > $1.updatedAt }
+            return
+        }
+        guard let data = SharedDefaults.store.data(forKey: userNotesKey),
+              let decoded = SafeDecode.array(UserNote.self, from: data, key: userNotesKey) else { return }
+        userNotes = decoded.sorted { $0.updatedAt > $1.updatedAt }
+        // Migrate synchronously so the old copy is only removed once the
+        // file really holds the notes.
+        if let encoded = try? JSONEncoder().encode(userNotes) {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            if (try? encoded.write(to: url, options: .atomic)) != nil {
+                SharedDefaults.store.removeObject(forKey: userNotesKey)
+            }
         }
     }
 
@@ -2111,8 +2373,12 @@ final class WorkoutStore: ObservableObject {
         return nil
     }
 
+    /// The weight the last session's work was done at: the heaviest
+    /// done working set (not the first set, which is often a warm-up or a
+    /// ramp-up). Falls back to the heaviest logged weight when nothing
+    /// was checked off.
     func lastWeight(for template: ExerciseTemplate) -> Double? {
-        lastLog(for: template.id)?.sets.compactMap { $0.weightLb }.first
+        lastLog(for: template.id).flatMap(lastWorkingWeight(in:))
     }
 
     /// Best (heaviest) working set ever logged for an exercise.
@@ -2181,7 +2447,9 @@ final class WorkoutStore: ObservableObject {
 
     /// True when a log finished every working set at the top of the range.
     private func hitTopReps(_ log: ExerciseLog, template: ExerciseTemplate) -> Bool {
-        let working = log.sets.filter { $0.kind != .warmup }
+        // Working sets only: a drop or failure set at lower reps must not
+        // block the bump (nor a warm-up count toward it).
+        let working = log.sets.filter { $0.kind == .working }
         return !working.isEmpty && working.allSatisfy { $0.done && $0.reps >= template.topReps }
     }
 
@@ -2266,7 +2534,17 @@ final class WorkoutStore: ObservableObject {
             return (baseWeight, template.topReps)
         }
         let percent = lib.isCompound ? 0.05 : 0.025
-        let increment: Double = (lib.equipment.contains(.machine) || lib.equipment.contains(.cable)) ? 5 : 2.5
+        let isStack = lib.equipment.contains(.machine) || lib.equipment.contains(.cable)
+        if unit(for: template) == .kg {
+            // kg users load kg plates: bump in kg (1.25 kg per dumbbell /
+            // plate pair, 2.5 kg stack), so the target is a loadable kg
+            // number, not a converted lb one.
+            let increment: Double = isStack ? 2.5 : 1.25
+            let kg = weight * 0.45359237 * (1 + percent)
+            let bumpedKg = ((kg - 1e-9) / increment).rounded(.up) * increment
+            return (bumpedKg / 0.45359237, template.bottomReps)
+        }
+        let increment: Double = isStack ? 5 : 2.5
         let raw = weight * (1 + percent)
         // Round UP to the next loadable increment (the 1e-9 guard keeps an
         // exact multiple from floating-point noise pushing it a step high).
@@ -2433,16 +2711,34 @@ final class WorkoutStore: ObservableObject {
     /// workout you skipped ends the streak. Today only adds once you've
     /// trained (it never breaks the streak before the day is over).
     /// Days before setup don't count.
+    /// With no program (or one with no days) only trained days count —
+    /// every day would otherwise read as a "rest day" and keep the streak.
+    /// Before the current program became active only trained days count
+    /// too (that program wasn't the plan then). Cached per day; reset
+    /// when sessions or the program change.
     var dayStreak: Int {
         let cal = Calendar.current
-        let trained = Set(sessions.map { cal.startOfDay(for: $0.date) })
+        let today = cal.startOfDay(for: Date())
+        if let cache = dayStreakCache, cache.day == today { return cache.value }
+        let value = computeDayStreak()
+        dayStreakCache = (today, value)
+        return value
+    }
+
+    private func computeDayStreak() -> Int {
+        let cal = Calendar.current
+        let trained = Set(sessions.filter { $0.exercises.contains { $0.sets.contains(where: \.done) } }
+            .map { cal.startOfDay(for: $0.date) })
         let start = setupDate.map { cal.startOfDay(for: $0) } ?? trained.min() ?? cal.startOfDay(for: Date())
+        let hasProgram = !(adaptedActiveProgram?.days.isEmpty ?? true)
+        let programStart = activeProgramSince.map { cal.startOfDay(for: $0) }
         var day = cal.startOfDay(for: Date())
         var streak = 0
         if trained.contains(day) { streak += 1 }
         day = cal.date(byAdding: .day, value: -1, to: day) ?? day
         while day >= start {
-            if trained.contains(day) || programDay(for: day) == nil {
+            let judgedByProgram = hasProgram && (programStart.map { day >= $0 } ?? true)
+            if trained.contains(day) || (judgedByProgram && programDay(for: day) == nil) {
                 streak += 1
             } else {
                 break
@@ -2616,7 +2912,13 @@ final class WorkoutStore: ObservableObject {
     /// resolving the pending result. First-time onboarding is unaffected
     /// — there is no active program to protect yet.
     func completeOnboarding(profile: UserProfile, program: UserProgram, keepCurrentProgram: Bool = false) {
-        if !keepCurrentProgram, isPresetActive, program.id != Program.daronPreset.id {
+        // A retake (preRetakeProgram set) with a program in use asks
+        // keep/switch the same way the preset does, instead of silently
+        // replacing the program the user was on.
+        let isRetakeWithProgram = preRetakeProgram != nil && activeProgram != nil
+            && program.id != activeProgram?.id
+        let presetGate = isPresetActive && program.id != Program.daronPreset.id
+        if !keepCurrentProgram, presetGate || isRetakeWithProgram {
             pendingOnboarding = PendingOnboarding(profile: profile, program: program)
             hasCompletedOnboarding = true
             stampSetupDate()
@@ -2640,6 +2942,16 @@ final class WorkoutStore: ObservableObject {
     /// rebuilds it).
     func cancelPendingOnboarding() {
         pendingOnboarding = nil
+        clearPreRetakeProgram()
+    }
+
+    /// Back out of a retake of setup: the app returns as it was, with the
+    /// same profile and program (nothing from the half-done quiz applies).
+    func cancelRetake() {
+        pendingOnboarding = nil
+        clearPreRetakeProgram()
+        hasCompletedOnboarding = true
+        persistOnboarding()
     }
 
     /// The actual onboarding apply step, shared by `completeOnboarding`
@@ -2674,20 +2986,14 @@ final class WorkoutStore: ObservableObject {
     }
 
     /// Update the injuries marked on the body diagram (Profile → Body &
-    /// injuries). Persists the profile and regenerates the generated
-    /// program so the new swaps apply. If the generated program is the
-    /// active one it is swapped in place; DaRon's preset is never touched.
+    /// injuries). Only the profile changes: the swaps are applied live by
+    /// `adaptedActiveProgram` (InjuryAdaptation), so regenerating the
+    /// program here threw away the user's edits to it for nothing.
     func updateInjuries(parts: Set<BodyPart>, otherText: String) {
         guard var profile else { return }
         profile.injuredParts = parts
         profile.otherLimitText = otherText
         self.profile = profile
-        let regenerated = ProgramGenerator.generate(
-            profile: profile, customExercises: customExercises,
-            preferences: exercisePreferences, equipment: effectiveEquipment)
-        let wasGeneratedActive = activeProgram?.id == generatedProgram?.id
-        generatedProgram = regenerated
-        if wasGeneratedActive { activeProgram = regenerated }
         persistProfileAndProgram()
     }
 
@@ -2896,7 +3202,11 @@ final class WorkoutStore: ObservableObject {
     /// Whether any session was logged on a date, whatever the plan was.
     /// A session logged on a rest day still counts as completed that day.
     func isCompletedWorkout(on date: Date) -> Bool {
-        sessions.contains { Calendar.current.isDate($0.date, inSameDayAs: date) }
+        // At least one done set: an empty save is not a workout.
+        sessions.contains { session in
+            Calendar.current.isDate(session.date, inSameDayAs: date)
+                && session.exercises.contains { $0.sets.contains(where: \.done) }
+        }
     }
 
     /// Whether a date is a MISSED workout (calendar rule, DaRon 2026-11-10):
@@ -2910,8 +3220,21 @@ final class WorkoutStore: ObservableObject {
     /// (the nudge already gates on a scheduled yesterday; the calendar dots
     /// already encode session==nil && hasPlan && isPast).
     func isMissedWorkout(on date: Date) -> Bool {
-        guard isScheduledWorkout(on: date), !isCompletedWorkout(on: date) else { return false }
-        return Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: Date())
+        isMissed(date)
+    }
+
+    /// THE missed-day rule, with every guard in one place: a past day the
+    /// current program schedules, with no workout logged, on or after the
+    /// day the user set up the app AND on or after the day the current
+    /// program became active (a day before that was planned by a
+    /// different program — today's program can't call it missed).
+    func isMissed(_ day: Date) -> Bool {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: day)
+        guard start < cal.startOfDay(for: Date()) else { return false }
+        if let setupDate, start < cal.startOfDay(for: setupDate) { return false }
+        if let activeProgramSince, start < cal.startOfDay(for: activeProgramSince) { return false }
+        return isScheduledWorkout(on: day) && !isCompletedWorkout(on: day)
     }
 
     /// The missed workout dates in the current week. Rest days never appear
@@ -3005,6 +3328,15 @@ final class WorkoutStore: ObservableObject {
         stampSetupDate()
     }
 
+    /// The setup date can't be later than the oldest logged workout (a
+    /// returning user stamped at adoption, or a stamp made after history
+    /// was imported, hid that history from the calendar and the streak).
+    private func reconcileSetupDateWithHistory() {
+        guard let stamp = setupDate, let oldest = sessions.map(\.date).min(), oldest < stamp else { return }
+        setupDate = oldest
+        persistSetupDate()
+    }
+
     private func persistSetupDate() {
         if let setupDate {
             SharedDefaults.store.set(setupDate.timeIntervalSince1970, forKey: setupDateKey)
@@ -3032,6 +3364,8 @@ final class WorkoutStore: ObservableObject {
            let decoded = SafeDecode.value(UserProgram.self, from: data, key: preRetakeProgramKey) {
             preRetakeProgram = decoded
         }
+        let since = SharedDefaults.store.double(forKey: activeProgramSinceKey)
+        activeProgramSince = since > 0 ? Date(timeIntervalSince1970: since) : nil
         let storedSetup = SharedDefaults.store.double(forKey: setupDateKey)
         setupDate = storedSetup > 0 ? Date(timeIntervalSince1970: storedSetup) : nil
         hasSeenPrivacy = SharedDefaults.store.bool(forKey: privacyKey)
@@ -3065,6 +3399,9 @@ final class WorkoutStore: ObservableObject {
         }
         if let data = try? JSONEncoder().encode(extraPrograms) {
             SharedDefaults.store.set(data, forKey: extraProgramsKey)
+        }
+        if let data = try? JSONEncoder().encode(exerciseOverrides) {
+            SharedDefaults.store.set(data, forKey: exerciseOverridesKey)
         }
         if let data = try? JSONEncoder().encode(FavoriteIDs(programs: favoriteProgramIDs.sorted(),
                                                            exercises: favoriteExerciseIDs.sorted())) {
@@ -3114,6 +3451,10 @@ final class WorkoutStore: ObservableObject {
            let decoded = SafeDecode.array(UserProgram.self, from: data, key: extraProgramsKey) {
             extraPrograms = decoded
         }
+        if let data = SharedDefaults.store.data(forKey: exerciseOverridesKey),
+           let decoded = SafeDecode.value([String: ExerciseOverride].self, from: data, key: exerciseOverridesKey) {
+            exerciseOverrides = decoded
+        }
         if let data = SharedDefaults.store.data(forKey: favoritesKey),
            let decoded = SafeDecode.value(FavoriteIDs.self, from: data, key: favoritesKey) {
             favoriteProgramIDs = Set(decoded.programs)
@@ -3121,12 +3462,92 @@ final class WorkoutStore: ObservableObject {
         }
     }
 
+    // MARK: - Per-exercise overrides (routine note, rest, unit)
+
+    /// A template with the user's saved per-exercise settings applied.
+    func applyingOverrides(_ template: ExerciseTemplate) -> ExerciseTemplate {
+        guard let o = exerciseOverrides[template.id] else { return template }
+        var t = template
+        if let rest = o.restSeconds { t.restSeconds = rest }
+        if let unit = o.unitOverride { t.unitOverride = unit }
+        if let note = o.note, !note.isEmpty { t.note = note }
+        return t
+    }
+
+    /// Rest override for an exercise (nil = back to the default). Saved by
+    /// exercise id and applied to today's draft right away.
+    func setRestOverride(_ seconds: TimeInterval?, for exerciseId: String) {
+        updateOverride(exerciseId) { $0.restSeconds = seconds }
+        if let i = draftExercises.firstIndex(where: { $0.id == exerciseId }) {
+            draftExercises[i].restSeconds = seconds
+        }
+    }
+
+    /// Unit override for an exercise (nil = the global unit).
+    func setUnitOverride(_ unit: WeightUnit?, for exerciseId: String) {
+        updateOverride(exerciseId) { $0.unitOverride = unit }
+        if let i = draftExercises.firstIndex(where: { $0.id == exerciseId }) {
+            draftExercises[i].unitOverride = unit
+        }
+    }
+
+    /// Routine note for an exercise (shown every time it appears).
+    func setRoutineNote(_ note: String?, for exerciseId: String) {
+        let value = (note?.isEmpty ?? true) ? nil : note
+        updateOverride(exerciseId) { $0.note = value }
+        if let i = draftExercises.firstIndex(where: { $0.id == exerciseId }) {
+            draftExercises[i].note = value
+        }
+    }
+
+    private func updateOverride(_ id: String, _ change: (inout ExerciseOverride) -> Void) {
+        var o = exerciseOverrides[id] ?? ExerciseOverride()
+        change(&o)
+        if o.isEmpty { exerciseOverrides.removeValue(forKey: id) } else { exerciseOverrides[id] = o }
+        persistCustomization()
+    }
+
     // MARK: - Draft session (autosaved in-progress workout)
+
+    /// How long after midnight a workout with logged sets stays the
+    /// workout in progress (a late session, or one finished next morning).
+    static let draftCarryOverHours: Double = 6
+
+    /// True when a draft dated `date` with done sets is still the workout
+    /// in progress: it's from today, or from an earlier day that ended
+    /// less than `draftCarryOverHours` ago.
+    static func isDraftLive(date: Date, hasDoneSets: Bool, now: Date = Date()) -> Bool {
+        let cal = Calendar.current
+        if cal.isDate(date, inSameDayAs: now) { return true }
+        guard hasDoneSets, date < now,
+              let endOfDay = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: date)) else { return false }
+        return now.timeIntervalSince(endOfDay) < draftCarryOverHours * 3600
+    }
+
+    private var draftHasDoneSets: Bool {
+        draftLogs.values.contains { $0.contains(where: \.done) }
+    }
+
+    /// The plan of a workout still in progress from an earlier day (it
+    /// ran past midnight). Today shows it instead of today's plan until
+    /// it's saved — a date rollover must never hide or wipe it.
+    var carriedOverDraftPlan: DayPlan? {
+        guard let draftDate, !Calendar.current.isDateInToday(draftDate),
+              draftHasDoneSets, Self.isDraftLive(date: draftDate, hasDoneSets: true) else { return nil }
+        return draftSourcePlan
+    }
+
+    /// True while a draft exists (built from a plan). Today uses it to
+    /// tell "every exercise removed" apart from "no draft yet".
+    var hasDraft: Bool { draftSourcePlan != nil || draftDayKey != nil }
 
     /// Make sure a draft exists for today's plan. Keeps an in-progress draft
     /// for today (so fold/unfold and app restarts lose nothing); starts a
     /// fresh one when the day or plan changes.
     func ensureDraft(for plan: DayPlan) {
+        // A workout with logged sets from an earlier day (it ran past
+        // midnight) stays until it's saved: never rebuilt for the new day.
+        if carriedOverDraftPlan != nil { return }
         if draftDayKey == plan.key,
            let draftDate, Calendar.current.isDateInToday(draftDate) {
             // Same weekday, same day — but the PLAN may have changed
@@ -3167,8 +3588,10 @@ final class WorkoutStore: ObservableObject {
                     let kept = draftFinisherChecks
                     draftFinisherChecks = plan.finisher.indices.map { kept.indices.contains($0) ? kept[$0] : false }
                 }
-                if draftExercises.isEmpty {
-                    draftExercises = plan.exercises
+                // Refill only a pre-sourcePlan draft: with a source plan an
+                // empty list means the user removed every exercise.
+                if draftExercises.isEmpty && draftSourcePlan == nil {
+                    draftExercises = plan.exercises.map(applyingOverrides)
                 }
                 if draftSourcePlan == nil {
                     draftSourcePlan = plan
@@ -3177,7 +3600,8 @@ final class WorkoutStore: ObservableObject {
             }
         }
         var fresh: [String: [SetLog]] = [:]
-        for template in plan.exercises {
+        let templates = plan.exercises.map(applyingOverrides)
+        for template in templates {
             let next = nextWeightAndReps(for: template)
             fresh[template.id] = (0..<template.sets).map { _ in
                 SetLog(weightLb: next.weightLb, reps: next.reps, done: false)
@@ -3187,7 +3611,7 @@ final class WorkoutStore: ObservableObject {
         draftDate = Date()
         draftLogs = fresh
         draftFinisherChecks = plan.finisher.map { _ in false }
-        draftExercises = plan.exercises
+        draftExercises = templates
         draftSourcePlan = plan
         draftSessionMod = nil
         draftNotes = [:]
@@ -3209,6 +3633,7 @@ final class WorkoutStore: ObservableObject {
 
     func addDraftExercise(_ template: ExerciseTemplate) {
         guard !draftExercises.contains(where: { $0.id == template.id }) else { return }
+        let template = applyingOverrides(template)
         draftExercises.append(template)
         let next = nextWeightAndReps(for: template)
         draftLogs[template.id] = (0..<template.sets).map { _ in
@@ -3218,7 +3643,11 @@ final class WorkoutStore: ObservableObject {
 
     func swapDraftExercise(id: String, with template: ExerciseTemplate) {
         guard let index = draftExercises.firstIndex(where: { $0.id == id }) else { return }
+        let template = applyingOverrides(template)
         draftLogs.removeValue(forKey: id)
+        // The note typed on it goes with the swap (it was dropped on save).
+        if let note = draftNotes.removeValue(forKey: id) { draftNotes[template.id] = note }
+        if let time = draftNoteTimes.removeValue(forKey: id) { draftNoteTimes[template.id] = time }
         draftExercises[index] = template
         let next = nextWeightAndReps(for: template)
         draftLogs[template.id] = (0..<template.sets).map { _ in
@@ -3273,9 +3702,12 @@ final class WorkoutStore: ObservableObject {
     }
 
     private func loadDraft() {
+        // Today's draft, or one from last night with sets logged (a
+        // workout that ran past midnight, relaunched within the window).
         guard let data = SharedDefaults.store.data(forKey: draftKey),
               let draft = try? JSONDecoder().decode(DraftSession.self, from: data),
-              Calendar.current.isDateInToday(draft.date) else {
+              Self.isDraftLive(date: draft.date,
+                               hasDoneSets: draft.logs.values.contains { $0.contains(where: \.done) }) else {
             return
         }
         draftDayKey = draft.dayKey
@@ -3542,9 +3974,16 @@ final class WorkoutStore: ObservableObject {
     func reconcileFromDefaults() {
         // Draft (only today's — a stale draft from another day is the
         // next launch's problem, not this reconcile's).
+        // Sessions too: the Finish Workout intent saves from outside the app.
+        if let data = SharedDefaults.store.data(forKey: sessionsKey),
+           let decoded = SafeDecode.array(SessionLog.self, from: data, key: sessionsKey) {
+            let sorted = decoded.sorted { $0.date > $1.date }
+            if sorted != sessions { sessions = sorted }
+        }
         if let data = SharedDefaults.store.data(forKey: draftKey),
            let draft = try? JSONDecoder().decode(DraftSession.self, from: data),
-           Calendar.current.isDateInToday(draft.date) {
+           Self.isDraftLive(date: draft.date,
+                            hasDoneSets: draft.logs.values.contains { $0.contains(where: \.done) }) {
             if draft.logs != draftLogs { draftLogs = draft.logs }
             if draft.templates != draftExercises { draftExercises = draft.templates }
             if draft.sourcePlan != draftSourcePlan { draftSourcePlan = draft.sourcePlan }
@@ -3554,6 +3993,11 @@ final class WorkoutStore: ObservableObject {
             if draft.sessionMod != draftSessionMod { draftSessionMod = draft.sessionMod }
             if draft.notes != draftNotes { draftNotes = draft.notes }
             if draft.noteTimes != draftNoteTimes { draftNoteTimes = draft.noteTimes }
+        } else if SharedDefaults.store.data(forKey: draftKey) == nil, draftDayKey != nil {
+            // The draft was saved or cleared from outside the app (Siri's
+            // Finish Workout): drop the in-memory copy so it can't be
+            // written back or saved twice.
+            clearDraft()
         }
         // Rest state.
         let paused = SharedDefaults.store.double(forKey: restPausedKey)
@@ -3623,10 +4067,9 @@ final class WorkoutStore: ObservableObject {
             sessions = decoded.sorted { $0.date > $1.date }
         }
         migrateMislabeledLegsSessionIfNeeded()
-        if let data = SharedDefaults.store.data(forKey: userNotesKey),
-           let decoded = SafeDecode.array(UserNote.self, from: data, key: userNotesKey) {
-            userNotes = decoded.sorted { $0.updatedAt > $1.updatedAt }
-        }
+        loadUserNotes()
+        // A blank note left by a compose the app closed on.
+        sweepBlankNotes(except: nil)
         if let saved = SharedDefaults.store.stringArray(forKey: noteCategoriesKey), !saved.isEmpty {
             noteCategories = saved
         }
@@ -3722,6 +4165,24 @@ enum SampleProfile: String, CaseIterable, Identifiable {
 extension WorkoutStore {
     private static let sampleBackupKey = "gymtracker.sampleBackup.sessions.v1"
     private static let sampleBackupSetupKey = "gymtracker.sampleBackup.setup.v1"
+    private static let sampleSessionIDsKey = "gymtracker.sampleSessionIDs.v1"
+
+    /// Sessions in memory that the sample generator didn't make.
+    private func sessionsNotFromSample() -> [SessionLog] {
+        // A sample loaded before ids were recorded: can't tell them apart,
+        // so keep only the backup (the old behavior).
+        guard let stored = SharedDefaults.store.stringArray(forKey: Self.sampleSessionIDsKey) else { return [] }
+        let ids = Set(stored)
+        return sessions.filter { !ids.contains($0.id.uuidString) }
+    }
+
+    /// The backed-up real sessions plus `extra`, without duplicates.
+    private func mergedBackup(with extra: [SessionLog]) -> [SessionLog] {
+        let backup = SharedDefaults.store.data(forKey: Self.sampleBackupKey)
+            .flatMap { SafeDecode.array(SessionLog.self, from: $0, key: Self.sampleBackupKey) } ?? []
+        let known = Set(backup.map(\.id))
+        return backup + extra.filter { !known.contains($0.id) }
+    }
 
     /// A backup of your own data exists (a sample is loaded).
     var hasSampleBackup: Bool { SharedDefaults.store.data(forKey: Self.sampleBackupKey) != nil }
@@ -3731,6 +4192,13 @@ extension WorkoutStore {
         if !hasSampleBackup, let data = try? JSONEncoder().encode(sessions) {
             SharedDefaults.store.set(data, forKey: Self.sampleBackupKey)
             SharedDefaults.store.set(setupDate?.timeIntervalSince1970 ?? 0, forKey: Self.sampleBackupSetupKey)
+        } else if hasSampleBackup {
+            // A sample is already loaded: real workouts logged on top of
+            // it join the backup before it's replaced.
+            let real = sessionsNotFromSample()
+            if !real.isEmpty, let data = try? JSONEncoder().encode(mergedBackup(with: real)) {
+                SharedDefaults.store.set(data, forKey: Self.sampleBackupKey)
+            }
         }
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -3773,19 +4241,36 @@ extension WorkoutStore {
                                   exercises: exercises, finisherDone: Bool.random(using: &rng), finisherNotes: ""))
         }
         sessions = out.sorted { $0.date > $1.date }
+        // Remember which sessions are generated, so a restore keeps the
+        // real ones logged while the sample was loaded.
+        SharedDefaults.store.set(out.map(\.id.uuidString), forKey: Self.sampleSessionIDsKey)
         setupDate = cal.date(byAdding: .day, value: -profile.days, to: today)
         persistSessionsForSample()
+        // Today's workout is rebuilt from the new history (it kept the
+        // weights it was set up with before the history existed).
+        rebuildTodayDraftIfUntouched()
     }
 
     /// Puts your own history back.
     func restoreRealHistory() {
-        guard let data = SharedDefaults.store.data(forKey: Self.sampleBackupKey),
-              let saved = try? JSONDecoder().decode([SessionLog].self, from: data) else { return }
-        sessions = saved
+        guard SharedDefaults.store.data(forKey: Self.sampleBackupKey) != nil else { return }
+        // Merge: the backup plus every workout logged while the sample
+        // was loaded (only the generated sessions go).
+        sessions = mergedBackup(with: sessionsNotFromSample()).sorted { $0.date > $1.date }
+        SharedDefaults.store.removeObject(forKey: Self.sampleSessionIDsKey)
         let t = SharedDefaults.store.double(forKey: Self.sampleBackupSetupKey)
         setupDate = t > 0 ? Date(timeIntervalSince1970: t) : nil
         SharedDefaults.store.removeObject(forKey: Self.sampleBackupKey)
         SharedDefaults.store.removeObject(forKey: Self.sampleBackupSetupKey)
         persistSessionsForSample()
+        rebuildTodayDraftIfUntouched()
+    }
+
+    /// Starts today's workout over from the history, unless sets are
+    /// already logged in it.
+    private func rebuildTodayDraftIfUntouched() {
+        guard !draftLogs.values.flatMap({ $0 }).contains(where: \.done) else { return }
+        clearDraft()
+        if let plan = programDay(for: Date()) { ensureDraft(for: plan) }
     }
 }

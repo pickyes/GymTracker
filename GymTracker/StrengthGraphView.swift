@@ -13,7 +13,9 @@ import Charts
 ///
 /// A point on the graph. `isProjection` marks the dashed future line.
 struct GraphPoint: Identifiable, Equatable {
-    let id = UUID()
+    /// Stable id: one point per day per series, so the date is unique
+    /// (a fresh UUID each build made Charts treat every point as new).
+    var id: Date { date }
     let date: Date
     let value: Double
     let isProjection: Bool
@@ -192,8 +194,14 @@ struct StrengthGraphView: View {
     }
 
     private func changeText(_ change: Double) -> String {
-        let sign = change >= 0 ? "+" : ""
-        return "\(sign)\(formatted(change))"
+        let sign = change >= 0 ? "+" : "−"
+        // An estimate's change reads in whole pounds (half kilos), not
+        // "+13.33 lb".
+        let unit = store.settings.weightUnit
+        let display = abs(change) * (unit == .kg ? 0.45359237 : 1)
+        let step: Double = unit == .kg ? 0.5 : 1
+        let tidy = (display / step).rounded() * step
+        return "\(sign)\(roundedWeightText(tidy)) \(unit.label)"
     }
 
     private func changePercentText(_ change: Double) -> String {
@@ -282,15 +290,19 @@ struct StrengthGraphView: View {
                 ForEach(actualPoints) { point in
                     LineMark(
                         x: .value("Date", point.date),
-                        y: .value("Strength", point.value)
+                        y: .value("Strength", point.value),
+                        series: .value("Line", "Actual")
                     )
                     .foregroundStyle(trendColor)
                     .lineStyle(StrokeStyle(lineWidth: 2.5))
                 }
                 ForEach(actualPoints) { point in
+                    // Filled from the bottom of the plot, not from zero:
+                    // the fill ran down through the month labels.
                     AreaMark(
                         x: .value("Date", point.date),
-                        y: .value("Strength", point.value)
+                        yStart: .value("Base", yDomain.lowerBound),
+                        yEnd: .value("Strength", point.value)
                     )
                     .foregroundStyle(
                         LinearGradient(
@@ -300,10 +312,13 @@ struct StrengthGraphView: View {
                     )
                 }
                 // Projection — dashed, faded.
-                ForEach(projectionPoints) { point in
+                ForEach(projectionLine) { point in
+                    // Its own series, or Charts joins it to the solid line
+                    // and the dashes are lost.
                     LineMark(
                         x: .value("Date", point.date),
-                        y: .value("Strength", point.value)
+                        y: .value("Strength", point.value),
+                        series: .value("Line", "Projected")
                     )
                     .foregroundStyle(trendColor.opacity(0.55))
                     .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 4]))
@@ -334,13 +349,12 @@ struct StrengthGraphView: View {
             .chartXAxis {
                 // Fewer labels the longer the span (3 years of months ran
                 // together into an unreadable smear).
-                AxisMarks(values: .stride(by: .month, count: axisMonthStep)) { value in
+                // Short ranges stride by days / weeks: a month stride
+                // left 1W with a single label (or none).
+                let axis = axisStride
+                AxisMarks(values: .stride(by: axis.component, count: axis.count)) { value in
                     AxisGridLine().foregroundStyle(Theme.border)
-                    if axisMonthStep >= 6 {
-                        AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
-                    } else {
-                        AxisValueLabel(format: .dateTime.month(.abbreviated))
-                    }
+                    AxisValueLabel(format: axis.format)
                 }
             }
             .chartYAxis {
@@ -383,6 +397,14 @@ struct StrengthGraphView: View {
     }
 
     /// Y domain with padding; never degenerate (flat line gets headroom).
+    /// The dashed line's points: it starts at the latest real value so
+    /// there's no gap between the solid and dashed lines.
+    private var projectionLine: [GraphPoint] {
+        let projected = projectionPoints
+        guard let last = actualPoints.last, !projected.isEmpty else { return projected }
+        return [GraphPoint(date: last.date, value: last.value, isProjection: true)] + projected
+    }
+
     private var yDomain: ClosedRange<Double> {
         var all: [Double] = []
         for p in actualPoints { all.append(p.value) }
@@ -444,6 +466,11 @@ struct StrengthGraphView: View {
 
     /// Main lifts that have at least one logged set, by library name.
     private var availableLifts: [(id: String, name: String)] {
+        // Cached like the points (it walked every set of every session
+        // on each body pass).
+        let key = PointsCache.HistoryKey(count: store.sessions.count, newest: store.sessions.first?.id,
+                                         oldest: store.sessions.last?.id)
+        if let hit = pointsCache.lifts(key) { return hit }
         var seen: [String: String] = [:]
         for session in store.sessions {
             for exercise in session.exercises {
@@ -460,6 +487,7 @@ struct StrengthGraphView: View {
         for id in Self.mainLiftIDs where seen[id] != nil {
             lifts.append((id: id, name: seen[id]!))
         }
+        pointsCache.setLifts(key, lifts)
         return lifts
     }
 
@@ -489,9 +517,7 @@ struct StrengthGraphView: View {
         // Worked out once per (history, lift, range), not on every read:
         // body reads this ~15 times a frame, which froze the app with
         // years of data (3-year test profile).
-        let key = PointsCache.Key(count: store.sessions.count, newest: store.sessions.first?.id,
-                                  oldest: store.sessions.last?.id, selection: "\(selection)",
-                                  range: "\(range)", unit: "\(store.settings.weightUnit)")
+        let key = pointsKey
         if let hit = pointsCache.get(key) { return hit }
         let cutoff = rangeCutoff
         let sessions = store.sessions.sorted { $0.date < $1.date }
@@ -504,6 +530,12 @@ struct StrengthGraphView: View {
         }
         pointsCache.set(key, points)
         return points
+    }
+
+    private var pointsKey: PointsCache.Key {
+        PointsCache.Key(count: store.sessions.count, newest: store.sessions.first?.id,
+                        oldest: store.sessions.last?.id, selection: "\(selection)",
+                        range: "\(range)", unit: "\(store.settings.weightUnit)")
     }
 
     private func exercisePoints(sessions: [SessionLog], cutoff: Date?, exerciseId: String) -> [GraphPoint] {
@@ -526,16 +558,32 @@ struct StrengthGraphView: View {
         return points
     }
 
-    /// Months between x-axis labels, from the span shown.
+    /// X-axis stride and label format for the range shown (past +
+    /// the projection, which runs as far forward as the range goes back).
+    private var axisStride: (component: Calendar.Component, count: Int, format: Date.FormatStyle) {
+        switch range {
+        case .oneWeek:
+            return (.day, 3, .dateTime.month(.abbreviated).day())
+        case .oneMonth:
+            return (.weekOfYear, 2, .dateTime.month(.abbreviated).day())
+        default:
+            let step = axisMonthStep
+            if step >= 12 { return (.month, step, .dateTime.year()) }
+            return (.month, step, step >= 6
+                    ? .dateTime.month(.abbreviated).year(.twoDigits)
+                    : .dateTime.month(.abbreviated))
+        }
+    }
+
+    /// Months between x-axis labels, from the whole span shown (the past
+    /// plus the projection). At most about four labels, so they never run
+    /// together on the folded screen ("May 24Nov 24May 25…").
     private var axisMonthStep: Int {
         guard let first = actualPoints.first?.date else { return 1 }
-        let months = Calendar.current.dateComponents([.month], from: first, to: Date()).month ?? 0
-        switch months {
-        case ..<7: return 1
-        case ..<13: return 2
-        case ..<25: return 4
-        default: return 6
-        }
+        let end = projectionPoints.last?.date ?? Date()
+        let months = max(1, Calendar.current.dateComponents([.month], from: first, to: end).month ?? 0)
+        let wanted = Int((Double(months) / 4).rounded(.up))
+        return [1, 2, 3, 4, 6, 12, 24].first { $0 >= wanted } ?? 24
     }
 
     private func overallPoints(sessions: [SessionLog], cutoff: Date?) -> [GraphPoint] {
@@ -562,11 +610,16 @@ struct StrengthGraphView: View {
             for (muscle, ids) in Self.overallGroups {
                 var best: Double = 0
                 for id in ids {
-                    if let v = sessionOneRM(session: session, exerciseId: id), v > best {
-                        best = v
+                    // Per-hand dumbbell 1RMs doubled (History's strength
+                    // score rule), so a DB bench compares to a barbell one.
+                    if let v = sessionOneRM(session: session, exerciseId: id) {
+                        let load = Self.isPairLift(id, in: session) ? v * 2 : v
+                        best = max(best, load)
                     }
                 }
-                if best > 0 { carry[muscle] = best }
+                // Running best: a lighter day (or a lighter variant in
+                // the group) never pulls the group's number down.
+                if best > 0 { carry[muscle] = max(carry[muscle] ?? 0, best) }
             }
             if beforeRange { continue }
             guard Set(carry.keys).isSuperset(of: everGroups) else { continue }
@@ -587,13 +640,24 @@ struct StrengthGraphView: View {
         return points
     }
 
+    /// Whether a lift is logged per hand (dumbbells): the log's own flag,
+    /// else the library's.
+    private static func isPairLift(_ id: String, in session: SessionLog) -> Bool {
+        session.exercises.first { $0.exerciseId == id }?.isPair ?? ExerciseLibrary.byId(id)?.isPair ?? false
+    }
+
     /// Projected (future) points: a least-squares fit to the recent trend,
     /// tapered so it flattens toward an asymptote and never runs away.
     /// With fewer than 2 actual points the projection is flat at the last
     /// value (so the dashed line still renders).
     private var projectionPoints: [GraphPoint] {
-        guard let last = actualPoints.last else { return [] }
+        // Cached with the actual points (read several times a frame).
+        let key = PointsCache.ProjectionKey(points: pointsKey,
+                                            experience: "\(String(describing: store.profile?.experience))",
+                                            goal: "\(String(describing: store.profile?.goal))")
+        if let hit = pointsCache.projection(key) { return hit }
         let points = actualPoints
+        guard let last = points.last else { return [] }
         var slopePerDay: Double = 0
         // Fit only the last 12 weeks (shared `projectionFitWindowDays`):
         // the least-squares slope over the whole selected range carries
@@ -643,6 +707,7 @@ struct StrengthGraphView: View {
             let date = last.date.addingTimeInterval(t * 86400.0)
             projected.append(GraphPoint(date: date, value: last.value + gain, isProjection: true))
         }
+        pointsCache.setProjection(key, projected)
         return projected
     }
 }
@@ -655,8 +720,18 @@ final class PointsCache {
         var count: Int; var newest: UUID?; var oldest: UUID?
         var selection: String; var range: String; var unit: String
     }
+    struct HistoryKey: Equatable { var count: Int; var newest: UUID?; var oldest: UUID? }
+    struct ProjectionKey: Equatable { var points: Key; var experience: String; var goal: String }
     private var key: Key?
     private var value: [GraphPoint] = []
+    private var projKey: ProjectionKey?
+    private var projValue: [GraphPoint] = []
+    private var liftsKey: HistoryKey?
+    private var liftsValue: [(id: String, name: String)] = []
     func get(_ k: Key) -> [GraphPoint]? { key == k ? value : nil }
     func set(_ k: Key, _ v: [GraphPoint]) { key = k; value = v }
+    func projection(_ k: ProjectionKey) -> [GraphPoint]? { projKey == k ? projValue : nil }
+    func setProjection(_ k: ProjectionKey, _ v: [GraphPoint]) { projKey = k; projValue = v }
+    func lifts(_ k: HistoryKey) -> [(id: String, name: String)]? { liftsKey == k ? liftsValue : nil }
+    func setLifts(_ k: HistoryKey, _ v: [(id: String, name: String)]) { liftsKey = k; liftsValue = v }
 }

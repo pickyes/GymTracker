@@ -15,6 +15,9 @@ struct PaywallView: View {
     @State private var isPurchasing = false
     @State private var showNotConfigured = false
     @State private var showPrivacyPolicy = false
+    /// onPurchased fires once — a purchase's success and the isPro
+    /// change that follows it must not both finish the flow.
+    @State private var didFinish = false
 
     enum ProPlan: String, CaseIterable, Identifiable {
         case yearly
@@ -55,14 +58,11 @@ struct PaywallView: View {
                     // loaded yet, or no offer on the product) = no
                     // timeline: never show a trial that doesn't exist.
                     if selectedPlan == .yearly, let trialDays = yearlyTrialDays {
-                        HStack(spacing: 8) {
-                            timelineStep("Today", "free")
-                            Image(systemName: "arrow.right").font(.caption).foregroundStyle(Theme.secondaryText)
-                            if trialDays > 1 {
-                                timelineStep("Day \(trialDays - 1)", "reminder")
-                                Image(systemName: "arrow.right").font(.caption).foregroundStyle(Theme.secondaryText)
-                            }
-                            timelineStep("Day \(trialDays)", "\(subscription.displayPrice(for: SubscriptionState.yearlyID))/year")
+                        // Stacks at large text sizes instead of squeezing
+                        // three columns off the edge.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) { trialTimeline(trialDays, arrow: "arrow.right") }
+                            VStack(alignment: .leading, spacing: 8) { trialTimeline(trialDays, arrow: "arrow.down") }
                         }
                         .padding()
                         .themeCard()
@@ -147,6 +147,21 @@ struct PaywallView: View {
                             .frame(maxWidth: .infinity)
                     }
 
+                    if subscription.isRestoring {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Restoring purchases…")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                    }
+
+                    if let notice = subscription.purchaseNotice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+
                     if let error = subscription.purchaseError {
                         Text(error)
                             .font(.caption)
@@ -182,6 +197,7 @@ struct PaywallView: View {
                         Task { await subscription.restore() }
                     }
                     .font(.subheadline)
+                    .disabled(subscription.isRestoring || isPurchasing)
                 }
             }
             .alert("Can't reach the App Store", isPresented: $showNotConfigured) {
@@ -192,7 +208,36 @@ struct PaywallView: View {
             .sheet(isPresented: $showPrivacyPolicy) {
                 PrivacyPolicyView(onClose: { showPrivacyPolicy = false })
             }
+            .onAppear {
+                // A failure from an earlier paywall visit isn't news now.
+                subscription.purchaseError = nil
+                subscription.purchaseNotice = nil
+            }
+            // Pro arriving any way — restore, an approved Ask to Buy,
+            // a purchase — closes the paywall.
+            .onChange(of: subscription.isPro) { _, isPro in
+                if isPro { finishPurchased() }
+            }
         }
+    }
+
+    private func finishPurchased() {
+        guard !didFinish else { return }
+        didFinish = true
+        onPurchased()
+    }
+
+    @ViewBuilder
+    private func trialTimeline(_ trialDays: Int, arrow: String) -> some View {
+        timelineStep("Today", "free")
+        Image(systemName: arrow).font(.caption).foregroundStyle(Theme.secondaryText)
+            .accessibilityHidden(true)
+        if trialDays > 1 {
+            timelineStep("Day \(trialDays - 1)", "reminder")
+            Image(systemName: arrow).font(.caption).foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
+        }
+        timelineStep("Day \(trialDays)", "\(subscription.displayPrice(for: SubscriptionState.yearlyID))/year")
     }
 
     /// Apple's standard EULA. Swap for a custom one if you publish your own.
@@ -209,13 +254,25 @@ struct PaywallView: View {
     }
 
     private func comparisonRow(_ label: String, free: String, pro: String) -> some View {
-        HStack {
-            Text(label).font(.subheadline)
-            Spacer()
+        let values = HStack(spacing: 4) {
             Text(free).font(.caption).foregroundStyle(Theme.secondaryText)
             Text("→").font(.caption).foregroundStyle(Theme.secondaryText)
             Text(pro).font(.caption).bold()
         }
+        // Large Dynamic Type: the label and values stack instead of
+        // running off the edge.
+        return ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(label).font(.subheadline).fixedSize()
+                Spacer()
+                values.fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.subheadline)
+                values
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func featureRow(_ text: String) -> some View {
@@ -232,18 +289,16 @@ struct PaywallView: View {
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(planTitle(plan))
-                            .font(.headline)
-                        if let badge {
-                            Text(badge)
-                                .font(.caption2)
-                                .bold()
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.accentColor)
-                                .clipShape(Capsule())
+                    // Title and badge side by side, or stacked when the
+                    // text is too large to fit both on one line.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            Text(planTitle(plan)).font(.headline).fixedSize()
+                            if let badge { badgeView(badge).fixedSize() }
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(planTitle(plan)).font(.headline)
+                            if let badge { badgeView(badge) }
                         }
                     }
                     Text(billed)
@@ -266,6 +321,18 @@ struct PaywallView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func badgeView(_ badge: String) -> some View {
+        Text(badge)
+            .font(.caption2)
+            .bold()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.accentColor)
+            .clipShape(Capsule())
     }
 
     private func planTitle(_ plan: ProPlan) -> String {
@@ -304,7 +371,7 @@ struct PaywallView: View {
             let ok = await subscription.purchase(product)
             isPurchasing = false
             if ok {
-                onPurchased()
+                finishPurchased()
             }
         }
     }

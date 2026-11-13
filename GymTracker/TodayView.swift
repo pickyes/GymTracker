@@ -73,6 +73,22 @@ struct TodayView: View {
     /// every fold. Today owns the values; the three layouts pass them in.
     @State private var liveBodySide: BodyDiagramSide = .front
     @State private var liveBodyUserFlipped = false
+    /// Finish & Save with nothing / not everything checked off asks first.
+    @State private var saveCheck: SaveCheck? = nil
+    /// "Back to rest day" with sets logged asks first.
+    @State private var confirmLeaveTrainAnyway = false
+    /// Modify Today feedback ("nothing to change", what changed).
+    @State private var sessionModMessage: String? = nil
+
+    private enum SaveCheck: Identifiable {
+        case nothingDone, incomplete(done: Int, total: Int)
+        var id: String {
+            switch self {
+            case .nothingDone: return "none"
+            case .incomplete: return "incomplete"
+            }
+        }
+    }
 
     /// The name for the cold-start greeting: the profile's name, or
     /// "DaRon" when the active program is his preset (his saved profile
@@ -113,7 +129,10 @@ struct TodayView: View {
     /// Today's exercises in the user's order (reordered / added / swapped
     /// mid-workout). Falls back to the plan order before the draft exists.
     private var exercises: [ExerciseTemplate] {
-        store.draftExercises.isEmpty ? (plan?.exercises ?? []) : store.draftExercises
+        // A draft that exists but is empty means every exercise was
+        // removed in Edit — never fall back to the plan's list then.
+        if store.hasDraft || !store.draftExercises.isEmpty { return store.draftExercises }
+        return effectivePlan?.exercises ?? []
     }
 
     var body: some View {
@@ -200,7 +219,8 @@ struct TodayView: View {
             withAnimation(.easeOut(duration: 0.25)) { keyboardHeight = 0 }
         }
         .onAppear {
-            if let plan {
+            restoreTrainAnywayIfNeeded()
+            if trainingAnywayPlan == nil, let plan {
                 store.ensureDraft(for: plan)
             }
             applyKeepAwake()
@@ -229,6 +249,44 @@ struct TodayView: View {
             }
         }
         .onChange(of: store.settings.keepScreenAwake) { applyKeepAwake() }
+        // "Current" follows the work: once the selected exercise's last
+        // set is checked off, the next exercise with sets left becomes
+        // current (the selection used to pin the finished card).
+        .onChange(of: store.draftLogs) { old, new in
+            guard let id = selectedExerciseID else { return }
+            let wasDone = (old[id] ?? []).allSatisfy(\.done)
+            let sets = new[id] ?? []
+            if !wasDone, !sets.isEmpty, sets.allSatisfy(\.done) { selectedExerciseID = nil }
+        }
+        .alert(item: $saveCheck) { check in
+            switch check {
+            case .nothingDone:
+                return Alert(
+                    title: Text("No sets checked off"),
+                    message: Text("Check off the sets you did to save this workout. Discarding clears today's workout."),
+                    primaryButton: .destructive(Text("Discard workout")) { discardWorkout() },
+                    secondaryButton: .cancel(Text("Keep going")))
+            case .incomplete(let done, let total):
+                return Alert(
+                    title: Text("Finish with \(done) of \(total) sets?"),
+                    message: Text("Only the sets you checked off are saved."),
+                    primaryButton: .default(Text("Save")) { if let p = effectivePlan { commitSave(for: p) } },
+                    secondaryButton: .cancel(Text("Keep going")))
+            }
+        }
+        .alert("Leave this workout?", isPresented: $confirmLeaveTrainAnyway) {
+            Button("Discard and go back", role: .destructive) { discardWorkout() }
+            Button("Keep training", role: .cancel) { }
+        } message: {
+            Text("You've checked off sets in this workout. Going back to the rest day discards them — Finish & Save keeps them.")
+        }
+        .alert("Modify today", isPresented: Binding(
+            get: { sessionModMessage != nil },
+            set: { if !$0 { sessionModMessage = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(sessionModMessage ?? "")
+        }
         .onChange(of: store.liveActivitySelectedExerciseID) { _, nextID in
             // The user tapped Next on the lock screen Live Activity:
             // advance the current exercise (the body highlight follows
@@ -313,6 +371,12 @@ struct TodayView: View {
             Color.black.opacity(0.06)
                 .ignoresSafeArea()
                 .onTapGesture(perform: close)
+                // VoiceOver's way out (side-bar mode hides the menu
+                // button's ✓ and the card has no Done of its own).
+                .accessibilityElement()
+                .accessibilityLabel("Close calendar")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { close() }
             VStack(spacing: 0) {
                 // Small pointer up at the arrow, so the card reads as
                 // dropping out of it.
@@ -343,13 +407,16 @@ struct TodayView: View {
                 : .scale(scale: 0.08, anchor: UnitPoint(x: (pointerX + 9) / max(cardWidth, 1), y: 0)).combined(with: .opacity))
         }
         .ignoresSafeArea(edges: .top)
+        // Two-finger scrub closes it from anywhere inside.
+        .accessibilityAction(.escape) { close() }
     }
 
     /// The workout Today shows: the "Train anyway" plan while one is
     /// running on a rest day, else today's scheduled plan (nil on a
     /// rest day, which shows the rest-day screen).
     private var effectivePlan: DayPlan? {
-        trainingAnywayPlan ?? plan
+        // A workout that ran past midnight stays on screen until saved.
+        trainingAnywayPlan ?? store.carriedOverDraftPlan ?? plan
     }
 
     /// Bottom clearance for scrollable workout content — the shared
@@ -378,7 +445,41 @@ struct TodayView: View {
     private func startTrainAnyway(plan: DayPlan) {
         store.ensureDraft(for: plan)
         showNextPreview = false
+        Self.setTrainAnywayDay(Date())
         withAnimation(AppAnimation.snappy) { trainingAnywayPlan = plan }
+    }
+
+    /// "Train anyway" survives a relaunch mid-workout: the day it was
+    /// started is saved, and the workout is the draft's source plan.
+    private static let trainAnywayKey = "gymtracker.trainAnywayDay.v1"
+    private static func setTrainAnywayDay(_ day: Date?) {
+        if let day {
+            SharedDefaults.store.set(day.timeIntervalSince1970, forKey: trainAnywayKey)
+        } else {
+            SharedDefaults.store.removeObject(forKey: trainAnywayKey)
+        }
+    }
+
+    private func restoreTrainAnywayIfNeeded() {
+        guard trainingAnywayPlan == nil else { return }
+        let stored = SharedDefaults.store.double(forKey: Self.trainAnywayKey)
+        guard stored > 0 else { return }
+        let day = Date(timeIntervalSince1970: stored)
+        guard let draftDate = store.draftDate, Calendar.current.isDate(day, inSameDayAs: draftDate),
+              let source = store.draftSourcePlan else {
+            Self.setTrainAnywayDay(nil)
+            return
+        }
+        trainingAnywayPlan = source
+    }
+
+    /// Throw away the workout in progress (nothing checked off, or
+    /// leaving a train-anyway workout) and start today fresh.
+    private func discardWorkout() {
+        store.clearDraft()
+        Self.setTrainAnywayDay(nil)
+        withAnimation(AppAnimation.snappy) { trainingAnywayPlan = nil }
+        if let plan { store.ensureDraft(for: plan) }
     }
 
     /// The way back from a "Train anyway" workout: clears the override
@@ -392,7 +493,12 @@ struct TodayView: View {
                 .font(.subheadline.weight(.semibold))
             Spacer()
             Button("Back to rest day") {
-                withAnimation(AppAnimation.snappy) { trainingAnywayPlan = nil }
+                if store.draftLogs.values.contains(where: { $0.contains(where: \.done) }) {
+                    confirmLeaveTrainAnyway = true
+                } else {
+                    Self.setTrainAnywayDay(nil)
+                    withAnimation(AppAnimation.snappy) { trainingAnywayPlan = nil }
+                }
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(Color.accentColor)
@@ -457,46 +563,98 @@ struct TodayView: View {
     /// Apply a one-off Session Mod (Fitbod pattern): rebuild today's draft
     /// with the mod's equipment / shorter sets, without touching the program.
     private func applySessionMod(_ mod: SessionMod) {
-        guard let plan, let profile = store.profile else { return }
-        store.draftSessionMod = mod
-        let equipment = mod.equipment ?? store.effectiveEquipment
-        let program = ProgramGenerator.generate(
-            profile: profile,
-            customExercises: store.customExercises,
-            preferences: store.exercisePreferences,
-            equipment: equipment
-        )
-        guard let modPlan = program.day(forKey: plan.key) else { return }
-        var templates = modPlan.exercises
-        if mod.shorterSession {
-            templates = templates.map { template in
-                var copy = template
-                copy.sets = min(2, template.sets)
-                return copy
-            }
+        // From the workout actually on screen (the draft's source plan,
+        // a train-anyway or carried-over plan), not a regenerated program
+        // (that did nothing for the preset or a catalog program).
+        guard let base = store.draftSourcePlan ?? effectivePlan else {
+            sessionModMessage = "There's no workout today to modify."
+            return
         }
-        if mod.deload {
-            // Recovery week: half the volume (rounded up, at least 1 set),
-            // same exercises, same weight. The load stays — the volume drops.
-            templates = templates.map { template in
-                var copy = template
-                copy.sets = max(1, (template.sets + 1) / 2)
-                return copy
+        let current = store.draftExercises.isEmpty && !store.hasDraft ? base.exercises : store.draftExercises
+        let logs = store.draftLogs
+        func hasDone(_ t: ExerciseTemplate) -> Bool { (logs[t.id] ?? []).contains(where: \.done) }
+        var templates = current
+        var changes: [String] = []
+        // Equipment for today: swap what can't be done with the kit to
+        // its first substitute that can. Exercises with logged sets stay.
+        if let kit = mod.equipment {
+            let have = kit.union([.bodyweight])
+            var swapped = 0, stuck = 0
+            templates = templates.map { t in
+                guard !hasDone(t), let lib = ExerciseLibrary.byId(t.id, plus: store.customExercises),
+                      !lib.equipment.isSubset(of: have) else { return t }
+                let sub = lib.substitutes.lazy
+                    .compactMap { ExerciseLibrary.byId($0, plus: store.customExercises) }
+                    .first { cand in cand.equipment.isSubset(of: have) && !store.isExcludedByInjury(cand.id)
+                        && !current.contains(where: { x in x.id == cand.id }) }
+                guard let sub else { stuck += 1; return t }
+                swapped += 1
+                var replacement = ProgramGenerator.template(for: sub, profile: store.profile ?? .starter)
+                replacement.sets = t.sets
+                return replacement
             }
+            if swapped > 0 { changes.append("\(pluralised(swapped, singular: "exercise")) swapped for your equipment") }
+            if stuck > 0 { changes.append("\(pluralised(stuck, singular: "exercise")) had no swap for that equipment") }
+        }
+        // Set counts are rebuilt from each exercise's own planned count,
+        // so turning a mod off restores them and two mods never stack.
+        func plannedSets(_ t: ExerciseTemplate) -> Int {
+            base.exercises.first(where: { $0.id == t.id })?.sets ?? t.sets
+        }
+        templates = templates.map { t in
+            var copy = t
+            var sets = plannedSets(t)
+            if mod.shorterSession { sets = min(2, sets) }
+            if mod.deload { sets = max(1, (sets + 1) / 2) }
+            copy.sets = sets
+            return copy
         }
         if let focus = mod.focusMuscle {
-            templates.sort { a, b in
-                let aMatch = ExerciseLibrary.byId(a.id, plus: store.customExercises)?.muscle == focus
-                let bMatch = ExerciseLibrary.byId(b.id, plus: store.customExercises)?.muscle == focus
-                return aMatch && !bMatch
+            let before = templates.map(\.id)
+            // Stable: focus-muscle exercises first, others keep their order.
+            let matching = templates.filter { ExerciseLibrary.byId($0.id, plus: store.customExercises)?.muscle == focus }
+            if matching.isEmpty {
+                changes.append("no \(focus.label.lowercased()) exercises in this workout to move up")
             }
+            templates = matching + templates.filter { t in !matching.contains(where: { $0.id == t.id }) }
+            if templates.map(\.id) != before { changes.append("\(focus.label) moved first") }
         }
-        store.draftExercises = templates
-        for template in templates where store.draftLogs[template.id] == nil {
-            let weight = store.lastWeight(for: template) ?? template.defaultWeightLb
-            store.draftLogs[template.id] = (0..<template.sets).map { _ in
-                SetLog(weightLb: weight, reps: template.topReps, done: false)
+        // Rebuild each exercise's set rows to its new count, keeping
+        // every done set (a done set is never dropped).
+        var newLogs = logs
+        var setsChanged = false
+        for t in templates {
+            let next = store.nextWeightAndReps(for: t)
+            var rows = newLogs[t.id] ?? []
+            let doneCount = rows.filter(\.done).count
+            let target = max(t.sets, doneCount)
+            if rows.count > target {
+                // Drop undone rows from the end.
+                while rows.count > target, let i = rows.lastIndex(where: { !$0.done }) { rows.remove(at: i) }
+            } else if rows.count < target {
+                let template = rows.last
+                rows += (rows.count..<target).map { _ in
+                    SetLog(weightLb: template?.weightLb ?? next.weightLb, reps: template?.reps ?? next.reps, done: false)
+                }
             }
+            if rows != (newLogs[t.id] ?? []) { setsChanged = true }
+            newLogs[t.id] = rows
+        }
+        if setsChanged {
+            if mod.shorterSession { changes.append("2 sets per exercise") }
+            if mod.deload { changes.append("half the sets (deload)") }
+            if !mod.shorterSession && !mod.deload { changes.append("planned set counts back") }
+        }
+        let changed = templates != current || setsChanged
+        store.draftSessionMod = mod
+        if changed {
+            store.draftExercises = templates
+            store.draftLogs = newLogs
+        }
+        if !changed {
+            sessionModMessage = changes.isEmpty ? "Nothing to change — today's workout already matches." : changes.joined(separator: "; ").capitalizedFirst + "."
+        } else if changes.contains(where: { $0.contains("no ") }) {
+            sessionModMessage = changes.joined(separator: "; ").capitalizedFirst + "."
         }
     }
 
@@ -980,8 +1138,10 @@ struct TodayView: View {
         let totalSets = allLogs.reduce(0) { $0 + $1.count }
         let doneSets = allLogs.reduce(0) { $0 + $1.filter(\.done).count }
         let doneExercises = allLogs.filter { !$0.isEmpty && $0.allSatisfy(\.done) }.count
-        let volumeLb = allLogs.flatMap { $0 }.filter(\.done)
-            .reduce(0.0) { $0 + ($1.weightLb ?? 0) * Double($1.reps) }
+        // The History volume formula: pairs doubled, warm-ups excluded.
+        let volumeLb = GymTracker.volumeLb(for: exercises.map { t in
+            ExerciseLog(exerciseId: t.id, name: t.name, isPair: t.isPair, sets: store.draftLogs[t.id] ?? [])
+        })
         let unit = store.settings.weightUnit
         let volume = unit.displayValue(for: volumeLb) ?? volumeLb
         // Tap to switch the headline between sets and exercises (DaRon):
@@ -1603,7 +1763,7 @@ struct TodayView: View {
             VStack(spacing: 5) {
                 ForEach(exercises.indices, id: \.self) { i in
                     Capsule()
-                        .fill(i == index ? Color.white : Color.white.opacity(0.25))
+                        .fill(i == index ? Theme.text : Theme.text.opacity(0.25))
                         .frame(width: 5, height: i == index ? 14 : 5)
                 }
             }
@@ -1696,7 +1856,7 @@ struct TodayView: View {
                 VStack(spacing: 5) {
                     ForEach(StandbyCard.allCases, id: \.self) { card in
                         Capsule()
-                            .fill(card == (standbyCard ?? .rest) ? Color.white : Color.white.opacity(0.25))
+                            .fill(card == (standbyCard ?? .rest) ? Theme.text : Theme.text.opacity(0.25))
                             .frame(width: 5, height: card == (standbyCard ?? .rest) ? 14 : 5)
                     }
                 }
@@ -1877,9 +2037,12 @@ struct TodayView: View {
     // MARK: - Shared pieces
 
     private func moveExercise(id: String, up: Bool) {
-        guard let index = exercises.firstIndex(where: { $0.id == id }) else { return }
+        // Indices from the list being moved (the draft), not the
+        // displayed list: they can differ, and a stale index crashed.
+        let list = store.draftExercises
+        guard let index = list.firstIndex(where: { $0.id == id }) else { return }
         let target = up ? index - 1 : index + 1
-        guard exercises.indices.contains(target) else { return }
+        guard list.indices.contains(target) else { return }
         store.draftExercises.move(fromOffsets: IndexSet(integer: index), toOffset: up ? target : target + 1)
     }
 
@@ -2122,7 +2285,22 @@ struct TodayView: View {
         .buttonStyle(.plain)
     }
 
+    /// Finish & Save: asks first when nothing, or not everything, is
+    /// checked off; otherwise saves straight away.
     private func saveSession(for plan: DayPlan) {
+        guard !saved else { return }
+        let all = exercises.flatMap { store.draftLogs[$0.id] ?? [] }
+        let done = all.filter(\.done).count
+        if done == 0 {
+            saveCheck = .nothingDone
+        } else if done < all.count {
+            saveCheck = .incomplete(done: done, total: all.count)
+        } else {
+            commitSave(for: plan)
+        }
+    }
+
+    private func commitSave(for plan: DayPlan) {
         // A double-tap on Finish saved two sessions (a fresh UUID each
         // time). saved is true while the confirmation alert is up, so
         // a second tap in that window is a no-op; once the alert is
@@ -2133,20 +2311,16 @@ struct TodayView: View {
         // mid-day, the current plan's title would mislabel the session
         // (the 17:39 "Legs" session that held push exercises).
         let sourcePlan = store.draftSourcePlan ?? plan
-        let exerciseLogs = exercises.map { template in
-            ExerciseLog(
-                exerciseId: template.id,
-                name: template.name,
-                isPair: template.isPair,
-                sets: store.draftLogs[template.id] ?? [],
-                unitOverride: template.unitOverride
-            )
-        }
+        // Only exercises with a checked-off set, and only those sets.
+        let exerciseLogs = WorkoutStore.sessionExercises(templates: exercises, logs: store.draftLogs)
+        guard !exerciseLogs.isEmpty else { saveCheck = .nothingDone; return }
         // The label comes from the session itself (its date and the
         // exercises actually logged) — never copied from a plan — so a
         // train-anyway session or a mid-workout swap can never mislabel
         // it again. See WorkoutStore.sessionLabel.
-        let savedAt = Date()
+        // Dated by the workout's own day: one that ran past midnight is
+        // still the day it was started (date and weekday key).
+        let savedAt = store.draftSessionDate()
         let label = WorkoutStore.sessionLabel(date: savedAt, plan: sourcePlan, exercises: exerciseLogs, customs: store.customExercises)
         let session = SessionLog(
             id: UUID(),
@@ -2163,15 +2337,23 @@ struct TodayView: View {
         // the day). Only saved workouts appear there — the draft is
         // cleared right after, so harvest first.
         for (exerciseID, text) in store.draftNotes {
-            if let template = exercises.first(where: { $0.id == exerciseID }) {
-                // The note is stamped with when it was typed, not when
-                // the workout was saved. (DaRon 21:51.)
-                store.addWorkoutNote(exerciseName: template.name, dayTitle: sourcePlan.title, text: text, date: store.draftNoteTimes[exerciseID] ?? Date())
-            }
+            // Never drop typed text: an exercise removed from the
+            // workout still keeps its note (named from the library).
+            let name = exercises.first(where: { $0.id == exerciseID })?.name
+                ?? ExerciseLibrary.byId(exerciseID, plus: store.customExercises)?.name
+                ?? "Workout note"
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            // Stamped with when it was typed (DaRon 21:51), titled with the
+            // session as saved, not the plan it came from.
+            store.addWorkoutNote(exerciseName: name, dayTitle: session.dayTitle, text: text,
+                                 date: store.draftNoteTimes[exerciseID] ?? Date())
         }
         store.clearDraft()
         saved = true
-        store.ensureDraft(for: plan)
+        Self.setTrainAnywayDay(nil)
+        // Today's own plan (not the saved one: a carried-over or
+        // train-anyway plan must not be rebuilt as today's workout).
+        if let today = self.plan { store.ensureDraft(for: today) }
         // A "Train anyway" session ends back on the rest-day screen:
         // the override clears, so Today falls back to the rest-day
         // view for today. (On a normal workout day this is nil
@@ -2193,6 +2375,10 @@ struct TodayView: View {
 // can never resize the body or push the workout list around. All timer
 // behavior is unchanged (counts down live, Pause freezes/resumes, Stop
 // cancels, +/− adjust, "Drink water" on every rest).
+
+private extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
 
 struct RestTimerCard: View {
     @EnvironmentObject var store: WorkoutStore
@@ -2418,7 +2604,10 @@ struct RestTimerCard: View {
                 if untilEnd > 0 {
                     try? await Task.sleep(for: .seconds(untilEnd))
                     await MainActor.run {
-                        if store.restEndsAt == endsAt {
+                        // Late wake-up (the app was in the background when
+                        // it ended): the notification already alerted —
+                        // no stale chime on return.
+                        if store.restEndsAt == endsAt, Date().timeIntervalSince(endsAt) <= 2 {
                             playExpiryFeedback()
                         }
                     }
@@ -2505,6 +2694,11 @@ struct ExerciseCard: View {
     @State private var showHistory = false
     @State private var showPlates = false
     @State private var noteText: String = ""
+    /// The card's content width, so every set row in it picks the same
+    /// layout (full or compact) — rows used to decide one by one, and a
+    /// row with a "Prev" hint went compact while its neighbours didn't.
+    @State private var contentWidth: CGFloat = 0
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @FocusState private var noteFocused: Bool
     @FocusState private var routineNoteFocused: Bool
 
@@ -2524,41 +2718,67 @@ struct ExerciseCard: View {
     /// (DaRon 22:32: completed work mutes to a faint accent tint.)
     private var isFullyDone: Bool { !sets.isEmpty && sets.allSatisfy { $0.done } }
 
+    @Environment(\.dynamicTypeSize) private var cardTypeSize
+
+    private var cardTitle: some View {
+        Text(template.name)
+            .font(.headline)
+            .lineLimit(cardTypeSize.isAccessibilitySize ? 3 : 2)
+            .minimumScaleFactor(0.8)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+    }
+
+    private var currentPill: some View {
+        Text("Current")
+            .font(.caption)
+            .bold()
+            .foregroundStyle(isFullyDone ? CompletedTint.completedGlyph : .white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(isFullyDone ? CompletedTint.completedFill : Color.accentColor)
+            .clipShape(Capsule())
+            .lineLimit(1)
+            .fixedSize()
+            .layoutPriority(2)
+    }
+
+    /// Rest pill (Fitbod "1:30 rest" pattern) — the rest length in effect
+    /// for this exercise. The pills keep their size; a long name wraps to
+    /// two lines instead of crushing the rest pill to a dot ("Arm
+    /// Superset: Pushdown + Hammer Curl").
+    private var restPill: some View {
+        Text("\(Int(store.restSeconds(for: template)))s rest")
+            .font(.caption)
+            .foregroundStyle(Theme.secondaryText)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Theme.cardElevated)
+            .clipShape(Capsule())
+            .lineLimit(1)
+            .fixedSize()
+            .layoutPriority(2)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(template.name)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.5)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                if isCurrent {
-                    Text("Current")
-                        .font(.caption)
-                        .bold()
-                        .foregroundStyle(isFullyDone ? CompletedTint.completedGlyph : .white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(isFullyDone ? CompletedTint.completedFill : Color.accentColor)
-                        .clipShape(Capsule())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+            // Large accessibility text: the name gets its own line and the
+            // pills sit under it (side by side the name shrank to nothing).
+            if cardTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    cardTitle
+                    HStack(spacing: 8) {
+                        if isCurrent { currentPill }
+                        restPill
+                    }
                 }
-                Spacer()
-                // Rest pill (Fitbod "1:30 rest" pattern) — the rest length
-                // in effect for this exercise. The scale factor keeps the
-                // pill on one line instead of clipping at narrow widths
-                // (the DB Row header was cut off in the open pose, 20:52).
-                Text("\(Int(store.restSeconds(for: template)))s rest")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Theme.cardElevated)
-                    .clipShape(Capsule())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+            } else {
+                HStack(spacing: 8) {
+                    cardTitle
+                    if isCurrent { currentPill }
+                    Spacer(minLength: 0)
+                    restPill
+                }
             }
             Text("\(template.sets) × \(template.repRange) · \(doneCount)/\(totalSets) done")
                 .font(.subheadline)
@@ -2616,14 +2836,23 @@ struct ExerciseCard: View {
                 .buttonStyle(.bordered)
             }
 
-            ForEach(Array(sets.enumerated()), id: \.offset) { index, _ in
+            // Rows keyed by the set's own id, with bindings that look the
+            // set up by id: deleting a row (even a focused one) can't
+            // shift another set into its field or index past the end.
+            ForEach(Array(sets.enumerated()), id: \.element.id) { index, set in
                 SetRow(
                     number: index + 1,
-                    set: $sets[index],
+                    set: setBinding(id: set.id, fallback: set),
                     template: template,
                     previous: previousSet(at: index),
-                    onDelete: { store.removeSet(at: index, for: template) },
-                    onFieldFocus: onFieldFocus
+                    onDelete: {
+                        if let i = sets.firstIndex(where: { $0.id == set.id }) {
+                            store.removeSet(at: i, for: template)
+                        }
+                    },
+                    onFieldFocus: onFieldFocus,
+                    compact: rowsCompact,
+                    canDelete: sets.count > 1
                 )
             }
 
@@ -2679,7 +2908,13 @@ struct ExerciseCard: View {
                 }
                 .onSubmit { noteFocused = false }
                 .onAppear { noteText = store.draftNotes[template.id] ?? "" }
+                // Follow the draft when it changes underneath (saved and
+                // cleared, swapped, reconciled) — not while typing.
+                .onChange(of: store.draftNotes[template.id]) { _, newValue in
+                    if !noteFocused, (newValue ?? "") != noteText { noteText = newValue ?? "" }
+                }
                 .onChange(of: noteText) { _, newValue in
+                    guard (store.draftNotes[template.id] ?? "") != newValue else { return }
                     store.draftNotes[template.id] = newValue
                     // Stamp the moment the note was first typed, not
                     // the moment the workout is saved. (DaRon 21:51:
@@ -2704,6 +2939,7 @@ struct ExerciseCard: View {
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         .padding()
         .background(Theme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -2717,7 +2953,7 @@ struct ExerciseCard: View {
             ExerciseHistorySheet(template: template)
         }
         .sheet(isPresented: $showPlates) {
-            PlateCalculatorSheet(template: template)
+            PlateCalculatorSheet(template: template, weightLb: currentSetWeight)
         }
     }
 
@@ -2783,26 +3019,44 @@ struct ExerciseCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
     }
 
+    // Saved per exercise in the store (and applied to today's draft),
+    // so they come back every time this exercise appears.
     private var restOverrideBinding: Binding<Double> {
         Binding(
             get: { template.restSeconds ?? store.settings.restSecondsDefault },
-            set: { newValue in
-                if let index = store.draftExercises.firstIndex(where: { $0.id == template.id }) {
-                    store.draftExercises[index].restSeconds = newValue
-                }
-            }
+            set: { store.setRestOverride($0, for: template.id) }
         )
     }
 
     private var unitOverrideBinding: Binding<WeightUnit?> {
         Binding(
             get: { template.unitOverride },
+            set: { store.setUnitOverride($0, for: template.id) }
+        )
+    }
+
+    /// Same layout for every row in this card, from the card's width.
+    private var rowsCompact: Bool {
+        // Large accessibility text: always the compact row. The full row
+        // is wider than the folded screen there, and at launch it stretched
+        // the card (and the whole page) off the left edge.
+        if cardTypeSize.isAccessibilitySize { return true }
+        let full: CGFloat = horizontalSizeClass == .regular ? 410 : 378
+        return contentWidth > 0 && contentWidth < full
+    }
+
+    private func setBinding(id: UUID, fallback: SetLog) -> Binding<SetLog> {
+        Binding(
+            get: { sets.first(where: { $0.id == id }) ?? fallback },
             set: { newValue in
-                if let index = store.draftExercises.firstIndex(where: { $0.id == template.id }) {
-                    store.draftExercises[index].unitOverride = newValue
-                }
+                if let i = sets.firstIndex(where: { $0.id == id }) { sets[i] = newValue }
             }
         )
+    }
+
+    /// The weight being lifted now: the next set to do, else the last set.
+    private var currentSetWeight: Double? {
+        (sets.first(where: { !$0.done }) ?? sets.last)?.weightLb
     }
 
     private var preferenceBinding: Binding<ExercisePreference> {
@@ -2815,11 +3069,7 @@ struct ExerciseCard: View {
     private var routineNoteBinding: Binding<String> {
         Binding(
             get: { template.note ?? "" },
-            set: { newValue in
-                if let index = store.draftExercises.firstIndex(where: { $0.id == template.id }) {
-                    store.draftExercises[index].note = newValue.isEmpty ? nil : newValue
-                }
-            }
+            set: { store.setRoutineNote($0, for: template.id) }
         )
     }
 
@@ -2852,6 +3102,10 @@ struct SetRow: View {
     /// Reports focus changes up to TodayView (field id or nil on blur)
     /// so the layout can scroll the focused field above the keyboard.
     var onFieldFocus: ((String?) -> Void)? = nil
+    /// The card's layout choice for all its rows (nil: decide alone).
+    var compact: Bool? = nil
+    /// False on an exercise's only set (it can't be deleted).
+    var canDelete: Bool = true
 
     @EnvironmentObject private var store: WorkoutStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -2874,16 +3128,20 @@ struct SetRow: View {
         )
     }
 
+    /// Up to 2000 lb (907 kg): a heavy leg press or sled is well past
+    /// the old 500 lb cap, which silently cut the number down.
     private var weightRange: ClosedRange<Double> {
-        unit == .kg ? 0...225 : 0...500
+        unit == .kg ? 0...907 : 0...2000
     }
 
+    /// 0–999 reps: 0 logs a failed attempt, and timed/high-rep work
+    /// passes 30.
     private var repsBinding: Binding<Double?> {
         Binding(
             get: { Double(set.reps) },
             set: { newValue in
                 if let newValue {
-                    set.reps = max(1, min(30, Int(newValue)))
+                    set.reps = max(0, min(999, Int(newValue)))
                 }
             }
         )
@@ -2900,9 +3158,13 @@ struct SetRow: View {
     var body: some View {
         // Narrow page (side bar on, line at the hinge): a compact row with
         // smaller boxes, so the whole row fits instead of being cut off.
-        ViewThatFits(in: .horizontal) {
-            row(compact: false)
-            row(compact: true)
+        if let compact {
+            row(compact: compact)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                row(compact: false)
+                row(compact: true)
+            }
         }
     }
 
@@ -2937,7 +3199,9 @@ struct SetRow: View {
             .buttonStyle(.plain)
             .frame(width: 32, height: 32)
             .contentShape(Rectangle())
-            .accessibilityLabel("Mark set \(number) done")
+            .accessibilityLabel("Set \(number)")
+            .accessibilityValue(set.done ? "Done" : "Not done")
+            .accessibilityHint(set.done ? "Double-tap to uncheck" : "Double-tap to mark done")
 
             // Accessibility text sizes: just the number — "Set" no longer
             // fits beside the fixed-width fields and truncated to "S…".
@@ -3000,7 +3264,7 @@ struct SetRow: View {
             Spacer()
 
             HStack(spacing: 2) {
-                NumberField(prompt: "–", keyboardType: .decimalPad, range: weightRange, value: weightBinding, width: compact ? 50 : fieldWidth, fieldID: "field-weight-\(template.id)-\(number)", onFocusChange: { focused in
+                NumberField(prompt: "–", keyboardType: .decimalPad, range: weightRange, value: weightBinding, width: compact ? 50 : fieldWidth, fieldID: "field-weight-\(template.id)-\(number)", accessibilityLabel: "Set \(number) weight, \(unit == .kg ? "kilograms" : "pounds")", onFocusChange: { focused in
                     onFieldFocus?(focused ? "field-weight-\(template.id)-\(number)" : nil)
                 })
                     .layoutPriority(1)
@@ -3012,7 +3276,7 @@ struct SetRow: View {
             }
 
             HStack(spacing: 2) {
-                NumberField(prompt: "–", keyboardType: .numberPad, range: 1...30, value: repsBinding, width: compact ? 50 : fieldWidth, fieldID: "field-reps-\(template.id)-\(number)", onFocusChange: { focused in
+                NumberField(prompt: "–", keyboardType: .numberPad, range: 0...999, value: repsBinding, width: compact ? 50 : fieldWidth, fieldID: "field-reps-\(template.id)-\(number)", accessibilityLabel: "Set \(number) reps", onFocusChange: { focused in
                     onFieldFocus?(focused ? "field-reps-\(template.id)-\(number)" : nil)
                 })
                     .layoutPriority(1)
@@ -3044,7 +3308,12 @@ struct SetRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // The only set can't go (an exercise keeps one set) — dimmed
+            // and explained instead of a tap that silently did nothing.
+            .disabled(!canDelete)
+            .opacity(canDelete ? 1 : 0.35)
             .accessibilityLabel("Delete set")
+            .accessibilityHint(canDelete ? "" : "An exercise keeps at least one set. Remove the exercise in Edit instead.")
         }
         // Done rows sit back slightly — but only a touch: the old 0.6
         // dim would bury the faint completed tint to near-invisible,
@@ -3065,6 +3334,8 @@ struct NumberField: View {
     /// / "field-reps-<id>-<set>"), and a focus report up to TodayView.
     /// Both default to off — a field without them just edits numbers.
     var fieldID: String? = nil
+    /// VoiceOver name for the field ("Set 2 weight, pounds").
+    var accessibilityLabel: String? = nil
     var onFocusChange: ((Bool) -> Void)? = nil
 
     @FocusState private var isFocused: Bool
@@ -3090,6 +3361,7 @@ struct NumberField: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
             .focused($isFocused)
+            .accessibilityLabel(accessibilityLabel ?? prompt)
             .id(fieldID)
             .onAppear { syncFromValue() }
             .onChange(of: value) { syncFromValue() }
@@ -3102,7 +3374,8 @@ struct NumberField: View {
     }
 
     private func displayText(for value: Double?) -> String {
-        guard let value, value > 0 else { return "" }
+        guard let value, value >= 0 else { return "" }
+        if value == 0 { return range.lowerBound == 0 && keyboardType == .numberPad ? "0" : "" }
         if value == value.rounded() { return String(Int(value)) }
         return roundedWeightText(value)
     }
@@ -3134,7 +3407,7 @@ struct NumberField: View {
             value = nil
             return
         }
-        if let parsed = Double(cleaned), parsed > 0 {
+        if let parsed = Double(cleaned), parsed > 0 || (parsed == 0 && range.lowerBound == 0) {
             value = min(max(parsed, range.lowerBound), range.upperBound)
         }
     }
@@ -3143,7 +3416,7 @@ struct NumberField: View {
         let cleaned = text.trimmingCharacters(in: .whitespaces)
         if cleaned.isEmpty {
             value = nil
-        } else if let parsed = Double(cleaned), parsed > 0 {
+        } else if let parsed = Double(cleaned), parsed > 0 || (parsed == 0 && range.lowerBound == 0) {
             value = min(max(parsed, range.lowerBound), range.upperBound)
         }
         text = displayText(for: value)
@@ -3478,14 +3751,23 @@ struct ExerciseHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
     let template: ExerciseTemplate
 
-    private var logs: [ExerciseLog] {
-        store.sessions
-            .sorted { $0.date > $1.date }
-            .flatMap { session in
-                session.exercises.filter { $0.exerciseId == template.id }
-                    .map { (session.date, $0) }
+    /// One row per logged exercise per session, newest first. Keyed by
+    /// session id + position (the old key was the exercise name, the
+    /// same on every row, so the list repeated one session).
+    private struct Entry: Identifiable {
+        let id: String
+        let date: Date
+        let log: ExerciseLog
+    }
+
+    private var entries: [Entry] {
+        var out: [Entry] = []
+        for session in store.sessions.sorted(by: { $0.date > $1.date }) {
+            for (i, log) in session.exercises.enumerated() where log.exerciseId == template.id {
+                out.append(Entry(id: "\(session.id.uuidString)-\(i)", date: session.date, log: log))
             }
-            .map { $0.1 }
+        }
+        return out
     }
 
     var body: some View {
@@ -3502,18 +3784,26 @@ struct ExerciseHistorySheet: View {
                     }
                 }
                 Section("Past sessions") {
-                    if logs.isEmpty {
+                    if entries.isEmpty {
                         Text("No sessions logged for this exercise yet.")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
-                    ForEach(logs, id: \.name) { log in
+                    ForEach(entries) { entry in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(log.sets.map { set in
-                                "\(store.displayWeightLabel(set.weightLb, isPair: log.isPair, for: template)) × \(set.reps)"
-                            }.joined(separator: ", "))
+                            Text(entry.date, format: .dateTime.weekday(.abbreviated).month().day().year())
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                            // Undone sets are marked, not passed off as lifted.
+                            entry.log.sets.enumerated().reduce(Text("")) { text, item in
+                                let (i, set) = item
+                                let label = Text("\(store.setWeightText(set, exercise: entry.log))\(set.done ? "" : " (not done)")")
+                                    .foregroundColor(set.done ? Theme.text : Theme.secondaryText)
+                                return i == 0 ? label : text + Text(", ") + label
+                            }
                             .font(.subheadline)
                         }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
@@ -3534,9 +3824,12 @@ struct PlateCalculatorSheet: View {
     @EnvironmentObject var store: WorkoutStore
     @Environment(\.dismiss) private var dismiss
     let template: ExerciseTemplate
+    /// Today's set weight (the set being lifted now). Falls back to the
+    /// last session's weight when today's set has none.
+    var weightLb: Double? = nil
 
     private var workingWeight: Double {
-        store.lastWeight(for: template) ?? template.defaultWeightLb ?? 0
+        weightLb.flatMap { $0 > 0 ? $0 : nil } ?? store.lastWeight(for: template) ?? template.defaultWeightLb ?? 0
     }
 
     var body: some View {

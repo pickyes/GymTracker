@@ -1,4 +1,5 @@
 import SwiftUI
+import Network
 
 /// First-launch gate: until onboarding completes, the intro flow shows.
 /// Returning users (flag set, or adopted from before onboarding existed)
@@ -30,6 +31,10 @@ import SwiftUI
 ///   safe area here (it pushes the title down and leaves a big gap).
 struct ContentView: View {
     @EnvironmentObject var store: WorkoutStore
+    #if DEBUG
+    /// The -sampleHistory launch argument loads once, not on every appear.
+    private static var sampleArgLoaded = false
+    #endif
     @State private var selectedPage: Page = .today
     @State private var navExpanded = false
     @State private var showCalendar = false
@@ -82,9 +87,11 @@ struct ContentView: View {
         guard duo.sideStatusBar else { return nil }
         if let verticalBarEdge { return verticalBarEdge }
         let dsMode = Self.isWide(steadySize) && steadySize.height > steadySize.width
-        return dsMode && duo.sideStrip ? .trailing : nil
+        return dsMode ? .trailing : nil
     }
     private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
+    /// The side bar is showing where iOS's status bar is horizontal.
+    private var drawsOwnStatusBar: Bool { rail != nil && verticalBarEdge == nil }
     static let railWidth: CGFloat = 84
     /// Side status bar on: the buttons' own column beside the strip.
     static let buttonColumn: CGFloat = 76
@@ -144,7 +151,7 @@ struct ContentView: View {
     }
 
     /// The grey side bar is showing (Settings → Side bar strip).
-    private var sideBar: Bool { rail != nil && duo.sideStrip }
+    private var sideBar: Bool { rail != nil }
 
     /// One page in the side bar: icon over a short label, lit when current.
     /// Back, in the side bar, when the page has somewhere to go back to
@@ -171,6 +178,7 @@ struct ContentView: View {
     private func railNavItem(_ page: Page, labeled: Bool, width: CGFloat = 70) -> some View {
         let active = page == selectedPage
         return Button {
+            dismissKeyboard()
             withAnimation(AppAnimation.snappy) { selectedPage = page }
         } label: {
             VStack(spacing: 4) {
@@ -209,6 +217,13 @@ struct ContentView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressSqueeze())
+        // The bar is a fixed-width strip, like a tab bar: its icons stop
+        // growing at xx-Large (bigger text made them overlap), and a long
+        // press shows the large-content preview instead.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        .accessibilityShowsLargeContentViewer {
+            Label(page.title, systemImage: page.systemImage)
+        }
         .accessibilityLabel(page.title)
         .accessibilityAddTraits(active ? .isSelected : [])
     }
@@ -250,7 +265,7 @@ struct ContentView: View {
                             : rail == .trailing ? proxy.safeAreaInsets.trailing : 0
                         // Strip off (Settings): the pages run under the side
                         // status bar; only the button column stays clear.
-                        let strip = rail != nil && duo.sideStrip
+                        let strip = rail != nil   // The grey bar always comes with the side status bar (DaRon)
                         let extraRail = strip ? max(0, Self.railWidth - systemRail) : 0
                         let railTotal = strip ? systemRail + extraRail : 0
                         // The status icons sit centered in the system's own
@@ -269,14 +284,15 @@ struct ContentView: View {
                         pageStack
                             // Plus a clear column for the buttons beside the
                             // strip, so nothing runs under them (DaRon).
-                            .frame(width: rail == nil ? proxy.size.width
-                                   : strip ? proxy.size.width - extraRail - 1
-                                   : proxy.size.width + systemRail)
+                            // Strip on: stop short of the strip. Strip off: just
+                            // run under the status bar on that edge (forcing a
+                            // wider frame slid the page off the far edge).
+                            .frame(width: strip ? proxy.size.width - extraRail - 1 : nil)
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
+                            .ignoresSafeArea(.container, edges: rail != nil && !strip ? (rail == .leading ? .leading : .trailing) : [])
                             // Nothing drawn past the page area's sides (shadows,
                             // glows); top and bottom still run to the edges.
                             .mask(Rectangle().padding(.vertical, -600))
-                            .ignoresSafeArea(.container, edges: rail != nil && !strip ? (rail == .leading ? .leading : .trailing) : [])
                             .environment(\.railEdge, rail)
                             // Where the hinge is across the pages.
                             .environment(\.duoHingeX,
@@ -348,6 +364,15 @@ struct ContentView: View {
                             .accessibilityHidden(true)
                             // Today's blue + lives in the side bar, under the
                             // status icons (DaRon: "an actual side bar").
+                            if drawsOwnStatusBar {
+                                RailStatusBar()
+                                    .frame(width: iconCenter * 2)
+                                    .padding(.top, 22)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                           alignment: rail == .leading ? .topLeading : .topTrailing)
+                                    .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
+                                    .allowsHitTesting(false)
+                            }
                             // The pages, listed like Claude's side bar (DaRon):
                             // tap to go, the current one lit up.
                             if !store.calendarDropdownOpen {
@@ -360,7 +385,9 @@ struct ContentView: View {
                                 // pages whether shown or not, so the page icons
                                 // never move (DaRon).
                                 VStack(spacing: railLabeled ? 6 : 4) {
-                                    railBackButton
+                                    // A real 52pt slot whether Back shows or not (an
+                                    // empty `if` collapsed it, so the icons moved).
+                                    ZStack { Color.clear; railBackButton }
                                         .frame(width: 52, height: 52)
                                     ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled, width: railItemWidth) }
                                 }
@@ -508,6 +535,8 @@ struct ContentView: View {
         #if DEBUG
         // Testing: launch with -sampleHistory veteran|regular|newLifter.
         .onAppear {
+            guard !Self.sampleArgLoaded else { return }
+            Self.sampleArgLoaded = true
             let args = CommandLine.arguments
             if let i = args.firstIndex(of: "-sampleHistory"), i + 1 < args.count,
                let p = SampleProfile(rawValue: args[i + 1]) { store.loadSampleHistory(p) }
@@ -538,7 +567,10 @@ struct ContentView: View {
         // top safe area so the page title sits tight under the status bar
         // instead of being pushed down — do NOT ignore the top safe area
         // here (it adds a big gap above the title).
-        .statusBarHidden(false)
+        // Open and upright with the side bar: iOS keeps its status bar
+        // across the top, so it's hidden and the app draws the time,
+        // Wi-Fi and battery down the side bar instead (DaRon).
+        .statusBarHidden(drawsOwnStatusBar)
         // Pending onboarding decision (Debug Pass 2): finishing a retake
         // while DaRon's preset is active stashes the result in
         // `pendingOnboarding` instead of silently replacing the preset.
@@ -998,6 +1030,7 @@ struct ContentView: View {
     /// when it is the page you are on.
     private func pagePill(_ page: Page) -> some View {
         Button {
+            dismissKeyboard()
             withAnimation(AppAnimation.snappy) {
                 selectedPage = page
                 navExpanded = false
@@ -1222,7 +1255,21 @@ struct VerticalBarEdgeReader: UIViewRepresentable {
         private var lastOrientation = -1
         private var last: HorizontalEdge?? = .none
 
-        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            report()
+            // A 180° turn keeps the same size and traits, so nothing above
+            // fires; the camera end would stay wrong (red team).
+            if observer == nil {
+                observer = NotificationCenter.default.addObserver(
+                    forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
+                ) { [weak self] _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.report() }
+                }
+            }
+        }
+        private var observer: NSObjectProtocol?
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
         override func layoutSubviews() { super.layoutSubviews(); report() }
         override func traitCollectionDidChange(_ previous: UITraitCollection?) {
             super.traitCollectionDidChange(previous); report()
@@ -1271,4 +1318,73 @@ private struct RailGlassHighlight: View {
                 .shadow(color: (tint ?? .clear).opacity(0.5), radius: 10, x: 0, y: 4)
         }
     }
+}
+
+
+/// The time, Wi-Fi and battery, stacked down the side bar, for the pose
+/// where iOS only offers a horizontal status bar.
+struct RailStatusBar: View {
+    @StateObject private var net = NetworkWatch()
+    @State private var battery: Float = UIDevice.current.batteryLevel
+    @State private var charging = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            TimelineView(.everyMinute) { ctx in
+                Text(ctx.date, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
+                    .font(.system(size: 17, weight: .semibold).monospacedDigit())
+            }
+            Image(systemName: net.wifi ? "wifi" : (net.connected ? "antenna.radiowaves.left.and.right" : "wifi.slash"))
+                .font(.system(size: 15, weight: .semibold))
+            if battery >= 0 {
+                VStack(spacing: 2) {
+                    Image(systemName: charging ? "battery.100.bolt" : batterySymbol)
+                        .font(.system(size: 17))
+                    Text("\(Int((battery * 100).rounded()))")
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                }
+            }
+        }
+        .foregroundStyle(Theme.text)
+        .accessibilityElement(children: .combine)
+        .onAppear {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in refresh() }
+    }
+
+    private var batterySymbol: String {
+        switch battery {
+        case ..<0.13: return "battery.0"
+        case ..<0.38: return "battery.25"
+        case ..<0.63: return "battery.50"
+        case ..<0.88: return "battery.75"
+        default: return "battery.100"
+        }
+    }
+
+    private func refresh() {
+        battery = UIDevice.current.batteryLevel
+        let st = UIDevice.current.batteryState
+        charging = st == .charging || st == .full
+    }
+}
+
+/// Connected / on Wi-Fi, from the system's network path.
+final class NetworkWatch: ObservableObject {
+    @Published var connected = true
+    @Published var wifi = true
+    private let monitor = NWPathMonitor()
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.connected = path.status == .satisfied
+                self?.wifi = path.usesInterfaceType(.wifi)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "status.net"))
+    }
+    deinit { monitor.cancel() }
 }

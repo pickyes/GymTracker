@@ -873,13 +873,22 @@ struct LiveBodyView: View {
     }
 
     private var sidePicker: some View {
-        Picker("View", selection: $side) {
+        // Only the user's own pick counts as a flip: the auto side
+        // (bestSide on appear / exercise change) also writes `side`, and
+        // an onChange(of: side) here marked those as user flips, so the
+        // figure stopped following the exercise after the first change.
+        Picker("View", selection: Binding(
+            get: { side },
+            set: { newValue in
+                userFlipped = true
+                side = newValue
+            }
+        )) {
             ForEach(BodyDiagramSide.allCases, id: \.self) { side in
                 Text(side.label).tag(side)
             }
         }
         .pickerStyle(.segmented)
-        .onChange(of: side) { _, _ in userFlipped = true }
     }
 
     var body: some View {

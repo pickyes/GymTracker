@@ -100,11 +100,11 @@ struct HistoryView: View {
                 // Folded there's no other page: the chosen day and the
                 // training heatmap sit here instead.
                 if !duoWide {
-                    Section {
-                        selectedDayRows
-                    } header: {
-                        Text(selectedDay, format: .dateTime.weekday(.wide).month().day())
-                    }
+                    // Plain heading rows, not section headers: a header
+                    // pins to the top and the rows slid under it
+                    // ("Rest day" over "Saturday, Nov 21").
+                    listHeading(Text(selectedDay, format: .dateTime.weekday(.wide).month().day()))
+                    selectedDayRows
                 }
                 toolTiles
                     .padding(.trailing, cornerButtonsInset)
@@ -117,9 +117,8 @@ struct HistoryView: View {
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowBackground(Color.clear)
                 }
-                Section("Personal records") {
-                    personalRecordsView
-                }
+                listHeading(Text("Personal records"))
+                personalRecordsView
                 // A plain heading row: a section header stays pinned to
                 // the top and slid over the cards while scrolling.
                 Text("This week")
@@ -133,7 +132,8 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
-                Section("All sessions") {
+                listHeading(Text("All sessions"))
+                Group {
                     if store.sessions.isEmpty {
                         Text("No sessions yet — finish a workout from Today and it will show up here.")
                             .font(.subheadline)
@@ -149,6 +149,7 @@ struct HistoryView: View {
                                 Button(role: .destructive) { sessionToDelete = session } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                                .tint(.red)
                             }
                     }
                 }
@@ -188,7 +189,9 @@ struct HistoryView: View {
         } detail: {
             Group {
                 if let session = store.sessions.first(where: { $0.id == selectedSessionID }) {
-                    SessionDetailView(session: session)
+                    // Deleting from the detail clears the selection, so a
+                    // compact push never sits on a dead id.
+                    SessionDetailView(session: session, onDelete: { selectedSessionID = nil })
                 } else {
                     ContentUnavailableView("Select a workout", systemImage: "clock.arrow.circlepath")
                         .navigationTitle("History")
@@ -234,6 +237,13 @@ struct HistoryView: View {
         }
         .onChange(of: horizontalSizeClass) { _, newValue in
             if newValue == .compact { selectedSessionID = nil }
+        }
+        // A selection whose session no longer exists (deleted here, from
+        // the other page, or by a sample-data swap) is no selection.
+        .onChange(of: store.sessions.count) { _, _ in
+            if let id = selectedSessionID, !store.sessions.contains(where: { $0.id == id }) {
+                selectedSessionID = nil
+            }
         }
         // D9: pose flip while the empty detail is showing — restore the
         // latest session when the width becomes regular again.
@@ -292,17 +302,35 @@ struct HistoryView: View {
         }
     }
 
+    /// A section title as an ordinary row, so it scrolls away with its
+    /// rows instead of pinning over them.
+    private func listHeading(_ text: Text) -> some View {
+        text
+            .font(.headline)
+            .foregroundStyle(Theme.secondaryText)
+            .accessibilityAddTraits(.isHeader)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+    }
+
     private func toolTile(_ title: String, systemImage: String) -> some View {
         VStack(spacing: 6) {
             Image(systemName: systemImage)
                 .font(.title3)
                 .foregroundStyle(Color.accentColor)
+                // One icon height, so the three tiles match (the symbols
+                // differ in height and made the tiles uneven).
+                .frame(height: 26)
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.6)
         }
+        // Room at the sides so a long label ("Strength graph") shrinks
+        // instead of touching the tile's edge.
+        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
         .themeCard(cornerRadius: 16)
@@ -314,8 +342,11 @@ struct HistoryView: View {
     /// The chosen day's workouts (tap to open), or what was planned.
     @ViewBuilder
     private var selectedDayRows: some View {
-        let cal = Calendar.current
-        let daySessions = store.sessions.filter { cal.isDate($0.date, inSameDayAs: selectedDay) }
+        // The calendar's own day rules (CalendarDayIndex): a day before
+        // tracking started is never "Missed" here either.
+        let index = CalendarDayIndex(store: store)
+        let daySessions = index.sessions(on: selectedDay)
+        let status = index.status(for: selectedDay)
         if !daySessions.isEmpty {
             ForEach(daySessions) { session in
                 SessionRowView(session: session)
@@ -324,10 +355,11 @@ struct HistoryView: View {
                         Button(role: .destructive) { sessionToDelete = session } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                        .tint(.red)
                     }
             }
-        } else if let plan = store.programDay(for: selectedDay) {
-            let isPast = selectedDay < cal.startOfDay(for: Date())
+        } else if status == .planned || status == .missed, let plan = index.plan(for: selectedDay) {
+            let isPast = status == .missed
             VStack(alignment: .leading, spacing: 6) {
                 Text(isPast ? "Missed · \(plan.title)" : "Planned · \(plan.title)")
                     .font(.headline)
@@ -344,7 +376,8 @@ struct HistoryView: View {
             }
             .padding(.vertical, 4)
         } else {
-            Text(selectedDay < cal.startOfDay(for: Date()) ? "Nothing logged that day." : "Rest day.")
+            Text(status == .beforeStart ? "Before you started tracking."
+                 : (selectedDay < index.today ? "Nothing logged that day." : "Rest day."))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -371,6 +404,8 @@ struct HistoryView: View {
         let lastWeek = lastWeekVolume
         // Volume ring: this week against last week (full once you match it).
         let volumeProgress = lastWeek > 0 ? volume / lastWeek : (volume > 0 ? 1 : 0)
+        let unit = store.settings.weightUnit
+        let streak = store.dayStreak
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 18) {
                 ActivityRings(rings: [
@@ -382,9 +417,9 @@ struct HistoryView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ringLegend("\(workouts)/\(plannedWorkouts)", "workouts", Color.accentColor)
                     ringLegend(targetSets > 0 ? "\(totalSets)/\(targetSets)" : "\(totalSets)", "sets", Theme.vividGreen)
-                    ringLegend(Self.shortPounds(volume), "lb moved", Theme.vividOrange)
+                    ringLegend(Self.shortVolume(volume, unit: unit), "\(unit.label) moved", Theme.vividOrange)
                     if lastWeek > 0 {
-                        Text("Last week \(Self.shortPounds(lastWeek)) lb")
+                        Text("Last week \(Self.shortVolume(lastWeek, unit: unit)) \(unit.label)")
                             .font(.caption)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -404,7 +439,6 @@ struct HistoryView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Streak").font(.caption).foregroundStyle(Theme.secondaryText)
-                    let streak = store.dayStreak
                     Text(store.dayText(streak))
                         .font(.headline)
                         .foregroundStyle(Theme.vividOrange)
@@ -425,8 +459,10 @@ struct HistoryView: View {
             .monospacedDigit()
     }
 
-    private static func shortPounds(_ lb: Double) -> String {
-        lb >= 10_000 ? String(format: "%.1fk", lb / 1000) : "\(Int(lb.rounded()))"
+    /// Volume in the user's unit, without the unit label.
+    private static func shortVolume(_ lb: Double, unit: WeightUnit) -> String {
+        let v = volumeInUnit(lb, unit: unit)
+        return v >= 10_000 ? String(format: "%.1fk", v / 1000) : "\(Int(v.rounded()))"
     }
 
     private var lastWeekVolume: Double {
@@ -491,7 +527,7 @@ struct HistoryView: View {
             switch store.settings.historyStat {
             case .volume:
                 statRow(label: "Volume this week",
-                        value: formattedVolumeLb(weeklyVolume))
+                        value: unitVolumeText(lb: weeklyVolume, unit: store.settings.weightUnit))
             case .bestWeight:
                 statRow(label: "Best lift this week",
                         value: bestLiftThisWeek ?? "—")
@@ -534,62 +570,100 @@ struct HistoryView: View {
     /// the displayed set is the one behind that best 1RM.
     private var bestLiftThisWeek: String? {
         let weekStart = weekStartDate(for: Date())
-        var best: (exercise: ExerciseLog, set: SetLog, oneRM: Double)?
+        var best: (exercise: ExerciseLog, set: SetLog, load: Double)?
         for session in store.sessions where session.date >= weekStart {
             for exercise in session.exercises {
-                guard ExerciseLibrary.byId(exercise.exerciseId, plus: store.customExercises)?.isCompound == true else { continue }
+                let lib = ExerciseLibrary.byId(exercise.exerciseId, plus: store.customExercises)
+                guard lib?.isCompound == true, !Self.isMachineStyle(lib) else { continue }
                 for set in exercise.sets where set.done && set.kind != .warmup {
                     guard let weight = set.weightLb,
                           let oneRM = validOneRepMax(weightLb: weight, reps: set.reps, isCompound: true) else { continue }
-                    if best == nil || oneRM > best!.oneRM {
-                        best = (exercise: exercise, set: set, oneRM: oneRM)
+                    // Per-hand dumbbell loads doubled to compare.
+                    let load = exercise.isPair ? oneRM * 2 : oneRM
+                    if best == nil || load > best!.load {
+                        best = (exercise: exercise, set: set, load: load)
                     }
                 }
             }
         }
-        guard let best else { return nil }
-        let template = ExerciseTemplate(id: best.exercise.exerciseId, name: best.exercise.name, sets: 1,
-                                        repRange: "", topReps: 1, defaultWeightLb: nil,
-                                        isPair: best.exercise.isPair, weightNote: nil, cues: nil)
-        return "\(best.exercise.name): \(store.displayWeightLabel(best.set.weightLb, isPair: best.exercise.isPair, for: template)) × \(best.set.reps)"
+        guard let best, let weight = best.set.weightLb else { return nil }
+        let unit = best.exercise.unitOverride ?? store.settings.weightUnit
+        return "\(best.exercise.name): \(liftWeightText(weight, isPair: best.exercise.isPair, unit: unit)) × \(best.set.reps)"
     }
 
-    private var bestOneRepMax: String? {
-        // One lookup pass instead of re-flattening the sessions per id.
-        var byId: [String: ExerciseLog] = [:]
+    /// Machine and cable lifts (leg press, hack squat, pulldowns, cable
+    /// rows): sled / stack numbers aren't comparable to free weights, so
+    /// a 400 lb leg press must not "beat" a 225 lb squat.
+    private static func isMachineStyle(_ lib: LibraryExercise?) -> Bool {
+        guard let lib else { return false }
+        return !lib.equipment.isDisjoint(with: [.machine, .cable])
+    }
+
+    /// Best valid 1RM per exercise in one pass (it re-scanned every
+    /// session per exercise), plus the LATEST log of it — its unit
+    /// override is the one the labels show.
+    private struct LiftBest {
+        let latest: ExerciseLog
+        let oneRM: Double          // as logged (per hand for pairs)
+        let isMachineStyle: Bool
+        /// One scale across lifts: per-hand dumbbell loads doubled.
+        var comparable: Double { latest.isPair ? oneRM * 2 : oneRM }
+    }
+
+    private var liftBests: [String: LiftBest] {
+        var latest: [String: ExerciseLog] = [:]
+        var best: [String: Double] = [:]
+        var machine: [String: Bool] = [:]
+        // store.sessions is newest-first: the first log seen is the latest.
         for session in store.sessions {
-            for exercise in session.exercises where byId[exercise.exerciseId] == nil {
-                byId[exercise.exerciseId] = exercise
+            for exercise in session.exercises {
+                let id = exercise.exerciseId
+                if latest[id] == nil {
+                    latest[id] = exercise
+                    let lib = ExerciseLibrary.byId(id, plus: store.customExercises)
+                    machine[id] = lib?.isCompound == true ? Self.isMachineStyle(lib) : nil
+                }
+                guard machine[id] != nil,
+                      let oneRM = bestValidOneRepMax(in: exercise.sets, isCompound: true) else { continue }
+                best[id] = max(best[id] ?? 0, oneRM)
             }
         }
-        var best: (name: String, oneRM: Double, isPair: Bool)?
-        for id in byId.keys {
-            guard let oneRM = store.oneRepMax(for: id) else { continue }
-            let exercise = byId[id]
-            let name = exercise?.name ?? id
-            let isPair = exercise?.isPair ?? false
-            if best == nil || oneRM > best!.oneRM {
-                best = (name, oneRM, isPair)
-            }
+        var out: [String: LiftBest] = [:]
+        for (id, oneRM) in best {
+            guard let log = latest[id] else { continue }
+            out[id] = LiftBest(latest: log, oneRM: oneRM, isMachineStyle: machine[id] ?? false)
         }
+        return out
+    }
+
+    private func liftText(_ lift: LiftBest) -> String {
+        let unit = lift.latest.unitOverride ?? store.settings.weightUnit
+        // An estimated max is a calculation, not a plate count: whole
+        // pounds (half kilos), never "193.33 lb".
+        let step = unit == .kg ? 0.5 / 0.45359237 : 1.0
+        let tidy = (lift.oneRM / step).rounded() * step
+        return liftWeightText(tidy, isPair: lift.latest.isPair, unit: unit)
+    }
+
+    /// The best max lift across free-weight compounds, compared on one
+    /// scale (per-hand dumbbells doubled; machine/cable lifts left out).
+    private var bestOneRepMax: String? {
+        let best = liftBests.values
+            .filter { !$0.isMachineStyle }
+            .max { $0.comparable < $1.comparable }
         guard let best else { return nil }
-        let template = ExerciseTemplate(id: "", name: best.name, sets: 1, repRange: "", topReps: 1,
-                                        defaultWeightLb: nil, isPair: best.isPair, weightNote: nil, cues: nil)
-        return "\(best.name): \(store.displayWeightLabel(best.oneRM, isPair: best.isPair, for: template))"
+        return "\(best.latest.name): \(liftText(best))"
     }
 
     /// Best lift per muscle group, from logged sessions (real data only).
     /// Same benchmarks as the Overall Strength score — compound lifts
     /// only, so the arm rows are gone: curls and pushdowns are
     /// isolation lifts with no valid 1RM (Gap 7), and a "record" for
-    /// them would be a made-up number.
+    /// them would be a made-up number. Within a group a free-weight lift
+    /// wins over a machine one (leg press vs squat aren't comparable);
+    /// per-hand dumbbell loads are doubled to compare.
     private var personalRecords: [(muscle: MuscleGroup, name: String, weight: String)] {
-        var byId: [String: ExerciseLog] = [:]
-        for session in store.sessions {
-            for exercise in session.exercises where byId[exercise.exerciseId] == nil {
-                byId[exercise.exerciseId] = exercise
-            }
-        }
+        let bests = liftBests
         let benchmarks: [(MuscleGroup, [String])] = [
             (.quads, ["squat", "leg-press", "hack-squat"]),
             (.chest, ["barbell-bench", "dumbbell-bench", "flat-bench"]),
@@ -598,27 +672,17 @@ struct HistoryView: View {
         ]
         var rows: [(muscle: MuscleGroup, name: String, weight: String)] = []
         for (muscle, ids) in benchmarks {
-            var best: (name: String, oneRM: Double, isPair: Bool)?
-            for id in ids {
-                guard let oneRM = store.oneRepMax(for: id) else { continue }
-                let exercise = byId[id]
-                let name = exercise?.name ?? id
-                let isPair = exercise?.isPair ?? false
-                if best == nil || oneRM > best!.oneRM {
-                    best = (name, oneRM, isPair)
-                }
-            }
-            guard let best else { continue }
-            let template = ExerciseTemplate(id: "", name: best.name, sets: 1, repRange: "", topReps: 1,
-                                            defaultWeightLb: nil, isPair: best.isPair, weightNote: nil, cues: nil)
-            rows.append((muscle: muscle, name: best.name,
-                         weight: store.displayWeightLabel(best.oneRM, isPair: best.isPair, for: template)))
+            let candidates = ids.compactMap { bests[$0] }
+            let pool = candidates.contains { !$0.isMachineStyle } ? candidates.filter { !$0.isMachineStyle } : candidates
+            guard let best = pool.max(by: { $0.comparable < $1.comparable }) else { continue }
+            rows.append((muscle: muscle, name: best.latest.name, weight: liftText(best)))
         }
         return rows
     }
 
     private var personalRecordsView: some View {
-        Group {
+        let personalRecords = personalRecords
+        return Group {
             if personalRecords.isEmpty {
                 Text("No records yet — finish a workout and your best lifts will show up here.")
                     .font(.subheadline)
@@ -781,6 +845,7 @@ struct HistoryView: View {
 /// One session row in the History list. Extracted so the list body stays
 /// a small, fast-to-type-check expression.
 struct SessionRowView: View {
+    @EnvironmentObject var store: WorkoutStore
     let session: SessionLog
 
     var body: some View {
@@ -791,7 +856,7 @@ struct SessionRowView: View {
             Text(session.date, format: .dateTime.weekday(.wide).month().day().year())
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
-            Text("\(pluralised(session.exercises.count, singular: "exercise")) · \(setsDoneText(done: doneSets)) · \(formattedVolumeLb(sessionVolume))")
+            Text("\(pluralised(session.exercises.count, singular: "exercise")) · \(setsDoneText(done: doneSets)) · \(unitVolumeText(lb: sessionVolume, unit: store.settings.weightUnit))")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -857,6 +922,9 @@ struct SessionDetailView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     let session: SessionLog
+    /// Called after this session is deleted, so the presenter can drop
+    /// its selection (a stale id left the compact push on a dead page).
+    var onDelete: (() -> Void)? = nil
     @State private var exportRequest: ExportRequest?
     /// D6: delete confirmation for this detail view's trash button.
     /// (HistoryView holds its own sessionToDelete for the swipe path —
@@ -937,6 +1005,7 @@ struct SessionDetailView: View {
         .confirmationDialog("Delete this workout?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 store.deleteSession(id: session.id)
+                onDelete?()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
@@ -975,7 +1044,9 @@ struct TrainingHeatmap: View {
     private var calendar: Calendar { Calendar.current }
 
 
-    /// Done working sets per day from `start` on.
+    /// Done working sets per day from `start` on. Every day with a saved
+    /// session has an entry (0 when no set was ticked): a saved session
+    /// counts as trained, the same rule as the calendar's green dot.
     private func setsByDay(from start: Date) -> [Date: Int] {
         var result: [Date: Int] = [:]
         for session in store.sessions where session.date >= start {
@@ -984,7 +1055,7 @@ struct TrainingHeatmap: View {
             let sets = session.exercises.reduce(0) { total, exercise in
                 total + exercise.sets.filter { $0.done && $0.kind != .warmup }.count
             }
-            if sets > 0 { result[day, default: 0] += sets }
+            result[day, default: 0] += sets
         }
         return result
     }
@@ -1040,7 +1111,11 @@ struct TrainingHeatmap: View {
         let today = calendar.startOfDay(for: Date())
         let streak = store.dayStreak
         let corner = max(3, cell * 0.25)
-        let trained = cells.compactMap { $0 }.filter { (sets[$0] ?? 0) > 0 }.count
+        // Same tracking start as the calendar: min(setup, oldest session).
+        let trackingStart = CalendarDayIndex.trackingStart(setupDate: store.setupDate,
+                                                           oldestSession: store.sessions.last?.date) ?? today
+        // Trained = any saved session that day (the calendar's rule).
+        let trained = cells.compactMap { $0 }.filter { sets[$0] != nil }.count
         return VStack(alignment: .leading, spacing: 8) {
             // Non-breaking hyphen, so "0-day" never splits across lines.
             Text("\(monthStart.formatted(.dateTime.month(.wide))) · \(trained) day\(trained == 1 ? "" : "s") trained · \(streak)\u{2011}day streak")
@@ -1058,12 +1133,14 @@ struct TrainingHeatmap: View {
                 }
             }
             .frame(height: 14)
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: gap) {
                 ForEach(0..<(cells.count / 7), id: \.self) { row in
                     HStack(spacing: gap) {
                         ForEach(0..<7, id: \.self) { column in
                             if let day = cells[row * 7 + column] {
-                                square(day: day, sets: sets[day] ?? 0, today: today, cell: cell, corner: corner)
+                                square(day: day, sets: sets[day], today: today, trackingStart: trackingStart,
+                                       cell: cell, corner: corner)
                                     .overlay {
                                         if calendar.isDate(day, inSameDayAs: selectedDay) && day <= today {
                                             RoundedRectangle(cornerRadius: corner, style: .continuous)
@@ -1072,6 +1149,7 @@ struct TrainingHeatmap: View {
                                     }
                             } else {
                                 Color.clear.frame(width: cell, height: cell)
+                                    .accessibilityHidden(true)
                             }
                         }
                     }
@@ -1088,6 +1166,7 @@ struct TrainingHeatmap: View {
             .font(.caption2)
             .foregroundStyle(Theme.secondaryText)
             .frame(height: 16)
+            .accessibilityHidden(true)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(monthStart.formatted(.dateTime.month(.wide))): \(trained) days trained, \(store.dayText(streak)) streak")
@@ -1116,30 +1195,42 @@ struct TrainingHeatmap: View {
         sets == 0 ? emptyFill : (sets >= 12 ? Color.accentColor : Color.accentColor.opacity(0.55))
     }
 
+    /// `sets` is nil on a day with no saved session, else its done
+    /// working sets (0 still counts as trained: a saved session).
     @ViewBuilder
-    private func square(day: Date, sets: Int, today: Date, cell: CGFloat, corner: CGFloat) -> some View {
+    private func square(day: Date, sets: Int?, today: Date, trackingStart: Date, cell: CGFloat, corner: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        let dayText = day.formatted(.dateTime.weekday(.wide).month().day())
+        let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
         if day > today {
             // Days still to come: an outline, so the month reads whole.
+            // Tapping one shows its plan on the calendar.
             shape.stroke(Self.emptyEdge, lineWidth: 1.5)
                 .frame(width: cell, height: cell)
                 .contentShape(shape)
                 .onTapGesture {
                     withAnimation(AppAnimation.snappy) { selectedDay = day }
                 }
-        } else if let setup = store.setupDate, day < calendar.startOfDay(for: setup) {
-            // Before you set the app up: a faint, inert square.
+                .accessibilityElement()
+                .accessibilityLabel("\(dayText), upcoming")
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        } else if sets == nil, day < trackingStart {
+            // Before you started tracking: a faint, inert square — not
+            // tappable, and VoiceOver says why it's blank.
             shape.fill(Self.emptyFill.opacity(0.4))
                 .frame(width: cell, height: cell)
+                .accessibilityElement()
+                .accessibilityLabel("\(dayText), before you started")
         } else {
             // Accent color (DaRon): full for a full workout, faded for a
-            // short one.
-            shape.fill(Self.level(sets))
+            // short one (or a saved session with no sets ticked).
+            let count = sets ?? 0
+            shape.fill(sets == nil ? Self.level(0) : Self.level(max(1, count)))
                 .frame(width: cell, height: cell)
                 .overlay {
                     if day == today {
                         shape.stroke(Color.accentColor, lineWidth: 2.5)
-                    } else if sets == 0 {
+                    } else if sets == nil {
                         shape.stroke(Self.emptyEdge, lineWidth: 1)
                     }
                 }
@@ -1148,10 +1239,33 @@ struct TrainingHeatmap: View {
                     withAnimation(AppAnimation.snappy) { selectedDay = day }
                 }
                 .accessibilityElement()
-                .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month().day()) + (sets > 0 ? ", \(sets) sets" : ", no workout"))
-                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel((day == today ? "Today, " : "") + dayText
+                    + (sets == nil ? ", no workout" : (count > 0 ? ", \(count) sets" : ", workout logged")))
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         }
     }
+}
+
+// MARK: - Volume / lift text in the user's unit
+
+/// Stored-lb volume converted to a unit (exact, no 0.5 kg rounding —
+/// it's a total, not a loadable plate weight).
+func volumeInUnit(_ lb: Double, unit: WeightUnit) -> Double {
+    unit == .kg ? lb * 0.45359237 : lb
+}
+
+/// "12.5k kg" / "850 lb" — `formattedVolumeLb`'s shape, in the user's
+/// unit (it was hard-coded lb on every screen).
+func unitVolumeText(lb: Double, unit: WeightUnit) -> String {
+    let v = volumeInUnit(lb, unit: unit)
+    if v >= 1000 { return String(format: "%.1fk %@", v / 1000, unit.label) }
+    return "\(Int(v.rounded())) \(unit.label)"
+}
+
+/// A lift's weight in a unit; per-hand dumbbell loads say "each".
+func liftWeightText(_ lb: Double, isPair: Bool, unit: WeightUnit) -> String {
+    guard let display = unit.displayValue(for: lb) else { return "—" }
+    return "\(roundedWeightText(display)) \(unit.label)" + (isPair ? " each" : "")
 }
 
 /// The Calendar page's tool tiles that open a page.

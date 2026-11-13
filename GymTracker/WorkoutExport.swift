@@ -88,6 +88,11 @@ enum ExportScope: Equatable {
 
     /// The sessions this scope covers, newest first (the store's order).
     func sessions(from store: WorkoutStore) -> [SessionLog] {
+        sessions(in: store.sessions)
+    }
+
+    /// Same, over a snapshot of the store's sessions (newest first).
+    func sessions(in all: [SessionLog]) -> [SessionLog] {
         switch self {
         case .session(let session):
             return [session]
@@ -95,12 +100,12 @@ enum ExportScope: Equatable {
             let calendar = Calendar.current
             let start = calendar.startOfDay(for: from)
             let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: to)) ?? to
-            return store.sessions.filter { $0.date >= start && $0.date < end }
+            return all.filter { $0.date >= start && $0.date < end }
         case .all:
-            return store.sessions
+            return all
         case .exercise(let id, _):
             var out: [SessionLog] = []
-            for session in store.sessions {
+            for session in all {
                 let matches = session.exercises.filter { $0.exerciseId == id }
                 guard !matches.isEmpty else { continue }
                 var narrowed = session
@@ -235,6 +240,134 @@ struct ExportSessionSummary {
     let notes: [(exercise: String, text: String)]
 }
 
+/// Everything an export needs from the store, copied on the main
+/// thread so the file can be built on a background queue (3 years of
+/// history froze the sheet when it was built inline). Value types only.
+///
+/// The per-set / per-weight text mirrors the store's shared formatters
+/// (`store.setWeightText`, `store.sessionOneRepMax`,
+/// `store.oneRepMax(for:)`) — same rules, run off the main thread.
+struct ExportContext {
+    let weightUnit: WeightUnit
+    let calendar: Calendar
+    /// User notes bucketed by start of day, grouped ONCE (they were
+    /// filtered per session).
+    private let notesByDay: [Date: [UserNote]]
+    /// Best valid 1RM per exercise id across ALL history, worked out in
+    /// one pass (it was `store.oneRepMax(for:)` per exercise log — a
+    /// full history scan each, O(n²)).
+    let bestOneRepMaxLb: [String: Double]
+    private let compoundIds: Set<String>
+    private let bodyweightIds: Set<String>
+
+    /// Snapshot the store (call on the main thread).
+    init(store: WorkoutStore) {
+        self.init(allSessions: store.sessions, weightUnit: store.settings.weightUnit,
+                  customExercises: store.customExercises, userNotes: store.userNotes)
+    }
+
+    init(allSessions: [SessionLog], weightUnit: WeightUnit, customExercises: [CustomExercise],
+         userNotes: [UserNote], calendar: Calendar = .current) {
+        self.weightUnit = weightUnit
+        self.calendar = calendar
+        var compound = Set<String>(), bodyweight = Set<String>(), seen = Set<String>()
+        var best: [String: Double] = [:]
+        for session in allSessions {
+            for exercise in session.exercises {
+                let id = exercise.exerciseId
+                if seen.insert(id).inserted, let lib = ExerciseLibrary.byId(id, plus: customExercises) {
+                    if lib.isCompound { compound.insert(id) }
+                    if lib.isBodyweight { bodyweight.insert(id) }
+                }
+                guard compound.contains(id),
+                      let oneRM = bestValidOneRepMax(in: exercise.sets, isCompound: true) else { continue }
+                best[id] = max(best[id] ?? 0, oneRM)
+            }
+        }
+        compoundIds = compound
+        bodyweightIds = bodyweight
+        bestOneRepMaxLb = best
+        var notes: [Date: [UserNote]] = [:]
+        for note in userNotes {
+            notes[calendar.startOfDay(for: note.createdAt), default: []].append(note)
+        }
+        notesByDay = notes
+    }
+
+    func unit(for exercise: ExerciseLog) -> WeightUnit { exercise.unitOverride ?? weightUnit }
+
+    func isBodyweight(_ exerciseId: String) -> Bool { bodyweightIds.contains(exerciseId) }
+
+    /// `store.setWeightText`'s rule: weight × reps in the exercise's
+    /// unit, "Bodyweight × n" for a bodyweight lift, "— × n" otherwise.
+    func setWeightText(_ set: SetLog, exercise: ExerciseLog) -> String {
+        if let weight = set.weightLb, weight > 0 {
+            return "\(weightLabel(weight, isPair: exercise.isPair, unit: unit(for: exercise))) × \(set.reps)"
+        }
+        return isBodyweight(exercise.exerciseId) ? "Bodyweight × \(set.reps)" : "— × \(set.reps)"
+    }
+
+    /// `store.sessionOneRepMax`'s rule (compound, ≤10-rep done sets).
+    func sessionOneRepMax(session: SessionLog, exerciseId: String) -> Double? {
+        guard compoundIds.contains(exerciseId) else { return nil }
+        var best: Double = 0
+        for exercise in session.exercises where exercise.exerciseId == exerciseId {
+            if let oneRM = bestValidOneRepMax(in: exercise.sets, isCompound: true) { best = max(best, oneRM) }
+        }
+        return best > 0 ? best : nil
+    }
+
+    /// A max-lift weight in the exercise's own unit (its override).
+    func liftText(_ lb: Double, exercise: ExerciseLog) -> String {
+        liftWeightText(lb, isPair: exercise.isPair, unit: unit(for: exercise))
+    }
+
+    /// Volume in the user's unit ("8.5k kg").
+    func volumeText(_ lb: Double) -> String { unitVolumeText(lb: lb, unit: weightUnit) }
+
+    /// The Notes-page notes for a workout: same day, same day title.
+    func notes(for session: SessionLog) -> [UserNote] {
+        (notesByDay[calendar.startOfDay(for: session.date)] ?? []).filter { $0.workoutTitle == session.dayTitle }
+    }
+}
+
+/// One export to build: the scope's sessions plus the context, both
+/// snapshotted on the main thread; `file` / `copyText` are safe to run
+/// on a background queue.
+struct ExportJob {
+    let scope: ExportScope
+    // Plain value copies (copy-on-write: no work on the main thread).
+    private let allSessions: [SessionLog]
+    private let weightUnit: WeightUnit
+    private let customExercises: [CustomExercise]
+    private let userNotes: [UserNote]
+
+    init(store: WorkoutStore, scope: ExportScope) {
+        self.scope = scope
+        allSessions = store.sessions
+        weightUnit = store.settings.weightUnit
+        customExercises = store.customExercises
+        userNotes = store.userNotes
+    }
+
+    /// Scope filtering + the one-pass context, on the calling queue.
+    private func prepare() -> (sessions: [SessionLog], context: ExportContext) {
+        (scope.sessions(in: allSessions),
+         ExportContext(allSessions: allSessions, weightUnit: weightUnit,
+                       customExercises: customExercises, userNotes: userNotes))
+    }
+
+    func file(format: ExportFormat) throws -> ExportedFile {
+        let (sessions, context) = prepare()
+        return try WorkoutExport.file(sessions: sessions, scope: scope, format: format, context: context)
+    }
+
+    func copyText(format: ExportFormat) -> String {
+        let (sessions, context) = prepare()
+        return WorkoutExport.copyText(sessions: sessions, scope: scope, format: format, context: context)
+    }
+}
+
 enum WorkoutExport {
 
     // MARK: - Dates
@@ -246,11 +379,21 @@ enum WorkoutExport {
         return f
     }()
 
-    private static let csvDateFormatter: DateFormatter = {
+    /// Fixed-format dates for CSV and filenames: POSIX locale and the
+    /// Gregorian calendar, so a Buddhist / Japanese calendar or a
+    /// 12-hour locale can't change the digits; the device's time zone,
+    /// stated explicitly (the CSV's day and time are local).
+    private static func fixedFormatter(_ format: String) -> DateFormatter {
         let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = TimeZone.current
+        f.dateFormat = format
         return f
-    }()
+    }
+
+    private static let csvDateFormatter = fixedFormatter("yyyy-MM-dd")
+    private static let csvTimeFormatter = fixedFormatter("HH:mm")
 
     static func shortDate(_ date: Date) -> String { shortDateFormatter.string(from: date) }
 
@@ -266,16 +409,21 @@ enum WorkoutExport {
 
     // MARK: - Entry point
 
-    /// Build the file for a scope + format. Throws only when the PDF
-    /// or JSON encoder fails — the text formats cannot fail.
+    /// Build the file for a scope + format on the calling thread
+    /// (main). The sheet uses `ExportJob` to build off the main thread.
     static func file(scope: ExportScope, format: ExportFormat, store: WorkoutStore) throws -> ExportedFile {
-        let sessions = scope.sessions(from: store)
+        try ExportJob(store: store, scope: scope).file(format: format)
+    }
+
+    /// Build the file from snapshotted data. Throws only when the JSON
+    /// encoder fails — the other formats cannot fail.
+    static func file(sessions: [SessionLog], scope: ExportScope, format: ExportFormat, context: ExportContext) throws -> ExportedFile {
         let data: Data
         switch format {
-        case .csv: data = Data(csvString(sessions: sessions, store: store).utf8)
-        case .text: data = Data(textString(sessions: sessions, scope: scope, store: store).utf8)
-        case .json: data = try jsonData(sessions: sessions, scope: scope, store: store)
-        case .pdf: data = pdfData(sessions: sessions, scope: scope, store: store)
+        case .csv: data = Data(csvString(sessions: sessions, context: context).utf8)
+        case .text: data = Data(textString(sessions: sessions, scope: scope, context: context).utf8)
+        case .json: data = try jsonData(sessions: sessions, scope: scope, context: context)
+        case .pdf: data = pdfData(sessions: sessions, scope: scope, context: context)
         }
         let filename = "GymTracker-\(scope.fileSlug)-\(fileDate(Date())).\(format.fileExtension)"
         return ExportedFile(data: data, filename: filename, format: format)
@@ -286,54 +434,49 @@ enum WorkoutExport {
     /// summary of the same scope (the sheet labels the button
     /// "Copy as text" in that case).
     static func copyText(scope: ExportScope, format: ExportFormat, store: WorkoutStore) -> String {
-        let sessions = scope.sessions(from: store)
+        ExportJob(store: store, scope: scope).copyText(format: format)
+    }
+
+    static func copyText(sessions: [SessionLog], scope: ExportScope, format: ExportFormat, context: ExportContext) -> String {
         switch format {
-        case .csv: return csvString(sessions: sessions, store: store)
-        case .json: return (try? String(data: jsonData(sessions: sessions, scope: scope, store: store), encoding: .utf8)) ?? ""
-        case .pdf, .text: return textString(sessions: sessions, scope: scope, store: store)
+        case .csv: return csvString(sessions: sessions, context: context)
+        case .json: return (try? String(data: jsonData(sessions: sessions, scope: scope, context: context), encoding: .utf8)) ?? ""
+        case .pdf, .text: return textString(sessions: sessions, scope: scope, context: context)
         }
     }
 
     // MARK: - Shared summaries (text + PDF source)
 
     /// One summary per session, built only from shared formatters.
-    static func summaries(for sessions: [SessionLog], store: WorkoutStore) -> [ExportSessionSummary] {
+    static func summaries(for sessions: [SessionLog], context: ExportContext) -> [ExportSessionSummary] {
         sessions.map { session in
             let exercises = session.exercises.map { exercise -> ExportExerciseSummary in
                 let setLines = exercise.sets.enumerated().map { index, set -> String in
                     var line = "Set \(index + 1)"
                     if set.kind != .working { line += " (\(set.kind.label))" }
-                    line += ": \(store.setWeightText(set, exercise: exercise))"
+                    line += ": \(context.setWeightText(set, exercise: exercise))"
                     line += set.done ? " — done" : " — not done"
                     return line
                 }
-                let oneRM = store.sessionOneRepMax(session: session, exerciseId: exercise.exerciseId)
-                let oneRMText: String? = {
-                    guard let oneRM else { return nil }
-                    let template = ExerciseTemplate(id: exercise.exerciseId, name: exercise.name, sets: 1,
-                                                    repRange: "", topReps: 1, defaultWeightLb: nil,
-                                                    isPair: exercise.isPair, weightNote: nil, cues: nil)
-                    return store.displayWeightLabel(oneRM, isPair: exercise.isPair, for: template)
-                }()
+                // In the exercise's own unit (its saved override).
+                let oneRMText = context.sessionOneRepMax(session: session, exerciseId: exercise.exerciseId)
+                    .map { context.liftText($0, exercise: exercise) }
                 return ExportExerciseSummary(
                     name: exercise.name,
                     setLines: setLines,
-                    volumeText: formattedVolumeLb(volumeLb(for: [exercise])),
+                    volumeText: context.volumeText(volumeLb(for: [exercise])),
                     bestOneRMText: oneRMText
                 )
             }
             let doneSets = session.exercises.flatMap { $0.sets }.filter { $0.done }.count
             let totalSets = session.exercises.flatMap { $0.sets }.count
             let finisher = session.finisherNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-            let calendar = Calendar.current
-            let notes = store.userNotes
-                .filter { $0.workoutTitle == session.dayTitle && calendar.isDate($0.createdAt, inSameDayAs: session.date) }
-                .map { (exercise: $0.title, text: $0.body) }
+            let notes = context.notes(for: session).map { (exercise: $0.title, text: $0.body) }
             return ExportSessionSummary(
                 session: session,
                 heading: "\(session.dayKey) · \(session.dayTitle) — \(shortDate(session.date))",
                 exercises: exercises,
-                totalVolumeText: formattedVolumeLb(volumeLb(for: session.exercises)),
+                totalVolumeText: context.volumeText(volumeLb(for: session.exercises)),
                 doneSets: doneSets,
                 totalSets: totalSets,
                 finisherText: finisher.isEmpty ? nil : finisher,
@@ -344,8 +487,8 @@ enum WorkoutExport {
 
     /// The printable summary as styled lines. Shared by the text
     /// export and the PDF — one model, two renderers.
-    static func summaryLines(sessions: [SessionLog], scope: ExportScope, store: WorkoutStore) -> [ExportLine] {
-        let summaries = summaries(for: sessions, store: store)
+    static func summaryLines(sessions: [SessionLog], scope: ExportScope, context: ExportContext) -> [ExportLine] {
+        let summaries = summaries(for: sessions, context: context)
         var lines: [ExportLine] = [
             ExportLine(text: "Status — Workout Export", style: .title),
             ExportLine(text: "Exported \(shortDate(Date())) · \(scope.titleText())", style: .muted),
@@ -385,7 +528,7 @@ enum WorkoutExport {
             let totalSets = summaries.reduce(0) { $0 + $1.totalSets }
             let totalVolume = volumeLb(for: sessions.flatMap { $0.exercises })
             lines.append(ExportLine(
-                text: "TOTAL — \(pluralised(summaries.count, singular: "workout")) · \(pluralised(totalExercises, singular: "exercise")) · \(pluralised(totalSets, singular: "set")) · \(formattedVolumeLb(totalVolume))",
+                text: "TOTAL — \(pluralised(summaries.count, singular: "workout")) · \(pluralised(totalExercises, singular: "exercise")) · \(pluralised(totalSets, singular: "set")) · \(context.volumeText(totalVolume))",
                 style: .heading))
         }
         return lines
@@ -393,8 +536,8 @@ enum WorkoutExport {
 
     // MARK: - Plain text
 
-    static func textString(sessions: [SessionLog], scope: ExportScope, store: WorkoutStore) -> String {
-        summaryLines(sessions: sessions, scope: scope, store: store)
+    static func textString(sessions: [SessionLog], scope: ExportScope, context: ExportContext) -> String {
+        summaryLines(sessions: sessions, scope: scope, context: context)
             .map { line in
                 // Indent sub-lines so the text reads as an outline.
                 switch line.style {
@@ -408,9 +551,9 @@ enum WorkoutExport {
 
     // MARK: - CSV (one row per set + a totals row)
 
-    static func csvString(sessions: [SessionLog], store: WorkoutStore) -> String {
+    static func csvString(sessions: [SessionLog], context: ExportContext) -> String {
         var rows: [String] = [
-            "date,workout,exercise,set,kind,weight,reps,unit,per_hand,done"
+            "date,time,workout,exercise,set,kind,weight,reps,unit,per_hand,done"
         ]
         var totalSets = 0
         var doneSets = 0
@@ -420,8 +563,8 @@ enum WorkoutExport {
                 // The unit in effect for this exercise: its saved
                 // override, else the global unit — the same unit the
                 // screen showed when the set was logged.
-                let unit = exercise.unitOverride ?? store.settings.weightUnit
-                let isBodyweight = ExerciseLibrary.byId(exercise.exerciseId, plus: store.customExercises)?.isBodyweight ?? false
+                let unit = context.unit(for: exercise)
+                let isBodyweight = context.isBodyweight(exercise.exerciseId)
                 for (index, set) in exercise.sets.enumerated() {
                     totalSets += 1
                     if set.done { doneSets += 1 }
@@ -435,6 +578,7 @@ enum WorkoutExport {
                     }
                     let fields = [
                         csvDateFormatter.string(from: session.date),
+                        csvTimeFormatter.string(from: session.date),
                         session.dayTitle,
                         exercise.name,
                         "\(index + 1)",
@@ -449,10 +593,11 @@ enum WorkoutExport {
                 }
             }
         }
-        // Totals row: volume is the shared `volumeLb(for:)` in lb
-        // (bodyweight sets contribute 0, per-hand loads doubled).
-        let totalVolume = volumeLb(for: sessions.flatMap { $0.exercises })
+        // Totals row: volume is the shared `volumeLb(for:)` (bodyweight
+        // sets contribute 0, per-hand loads doubled), in the user's unit.
+        let totalVolume = volumeInUnit(volumeLb(for: sessions.flatMap { $0.exercises }), unit: context.weightUnit)
         let totals = [
+            "",
             "",
             "TOTAL",
             "\(sessions.count) workout\(sessions.count == 1 ? "" : "s")",
@@ -460,7 +605,7 @@ enum WorkoutExport {
             "",
             numberText(totalVolume),
             "\(totalReps)",
-            "lb",
+            context.weightUnit.label,
             "",
             "\(doneSets)/\(totalSets)",
         ]
@@ -540,8 +685,8 @@ enum WorkoutExport {
         let totalVolumeLb: Double
     }
 
-    static func jsonData(sessions: [SessionLog], scope: ExportScope, store: WorkoutStore) throws -> Data {
-        let summaries = summaries(for: sessions, store: store)
+    static func jsonData(sessions: [SessionLog], scope: ExportScope, context: ExportContext) throws -> Data {
+        let summaries = summaries(for: sessions, context: context)
         let workouts = zip(sessions, summaries).map { session, summary -> ExportWorkout in
             let exercises = zip(session.exercises, summary.exercises).map { exercise, exSummary -> ExportExercise in
                 let sets = exercise.sets.enumerated().map { index, set -> ExportSet in
@@ -549,22 +694,22 @@ enum WorkoutExport {
                         set: index + 1,
                         kind: set.kind.rawValue,
                         weightLb: set.weightLb,
-                        weightDisplay: store.setWeightText(set, exercise: exercise),
+                        weightDisplay: context.setWeightText(set, exercise: exercise),
                         reps: set.reps,
                         done: set.done
                     )
                 }
                 // Best valid 1RM for this exercise across ALL history
-                // (`store.oneRepMax(for:)` — the shared gate), not just
-                // this session, so the JSON answers "best ever" too.
+                // (the shared gate, precomputed once in the context),
+                // not just this session, so the JSON answers "best ever".
                 return ExportExercise(
                     id: exercise.exerciseId,
                     name: exercise.name,
                     isPair: exercise.isPair,
-                    unit: (exercise.unitOverride ?? store.settings.weightUnit).label,
+                    unit: context.unit(for: exercise).label,
                     sets: sets,
                     volumeLb: volumeLb(for: [exercise]),
-                    bestOneRepMaxLb: store.oneRepMax(for: exercise.exerciseId)
+                    bestOneRepMaxLb: context.bestOneRepMaxLb[exercise.exerciseId]
                 )
             }
             let finisher = summary.finisherText
@@ -609,8 +754,8 @@ enum WorkoutExport {
     /// The content is the shared `summaryLines` — the PDF and the
     /// text export are two renderers over the same lines, so their
     /// numbers can never drift apart.
-    static func pdfData(sessions: [SessionLog], scope: ExportScope, store: WorkoutStore) -> Data {
-        let lines = summaryLines(sessions: sessions, scope: scope, store: store)
+    static func pdfData(sessions: [SessionLog], scope: ExportScope, context: ExportContext) -> Data {
+        let lines = summaryLines(sessions: sessions, scope: scope, context: context)
         let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
         let margin: CGFloat = 48
         let contentWidth = pageRect.width - margin * 2
@@ -635,7 +780,9 @@ enum WorkoutExport {
                 let footer = "Status — page \(pageNumber)"
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 9),
-                    .foregroundColor: UIColor.secondaryLabel,
+                    // Fixed print colors: dynamic label colors resolve to
+                    // white in dark mode — white text on a white page.
+                    .foregroundColor: UIColor.darkGray,
                 ]
                 let size = footer.size(withAttributes: attrs)
                 footer.draw(at: CGPoint(x: (pageRect.width - size.width) / 2, y: pageRect.height - 32), withAttributes: attrs)
@@ -654,7 +801,7 @@ enum WorkoutExport {
                 }()
                 let text = line.text
                 let lineFont = font(for: line.style)
-                let color: UIColor = line.style == .muted ? .secondaryLabel : .label
+                let color: UIColor = line.style == .muted ? .darkGray : .black
                 let attrs: [NSAttributedString.Key: Any] = [.font: lineFont, .foregroundColor: color]
                 let height = text.isEmpty ? 6 : text.boundingRect(
                     with: CGSize(width: contentWidth - indent, height: .greatestFiniteMagnitude),
@@ -698,6 +845,8 @@ struct ExportSheet: View {
     @State private var showingShare = false
     @State private var copied = false
     @State private var errorMessage: String?
+    /// True while a file / copy text is being built off the main thread.
+    @State private var isBuilding = false
 
     init(request: ExportRequest) {
         self.request = request
@@ -823,7 +972,7 @@ struct ExportSheet: View {
                     Text("\(sessions.count) workout\(sessions.count == 1 ? "" : "s") · \(exercises) exercises · \(sets) sets")
                         .font(.subheadline)
                     Spacer()
-                    Text(formattedVolumeLb(volume))
+                    Text(unitVolumeText(lb: volume, unit: store.settings.weightUnit))
                         .font(.subheadline.weight(.semibold))
                 }
             }
@@ -834,9 +983,15 @@ struct ExportSheet: View {
         Button {
             share()
         } label: {
-            Label("Share…", systemImage: "square.and.arrow.up")
+            HStack {
+                Label(isBuilding ? "Preparing…" : "Share…", systemImage: "square.and.arrow.up")
+                if isBuilding {
+                    Spacer()
+                    ProgressView()
+                }
+            }
         }
-        .disabled(resolvedSessions.isEmpty)
+        .disabled(resolvedSessions.isEmpty || isBuilding)
     }
 
     private var copyButton: some View {
@@ -848,7 +1003,7 @@ struct ExportSheet: View {
                 systemImage: copied ? "checkmark.circle.fill" : "doc.on.clipboard"
             )
         }
-        .disabled(resolvedSessions.isEmpty)
+        .disabled(resolvedSessions.isEmpty || isBuilding)
     }
 
     private func applyRange() {
@@ -859,21 +1014,45 @@ struct ExportSheet: View {
     }
 
     /// Build the file, write it to temp, and open the native share
-    /// sheet (AirDrop, Messages, Mail, Save to Files, Print).
+    /// sheet (AirDrop, Messages, Mail, Save to Files, Print). The data
+    /// is snapshotted here on the main thread; the file (PDF layout,
+    /// years of CSV rows) is built on a background queue while the
+    /// Share button shows a spinner.
     private func share() {
-        do {
-            let file = try WorkoutExport.file(scope: scope, format: format, store: store)
-            shareURL = try file.temporaryURL()
-            showingShare = true
-        } catch {
-            errorMessage = error.localizedDescription
+        guard !isBuilding else { return }
+        isBuilding = true
+        let job = ExportJob(store: store, scope: scope)
+        let format = format
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try job.file(format: format).temporaryURL() }
+            DispatchQueue.main.async {
+                isBuilding = false
+                switch result {
+                case .success(let url):
+                    shareURL = url
+                    showingShare = true
+                case .failure(let error):
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
     /// Copy the format's text to the clipboard (PDF copies its
-    /// plain-text summary — see `WorkoutExport.copyText`).
+    /// plain-text summary — see `WorkoutExport.copyText`). Built off the
+    /// main thread like Share.
     private func copy() {
-        UIPasteboard.general.string = WorkoutExport.copyText(scope: scope, format: format, store: store)
-        copied = true
+        guard !isBuilding else { return }
+        isBuilding = true
+        let job = ExportJob(store: store, scope: scope)
+        let format = format
+        DispatchQueue.global(qos: .userInitiated).async {
+            let text = job.copyText(format: format)
+            DispatchQueue.main.async {
+                UIPasteboard.general.string = text
+                isBuilding = false
+                copied = true
+            }
+        }
     }
 }

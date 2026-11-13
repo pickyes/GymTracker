@@ -1791,3 +1791,18 @@ extension View {
         }
     }
 }
+
+// MARK: - Swipe back without the bar's back button
+
+/// The side bar hides the top-left back button, which also turned off
+/// the edge swipe to go back; keep the swipe working (red team).
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        viewControllers.count > 1
+    }
+}

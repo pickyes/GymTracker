@@ -190,13 +190,14 @@ struct ProfileView: View {
         .onAppear {
             if !didSetup {
                 didSetup = true
-                if let weight = store.bodyWeightLb {
-                    let unit = store.settings.weightUnit
-                    weightText = roundedWeightText(unit.displayValue(for: weight) ?? weight)
-                }
+                refreshWeightText()
             }
         }
         .onChange(of: weightText) { _, _ in saveWeight() }
+        // The field showed the old unit's number after a unit switch
+        // (and a stale value after bodyweight changed elsewhere).
+        .onChange(of: store.settings.weightUnit) { _, _ in refreshWeightText(force: true) }
+        .onChange(of: store.bodyWeightLb) { _, _ in refreshWeightText() }
         .sheet(isPresented: $editingIdentity) { ProfileIdentityEditor() }
         .sheet(isPresented: $showPaywall) {
             PaywallView(
@@ -786,10 +787,35 @@ struct ProfileView: View {
     private func saveWeight() {
         let cleaned = weightText.trimmingCharacters(in: .whitespaces)
         if cleaned.isEmpty {
-            store.saveBodyWeight(nil)
-        } else if let value = Double(cleaned), value > 0 {
-            store.saveBodyWeight(store.settings.weightUnit.storedValue(for: value) ?? value)
+            if store.bodyWeightLb != nil { store.saveBodyWeight(nil) }
+        } else if let value = SetupQuizView.parseDecimal(cleaned), value > 0 {
+            let unit = store.settings.weightUnit
+            let stored = unit.storedValue(for: value) ?? value
+            // Skip a no-op save — including the field showing the stored
+            // value rounded for display (a unit switch must not save the
+            // rounded kg number back over the exact lb value).
+            if let current = store.bodyWeightLb {
+                if abs(current - stored) < 0.001 { return }
+                if roundedWeightText(unit.displayValue(for: current) ?? current) == cleaned { return }
+            }
+            store.saveBodyWeight(stored)
         }
+    }
+
+    /// Show the stored bodyweight in the current unit. Without `force`,
+    /// leaves the field alone when it already means the stored value
+    /// (so typing "72." isn't rewritten mid-edit).
+    private func refreshWeightText(force: Bool = false) {
+        let unit = store.settings.weightUnit
+        guard let weight = store.bodyWeightLb else {
+            if force || !weightText.isEmpty { weightText = "" }
+            return
+        }
+        if !force, let typed = SetupQuizView.parseDecimal(weightText),
+           let typedLb = unit.storedValue(for: typed), abs(typedLb - weight) < 0.01 {
+            return
+        }
+        weightText = roundedWeightText(unit.displayValue(for: weight) ?? weight)
     }
 
     /// User-initiated JSON export (share sheet). Writes a temp file and
@@ -967,20 +993,28 @@ struct ProfileIdentityEditor: View {
     @State private var name = ProfileIdentity.shared.name
     @State private var item: PhotosPickerItem?
     @State private var cropping: UIImage?
-    @State private var originalPhoto = ProfileIdentity.shared.photo
+    /// Photo changes are staged here and only saved on Done — Cancel or
+    /// swiping the sheet down leaves the saved photo untouched.
+    @State private var stagedPhoto: UIImage? = ProfileIdentity.shared.photo
+    @State private var photoChanged = false
+
+    private func stage(_ image: UIImage?) {
+        stagedPhoto = image
+        photoChanged = true
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     VStack(spacing: 12) {
-                        ProfileAvatar(size: 110)
+                        stagedAvatar
                         PhotosPicker(selection: $item, matching: .images) {
-                            Text(identity.photo == nil ? "Add Photo" : "Change Photo")
+                            Text(stagedPhoto == nil ? "Add Photo" : "Change Photo")
                                 .font(.body.weight(.semibold))
                         }
-                        if identity.photo != nil {
-                            Button("Remove Photo", role: .destructive) { identity.setPhoto(nil) }
+                        if stagedPhoto != nil {
+                            Button("Remove Photo", role: .destructive) { stage(nil) }
                                 .buttonStyle(.borderless)
                         }
                     }
@@ -992,7 +1026,7 @@ struct ProfileIdentityEditor: View {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7), spacing: 10) {
                         ForEach(0..<GeneratedAvatar.count, id: \.self) { i in
                             Button {
-                                identity.setPhoto(GeneratedAvatar.image(i, accent: accent))
+                                stage(GeneratedAvatar.image(i, accent: accent))
                             } label: {
                                 GeneratedAvatar(index: i, accent: accent)
                                     .aspectRatio(1, contentMode: .fit)
@@ -1019,14 +1053,14 @@ struct ProfileIdentityEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        // Undo photo changes too, not just the name.
-                        if identity.photo !== originalPhoto { identity.setPhoto(originalPhoto) }
+                        // Nothing was saved yet — staged changes are dropped.
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         identity.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if photoChanged { identity.setPhoto(stagedPhoto) }
                         dismiss()
                     }
                 }
@@ -1046,11 +1080,28 @@ struct ProfileIdentityEditor: View {
                 set: { if $0 == nil { cropping = nil } }
             )) { crop in
                 PhotoCropView(image: crop.image) { result in
-                    if let result { identity.setPhoto(result) }
+                    if let result { stage(result) }
                     cropping = nil
                 }
             }
         }
+    }
+
+    /// The staged photo (same look as ProfileAvatar, which shows the
+    /// saved one).
+    private var stagedAvatar: some View {
+        Group {
+            if let photo = stagedPhoto {
+                Image(uiImage: photo).resizable().scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable().scaledToFit()
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .frame(width: 110, height: 110)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
     }
 
     private struct CropItem: Identifiable {
@@ -1125,6 +1176,16 @@ struct PhotoCropView: View {
                         }
                 )
             )
+            // Rotation / fold / split-view resize changes the circle and
+            // the photo's shown size: re-clamp so the circle stays covered.
+            .onChange(of: geo.size) { _, newSize in
+                let newSide = min(newSize.width, newSize.height) - 48
+                let newFill = max(newSide / image.size.width, newSide / image.size.height)
+                let newShown = CGSize(width: image.size.width * newFill * scale,
+                                      height: image.size.height * newFill * scale)
+                offset = clamp(offset, side: newSide, shown: newShown)
+                baseOffset = offset
+            }
         }
     }
 
