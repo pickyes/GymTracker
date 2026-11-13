@@ -7,6 +7,9 @@ import Charts
 /// weeks, and the lifts that have gone up most.
 struct TrainingProgressView: View {
     @EnvironmentObject var store: WorkoutStore
+    /// This week (rings, muscle bars, max lift and streak), built by the
+    /// Calendar page so both read the same numbers (DaRon moved it here).
+    var thisWeek: AnyView? = nil
     @Environment(\.fabBottomOffset) private var fabBottomOffset
 
     private var calendar: Calendar { Calendar.current }
@@ -103,6 +106,11 @@ struct TrainingProgressView: View {
                                            description: Text("Finish a workout from Today and your progress will show up here."))
                         .padding(.top, 40)
                 } else {
+                    if let thisWeek {
+                        Text("This week")
+                            .font(.title3.weight(.bold))
+                        thisWeek
+                    }
                     monthCard
                     chartCard(title: "Weekly volume", subtitle: "Last 12 weeks · \(unit.label)") {
                         Chart(weeks) { week in

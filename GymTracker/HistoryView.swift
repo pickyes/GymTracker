@@ -138,19 +138,7 @@ struct HistoryView: View {
             // (The training heatmap is part of the calendar above now.)
             listHeading(Text("Personal records"))
             personalRecordsView
-            // A plain heading row: a section header stays pinned to
-            // the top and slid over the cards while scrolling.
-            Text("This week")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(Theme.text)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 0, trailing: 16))
-                .listRowBackground(Color.clear)
-            historyStatsHeader
-                .padding(.trailing, cornerButtonsInset)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
+            // (This week moved to the Progress page, DaRon.)
             let shown = shownSessions
             sessionsHeader(shown: shown.count)
             if !sessionsCollapsed {
@@ -254,7 +242,7 @@ struct HistoryView: View {
             if let tool = openTool {
                 switch tool {
                 case .strength: StrengthGraphView()
-                case .progress: TrainingProgressView()
+                case .progress: TrainingProgressView(thisWeek: AnyView(historyStatsHeader))
                 case .body: BodyView()
                 }
             } else if let id = selectedSessionID,
@@ -288,7 +276,7 @@ struct HistoryView: View {
                         Group {
                             switch tool {
                             case .strength: StrengthGraphView()
-                            case .progress: TrainingProgressView()
+                            case .progress: TrainingProgressView(thisWeek: AnyView(historyStatsHeader))
                             case .body: BodyView()
                             }
                         }
