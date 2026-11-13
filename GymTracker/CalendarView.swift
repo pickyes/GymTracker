@@ -509,14 +509,22 @@ struct CalendarView: View {
             Text(displayedMonth, format: .dateTime.month(.wide))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+            // Four across when they fit, else two per row so nothing
+            // truncates (a narrow pane cut them to "Pla..." and "1...").
+            let pairs = LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(stats.indices, id: \.self) { i in summaryStat(stats[i].0, stats[i].1, stats[i].2) }
+            }
             if dynamicTypeSize.isAccessibilitySize {
-                // Accessibility sizes: two per row so nothing truncates.
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    ForEach(stats.indices, id: \.self) { i in summaryStat(stats[i].0, stats[i].1, stats[i].2) }
-                }
+                pairs
             } else {
-                HStack(spacing: 0) {
-                    ForEach(stats.indices, id: \.self) { i in summaryStat(stats[i].0, stats[i].1, stats[i].2) }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 0) {
+                        ForEach(stats.indices, id: \.self) { i in
+                            summaryStat(stats[i].0, stats[i].1, stats[i].2).fixedSize()
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    pairs
                 }
             }
         }
@@ -597,19 +605,24 @@ struct CalendarView: View {
     }
 
     private var legend: some View {
-        HStack(spacing: 16) {
-            legendItem(color: Theme.vividGreen, label: "Done")
-            legendItem(color: Color.accentColor, label: "Planned")
-            legendItem(color: Theme.vividOrange, label: "Missed")
-            HStack(spacing: 6) {
-                Circle()
-                    .stroke(Color.accentColor, lineWidth: 1.5)
-                    .frame(width: 10, height: 10)
-                Text("Today")
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondaryText)
+        // One line, or two rows of two when narrow (the words broke into
+        // single letters in a squeezed pane, DaRon).
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                legendItems
+                Spacer(minLength: 0)
             }
-            Spacer()
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                GridRow {
+                    legendItem(color: Theme.vividGreen, label: "Done")
+                    legendItem(color: Color.accentColor, label: "Planned")
+                }
+                GridRow {
+                    legendItem(color: Theme.vividOrange, label: "Missed")
+                    todayLegendItem
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

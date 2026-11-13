@@ -894,7 +894,10 @@ struct ContentView: View {
         let mainPage = main()
         DuoPagePair(wide: wide, swapped: swapped,
                     mainWidth: halves ? nil : TodayView.outerDisplayWidth,
-                    stacksWhenTall: stacksWhenTall) {
+                    stacksWhenTall: stacksWhenTall,
+                    // The divider never squeezes the page below the width
+                    // it's laid out for (Calendar bunched up, DaRon).
+                    mainMinWidth: 380) {
             companionPage
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .hingeReveal()
