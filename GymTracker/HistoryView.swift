@@ -854,6 +854,35 @@ struct SessionDetailView: View {
                     Label("Pump finisher done", systemImage: "flame.fill")
                 }
             }
+            // Share and delete sit under the title and date (DaRon), not
+            // floating in the bar over the title.
+            HStack(spacing: 10) {
+                // Export this one workout (CSV / PDF / text / JSON).
+                Button {
+                    exportRequest = ExportRequest(initialScope: .session(session))
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel("Export this workout")
+                // D6: delete this session (asks first).
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .tint(.red)
+                .accessibilityLabel("Delete this workout")
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .buttonBorderShape(.capsule)
+            // Each button is its own target (not the whole row).
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
             ForEach(session.exercises, id: \.exerciseId) { exercise in
                 Section(exercise.name) {
                     ForEach(exercise.sets.indices, id: \.self) { index in
@@ -886,29 +915,6 @@ struct SessionDetailView: View {
         }
         .oledList()
         .navigationTitle("\(session.dayKey) · \(session.dayTitle)")
-        .toolbar {
-            // Export this one workout (CSV / PDF / text / JSON) — the
-            // share sheet and copy live in ExportSheet.
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    exportRequest = ExportRequest(initialScope: .session(session))
-                } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
-                }
-                .accessibilityLabel("Export this workout")
-            }
-            // D6: delete this session. The detail dismisses itself: once
-            // the session is gone HistoryView's detail branch finds no
-            // match and shows the empty detail instead.
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-                .accessibilityLabel("Delete this workout")
-            }
-        }
         // D6: delete confirmation (same wording as the list swipe path).
         .confirmationDialog("Delete this workout?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
