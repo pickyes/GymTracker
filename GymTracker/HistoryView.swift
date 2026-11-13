@@ -1016,7 +1016,7 @@ struct TrainingHeatmap: View {
         return VStack(alignment: .leading, spacing: 8) {
             // Non-breaking hyphen, so "0-day" never splits across lines.
             Text("\(monthStart.formatted(.dateTime.month(.wide))) · \(trained) day\(trained == 1 ? "" : "s") trained · \(streak)\u{2011}day streak")
-                .font(.caption.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1039,7 +1039,7 @@ struct TrainingHeatmap: View {
                                     .overlay {
                                         if calendar.isDate(day, inSameDayAs: selectedDay) && day <= today {
                                             RoundedRectangle(cornerRadius: corner, style: .continuous)
-                                                .stroke(Theme.text.opacity(0.8), lineWidth: 1.5)
+                                                .stroke(Theme.text, lineWidth: 2.5)
                                         }
                                     }
                             } else {
@@ -1052,8 +1052,8 @@ struct TrainingHeatmap: View {
             // Key: none, a short workout, a full one.
             HStack(spacing: 4) {
                 Text("Less")
-                keySquare(Theme.cardElevated)
-                keySquare(Color.accentColor.opacity(0.4))
+                keySquare(Self.level(0))
+                keySquare(Self.level(1))
                 keySquare(Color.accentColor)
                 Text("More")
             }
@@ -1068,7 +1068,7 @@ struct TrainingHeatmap: View {
     private func keySquare(_ color: Color) -> some View {
         RoundedRectangle(cornerRadius: 3, style: .continuous)
             .fill(color)
-            .frame(width: 11, height: 11)
+            .frame(width: 14, height: 14)
     }
 
     private func weekdayInitial(_ column: Int) -> String {
@@ -1076,12 +1076,24 @@ struct TrainingHeatmap: View {
         return symbols[(calendar.firstWeekday - 1 + column) % 7]
     }
 
+    /// Heat levels (DaRon: more visible): an empty day still reads as a
+    /// square, a short workout is a clear mid accent, a full one solid.
+    private static let emptyFill = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 0.17, alpha: 1) : UIColor(white: 0.88, alpha: 1)
+    })
+    private static let emptyEdge = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(white: 0.26, alpha: 1) : UIColor(white: 0.78, alpha: 1)
+    })
+    private static func level(_ sets: Int) -> Color {
+        sets == 0 ? emptyFill : (sets >= 12 ? Color.accentColor : Color.accentColor.opacity(0.55))
+    }
+
     @ViewBuilder
     private func square(day: Date, sets: Int, today: Date, cell: CGFloat, corner: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
         if day > today {
-            // Days still to come: a faint outline, so the month reads whole.
-            shape.stroke(Theme.border, lineWidth: 1)
+            // Days still to come: an outline, so the month reads whole.
+            shape.stroke(Self.emptyEdge, lineWidth: 1.5)
                 .frame(width: cell, height: cell)
                 .contentShape(shape)
                 .onTapGesture {
@@ -1089,18 +1101,18 @@ struct TrainingHeatmap: View {
                 }
         } else if let setup = store.setupDate, day < calendar.startOfDay(for: setup) {
             // Before you set the app up: a faint, inert square.
-            shape.fill(Theme.cardElevated.opacity(0.35))
+            shape.fill(Self.emptyFill.opacity(0.4))
                 .frame(width: cell, height: cell)
         } else {
             // Accent color (DaRon): full for a full workout, faded for a
             // short one.
-            let color: Color = sets == 0 ? Theme.cardElevated
-                : (sets >= 12 ? Color.accentColor : Color.accentColor.opacity(0.4))
-            shape.fill(color)
+            shape.fill(Self.level(sets))
                 .frame(width: cell, height: cell)
                 .overlay {
                     if day == today {
-                        shape.stroke(Color.accentColor, lineWidth: 1.5)
+                        shape.stroke(Color.accentColor, lineWidth: 2.5)
+                    } else if sets == 0 {
+                        shape.stroke(Self.emptyEdge, lineWidth: 1)
                     }
                 }
                 .contentShape(shape)
