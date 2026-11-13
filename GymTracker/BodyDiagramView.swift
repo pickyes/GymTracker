@@ -402,7 +402,8 @@ struct BodyFigureView: View {
             ? UIColor(red: 38/255, green: 38/255, blue: 44/255, alpha: 1)
             : UIColor(white: 0.84, alpha: 1)
     })
-    private static let muscleRest = Color(UIColor { tc in
+    /// Also the "Resting" swatch in the Body page legend.
+    static let muscleRest = Color(UIColor { tc in
         tc.userInterfaceStyle == .dark
             ? UIColor(red: 70/255, green: 70/255, blue: 78/255, alpha: 1)
             : UIColor(white: 0.68, alpha: 1)
@@ -1043,12 +1044,15 @@ struct BodyView: View {
     }
 
     private var statsRow: some View {
-        HStack(spacing: 16) {
+        // Both cards the same height, tops level (the longer label wrapped
+        // and made one card taller than the other).
+        HStack(alignment: .top, spacing: 16) {
             statCard(value: store.daysSinceLastWorkout.map { "\($0)" } ?? "—",
                      label: "DAYS SINCE YOUR LAST WORKOUT")
             statCard(value: "\(store.freshMuscleGroups.count)",
                      label: "FRESH MUSCLE GROUPS")
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func statCard(value: String, label: String) -> some View {
@@ -1060,7 +1064,7 @@ struct BodyView: View {
                 .foregroundStyle(Theme.secondaryText)
                 .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.vertical, 12)
         .themeCard()
     }
@@ -1069,7 +1073,9 @@ struct BodyView: View {
         HStack(spacing: 16) {
             legendDot(color: Color(red: 1.0, green: 0.18, blue: 0.33), label: "Fresh", dashedRing: true)
             legendDot(color: Color(red: 0.55, green: 0.36, blue: 0.96), label: "Recovering")
-            legendDot(color: Color(red: 0.84, green: 0.25, blue: 0.17), label: "Resting")
+            // Resting = not tracked for recovery, drawn in the plain grey
+            // (the swatch was red, a colour nothing on the figure uses).
+            legendDot(color: BodyFigureView.muscleRest, label: "Resting")
         }
         .font(.caption)
         .foregroundStyle(Theme.secondaryText)

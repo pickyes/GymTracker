@@ -300,9 +300,12 @@ struct HistoryView: View {
     private var toolTiles: some View {
         HStack(spacing: 10) {
             Button { openTool = .strength } label: {
-                toolTile("Strength graph", systemImage: "chart.line.uptrend.xyaxis")
+                // "Strength" so all three labels share one size (the
+                // longer one shrank to fit); the icon shows it's a graph.
+                toolTile("Strength", systemImage: "chart.line.uptrend.xyaxis")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Strength graph")
             Button { openTool = .body } label: {
                 toolTile("Body", systemImage: "figure.stand")
             }
