@@ -188,7 +188,8 @@ struct NotesView: View {
                 // the note waits on the other page. Swap mirrors it.
                 // The pair draws the hinge line itself, so it stays on the
                 // hinge in both layouts and while the pages swap.
-                DuoPagePair(wide: true, swapped: swapped, showsDivider: true) {
+                DuoPagePair(wide: true, swapped: swapped, showsDivider: true,
+                            paneClearsCorner: false, mainClearsCorner: false) {
                     detailPane
                         // Clear of the corner buttons when on the right.
                         .contentMargins(.trailing, swapped ? 92 : 0, for: .scrollContent)

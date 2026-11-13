@@ -292,6 +292,9 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// On the DS bottom half, pull the companion page in to clear the
     /// corner buttons. Today's body stays centered (DaRon), so it doesn't.
     var paneClearsCorner = true
+    /// Same for the main page. Notes' list keeps its full width (its
+    /// search bar stopped short); its last rows scroll clear instead.
+    var mainClearsCorner = true
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
 
@@ -314,6 +317,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          stacked: stacked,
                          showsDivider: showsDivider,
                          paneClearsCorner: paneClearsCorner,
+                         mainClearsCorner: mainClearsCorner,
                          // Stacked keeps the keyboard-free height, so the
                          // halves stay on the hinge; pages still get the
                          // keyboard's safe area and scroll above it.
@@ -347,6 +351,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var stacked = false
     var showsDivider = false
     var paneClearsCorner = true
+    var mainClearsCorner = true
     var size: CGSize
     var mainWidth: CGFloat?
     var direction: LayoutDirection
@@ -428,8 +433,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
             }
             main()
                 .environment(\.layoutDirection, direction)
-                .safeAreaPadding(.trailing, stacked && slide < 0.5 ? 76 : 0)
-                .environment(\.duoCornerInset, stacked && slide < 0.5 ? 76 : 0)
+                .safeAreaPadding(.trailing, stacked && slide < 0.5 && mainClearsCorner ? 76 : 0)
+                .environment(\.duoCornerInset, stacked && slide < 0.5 && mainClearsCorner ? 76 : 0)
                 .frame(width: mainW, height: pageH, alignment: .top)
                 .clipped(antialiased: stacked)
                 .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: pageH),
