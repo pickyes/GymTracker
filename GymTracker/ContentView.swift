@@ -53,6 +53,8 @@ struct ContentView: View {
     @State private var keyboardShown = false
     /// The software keyboard's height, from its own notification.
     @State private var keyboardHeight: CGFloat = 0
+    /// The on-screen keyboard is really up (not a hardware keyboard's bar).
+    private var softKeyboardUp: Bool { keyboardShown && keyboardHeight > 120 }
     /// Top of the swap/menu column on screen, so Today's + never sits on it.
     @State private var cornerColumnTop: CGFloat = .infinity
     /// Where the system puts the vertical status bar (nil: nowhere).
@@ -62,11 +64,15 @@ struct ContentView: View {
     @State private var interfaceOrientation = 0
     /// Folded and sideways: the camera hole sits at one end of the side
     /// bar. Never put a button there (DaRon).
+    // Upright (portrait) and turned left: camera at the top of the bar;
+    // upside down and turned right: at the bottom (measured on the Duo).
     private var cameraAtTop: Bool {
-        !Self.isWide(steadySize) && interfaceOrientation == UIInterfaceOrientation.landscapeLeft.rawValue
+        !Self.isWide(steadySize) && [UIInterfaceOrientation.portrait.rawValue,
+                                     UIInterfaceOrientation.landscapeLeft.rawValue].contains(interfaceOrientation)
     }
     private var cameraAtBottom: Bool {
-        !Self.isWide(steadySize) && interfaceOrientation == UIInterfaceOrientation.landscapeRight.rawValue
+        !Self.isWide(steadySize) && [UIInterfaceOrientation.portraitUpsideDown.rawValue,
+                                     UIInterfaceOrientation.landscapeRight.rawValue].contains(interfaceOrientation)
     }
     /// Settings → Status bar on the side, on a screen that has one: the
     /// buttons move into a rail along that edge (DaRon, like Reddit).
@@ -84,7 +90,7 @@ struct ContentView: View {
     /// Side bar: how tall the page list is, labeled or icons only.
     private func railListHeight(labeled: Bool) -> CGFloat {
         let back: CGFloat = 52 + (labeled ? 6 : 4)
-        return labeled ? back + 4 * 58 + 3 * 6 : back + 4 * 44 + 3 * 4
+        return labeled ? back + 4 * 58 + 3 * 6 : back + 58 + 3 * 44 + 3 * 4
     }
 
     /// The buttons stacked at the bottom of the side bar, gaps included.
@@ -165,7 +171,8 @@ struct ContentView: View {
                 // The current page's icon grows a little (DaRon).
                 .scaleEffect(active ? 1.22 : 1)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: active)
-                if labeled {
+                // Icons-only bar: the selected page still shows its name.
+                if labeled || active {
                     Text(page == .profile && !identity.name.trimmingCharacters(in: .whitespaces).isEmpty
                          ? identity.name.trimmingCharacters(in: .whitespaces) : page.title)
                         .font(.caption2.weight(.semibold))
@@ -175,7 +182,7 @@ struct ContentView: View {
             }
             // Selected: lit white on the accent highlight (DaRon).
             .foregroundStyle(active ? Color.white : Theme.secondaryText)
-            .frame(width: 70, height: labeled ? 58 : 44)
+            .frame(width: 70, height: labeled || active ? 58 : 44)
             .background {
                 // One highlight that slides to the page you pick.
                 if active {
@@ -483,7 +490,13 @@ struct ContentView: View {
             withAnimation(AppAnimation.snappy) { keyboardShown = true; keyboardHeight = frame.height }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            withAnimation(AppAnimation.snappy) { keyboardShown = false }
+            withAnimation(AppAnimation.snappy) { keyboardShown = false; keyboardHeight = 0 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            // Floating or undocked keyboards change frame without a hide.
+            let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+            let screenH = UIScreen.main.bounds.height
+            if frame.minY >= screenH - 1 || frame.height < 120 { keyboardHeight = 0 }
         }
         // Hinge read from launch, 0° to 180°, the whole time.
         .hingeReader()
@@ -842,7 +855,7 @@ struct ContentView: View {
             // Hidden while typing: you're already writing one, and with
             // the keyboard up a third button pushed the column into the
             // clock (landscape).
-            if selectedPage == .notes && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
+            if selectedPage == .notes && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
                 Button { store.composeNoteRequest += 1 } label: {
                     Image(systemName: "square.and.pencil")
                         .scaledFont(size: 22, weight: .semibold, maxScale: 1.3)
@@ -860,7 +873,9 @@ struct ContentView: View {
             // is open.
             // Today's + joins the rail too, above swap (DaRon).
             // (With the grey strip on, it sits in the strip instead.)
-            if rail != nil && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
+            // Hidden only behind a real on-screen keyboard (a stale flag
+            // from a hardware keyboard hid it on the phone).
+            if rail != nil && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
                 railTodayActions
                     .transition(.scale.combined(with: .opacity))
             }
