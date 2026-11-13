@@ -884,21 +884,14 @@ struct LiveBodyView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Narrow panes (the open Duo's left strip, ~200pt) stack the
-            // title over the Front/Back switch; otherwise side by side.
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    Text("Working now")
-                        .font(.headline)
-                    Spacer()
-                    sidePicker.frame(width: 140)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Working now")
-                        .font(.headline)
-                    sidePicker
-                }
+            // Front/Back always sits under the title (DaRon Nov 12), so it
+            // never collides with the clock and Wi-Fi in the top corner.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Working now")
+                    .font(.headline)
+                sidePicker.frame(maxWidth: 160)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             BodyFigureView(side: side, highlighted: litMuscles,
                            litColor: accent, primary: primaryLitMuscles)
                 .modifier(LiveBodyFigureHeight(height: figureHeight))
