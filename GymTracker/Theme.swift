@@ -353,7 +353,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     }
 }
 
-/// A page mid-swap: nearly full size (97% at the very middle), rounded
+/// A page mid-swap: nearly full size (98.5% at the very middle), rounded
 /// and shadowed in proportion to `lift`; exactly the page at rest.
 struct DuoSwapCard: ViewModifier {
     var lift: Double
@@ -369,7 +369,8 @@ struct DuoSwapCard: ViewModifier {
                     .padding(-200 * (1 - edge))
             }
             .shadow(color: .black.opacity(0.35 * lift), radius: 14 * lift, y: 6 * lift)
-            .scaleEffect(1 - 0.03 * lift)
+            // Bigger cards (DaRon): 98.5% of the page at the very middle.
+            .scaleEffect(1 - 0.015 * lift)
     }
 }
 
