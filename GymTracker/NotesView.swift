@@ -130,6 +130,8 @@ struct NotesView: View {
             }
         }
         .onChange(of: store.userNotes.map(\.id)) { _, _ in syncSelection() }
+        // The corner compose button (ContentView).
+        .onChange(of: store.composeNoteRequest) { _, _ in compose() }
         .alert("Delete this note?", isPresented: Binding(
             get: { notePendingDelete != nil },
             set: { if !$0 { notePendingDelete = nil } }
@@ -183,23 +185,10 @@ struct NotesView: View {
             // In the clock's row, like Today (Nov 12).
             .padding(.top, 30)
 
-            // Compose sits beside the search field, below the status bar
-            // (in the title row it ran into the Wi-Fi icon).
-            HStack(spacing: 10) {
-                searchField
-                Button(action: compose) {
-                    Image(systemName: "square.and.pencil")
-                        .scaledFont(size: 20, weight: .semibold)
-                        .foregroundStyle(.white)
-                        .frame(width: 46, height: 46)
-                        .background(Color.accentColor, in: Circle())
-                        .shadow(color: Color.accentColor.opacity(0.5), radius: 8, x: 0, y: 3)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New note")
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+            // Compose lives beside the menu button in the corner now.
+            searchField
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -373,7 +362,7 @@ struct NotesView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView("No note open", systemImage: "note.text",
-                                   description: Text("Tap the compose button to write one."))
+                                   description: Text("Tap the blue compose button to write one."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

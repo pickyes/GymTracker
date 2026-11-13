@@ -1592,6 +1592,8 @@ final class WorkoutStore: ObservableObject {
     /// per cold start. Not persisted — a fresh process starts false.
 /// Today's calendar dropdown is open (the corner buttons step aside).
     @Published var calendarDropdownOpen = false
+    /// Bumped by the Notes compose button in the corner (Notes opens a new note).
+    @Published var composeNoteRequest = 0
         @Published var showColdStartGreeting = false
 
     // MARK: - Customization (on-device only)

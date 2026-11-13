@@ -418,7 +418,25 @@ struct ContentView: View {
                         insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
                         removal: .opacity.animation(.easeIn(duration: 0.15))))
             }
-            fabButton
+            // Notes: the blue compose button sits beside the menu button
+            // (DaRon, Nov 12).
+            HStack(spacing: 16) {
+                if selectedPage == .notes && !navExpanded {
+                    Button { store.composeNoteRequest += 1 } label: {
+                        Image(systemName: "square.and.pencil")
+                            .scaledFont(size: 22, weight: .semibold, maxScale: 1.3)
+                            .foregroundStyle(.white)
+                            .frame(width: 56, height: 56)
+                            .background(effectiveAccent, in: Circle())
+                            .shadow(color: effectiveAccent.opacity(0.5), radius: 10, y: 4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New note")
+                    .transition(.scale.combined(with: .opacity))
+                }
+                fabButton
+            }
+            .animation(AppAnimation.snappy, value: selectedPage)
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: restActive)
     }
