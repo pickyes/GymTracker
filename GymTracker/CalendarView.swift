@@ -79,6 +79,8 @@ struct CalendarView: View {
     /// navigation, and Done's dismiss() would be a dead button there.
     /// Default false keeps the sheet / dropdown behavior unchanged.
     var embeddedInNavigation: Bool = false
+    /// The page grid's width, to see if the legend fits after the month.
+    @State private var gridWidth: CGFloat = 0
 
     var body: some View {
         if gridOnly {
@@ -86,7 +88,20 @@ struct CalendarView: View {
                 monthHeader
                 weekdayHeader
                 monthGrid
-                legend
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
+                    // The legend sits in the empty days after the month's
+                    // last day when there's room (DaRon), else under it.
+                    .overlay {
+                        if legendFitsInGrid {
+                            GeometryReader { g in
+                                let w = g.size.width * CGFloat(trailingBlanks) / 7
+                                gridLegend
+                                    .frame(width: w - 8, height: 52)
+                                    .position(x: g.size.width - w / 2, y: g.size.height - 31)
+                            }
+                        }
+                    }
+                if !legendFitsInGrid { legend }
                 if showsMonthSummary { monthSummary.padding(.trailing, summaryTrailingInset) }
             }
             .onAppear {
@@ -491,6 +506,55 @@ struct CalendarView: View {
                 .foregroundStyle(Theme.secondaryText)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Empty cells after the month's last day on the page's grid.
+    private var trailingBlanks: Int {
+        let cells = monthCells
+        return cells.count - (cells.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? cells.count)
+    }
+
+    /// Room after the last day: the legend on one line needs about 330pt,
+    /// in two rows about 170pt. Otherwise it goes under the grid.
+    private var legendFitsInGrid: Bool {
+        gridOnly && gridWidth * CGFloat(trailingBlanks) / 7 >= 170
+    }
+
+    /// The legend for the grid's last row: one line, or two when narrow.
+    private var gridLegend: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) { legendItems }
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                GridRow {
+                    legendItem(color: Theme.vividGreen, label: "Done")
+                    legendItem(color: Color.accentColor, label: "Planned")
+                }
+                GridRow {
+                    legendItem(color: Theme.vividOrange, label: "Missed")
+                    todayLegendItem
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var legendItems: some View {
+        legendItem(color: Theme.vividGreen, label: "Done")
+        legendItem(color: Color.accentColor, label: "Planned")
+        legendItem(color: Theme.vividOrange, label: "Missed")
+        todayLegendItem
+    }
+
+    private var todayLegendItem: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .stroke(Color.accentColor, lineWidth: 1.5)
+                .frame(width: 10, height: 10)
+            Text("Today")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
     }
 
     private var legend: some View {
