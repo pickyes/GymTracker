@@ -313,13 +313,18 @@ struct ContentView: View {
         }
         swapInFlight = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { swapLifted = true }
+        // One continuous motion (DaRon: "needs to be fluid"): the lift,
+        // the slide and the settle overlap instead of running in steps,
+        // each a critically damped spring that picks up the one before
+        // it mid-flight, so nothing stops between phases.
+        withDuoSwapAnimation(.spring(response: 0.32, dampingFraction: 1)) { swapLifted = true }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(170))
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.84)) { duo.swapSides.toggle() }
-            try? await Task.sleep(for: .milliseconds(430))
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) { swapLifted = false }
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: .milliseconds(60))
+            withDuoSwapAnimation(.spring(response: 0.55, dampingFraction: 0.92)) { duo.swapSides.toggle() }
+            try? await Task.sleep(for: .milliseconds(330))
+            withDuoSwapAnimation(.spring(response: 0.45, dampingFraction: 1)) { swapLifted = false }
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.6)
+            try? await Task.sleep(for: .milliseconds(350))
             swapInFlight = false
         }
     }

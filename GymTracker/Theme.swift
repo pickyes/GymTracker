@@ -242,14 +242,33 @@ extension EnvironmentValues {
 
 // MARK: - Duo page pair (swap like two apps, Nov 12)
 
+/// Marks the swap-sides animation, so it passes through views that
+/// otherwise switch animation off (Today's content does, to keep
+/// unfolding seamless).
+private struct DuoSwapTransactionKey: TransactionKey { static let defaultValue = false }
+
+extension Transaction {
+    var duoSwap: Bool {
+        get { self[DuoSwapTransactionKey.self] }
+        set { self[DuoSwapTransactionKey.self] = newValue }
+    }
+}
+
+/// Runs `body` with `animation`, marked as part of a swap.
+func withDuoSwapAnimation(_ animation: Animation, _ body: () -> Void) {
+    var t = Transaction(animation: animation)
+    t.duoSwap = true
+    withTransaction(t, body)
+}
+
 /// The open Duo's two pages: the waiting `pane` and the front screen's
 /// `main` page. Unswapped the pane is on the left; swapped, the right.
 ///
 /// Swapping works like trading two apps' sides on iPhone Duo: both pages
 /// lift into rounded cards over grey, slide past each other to the other
 /// side, then settle back to full screen. Both pages keep their identity
-/// the whole time (the HStack's direction flips, not its children), so
-/// they really move — scroll positions, text and state come along.
+/// the whole time (only their x offsets change), so they really move —
+/// scroll positions, text and state come along.
 struct DuoPagePair<Pane: View, Main: View>: View {
     var wide: Bool
     var swapped: Bool
@@ -261,28 +280,37 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     @Environment(\.layoutDirection) private var direction
     @Environment(\.duoSwapLifted) private var lifted
 
-    private var flipped: LayoutDirection {
-        direction == .leftToRight ? .rightToLeft : .leftToRight
-    }
-
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if wide {
-                pane()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        GeometryReader { geo in
+            let total = geo.size.width
+            let mainW = wide ? min(mainWidth ?? total / 2, total) : total
+            let paneW = max(total - mainW, 0)
+            // Pane on the left unless swapped (mirrored for right-to-left
+            // languages). Plain x offsets, so a swap is a real slide: each
+            // page glides across to the other side instead of jumping.
+            let paneOnLeft = (direction == .leftToRight) != (wide && swapped)
+            ZStack(alignment: .topLeading) {
+                if wide {
+                    pane()
+                        .environment(\.layoutDirection, direction)
+                        .frame(width: paneW, height: geo.size.height, alignment: .top)
+                        .modifier(DuoSwapCard(lifted: lifted))
+                        .offset(x: paneOnLeft ? 0 : mainW)
+                }
+                main()
                     .environment(\.layoutDirection, direction)
-                    .modifier(DuoSwapCard(lifted: lifted))
+                    .frame(width: mainW, height: geo.size.height, alignment: .top)
+                    .modifier(DuoSwapCard(lifted: lifted && wide))
+                    .offset(x: wide && paneOnLeft ? paneW : 0)
+                    // The front screen's page passes over the other one.
+                    .zIndex(1)
             }
-            main()
-                .frame(width: wide ? mainWidth : nil)
-                .frame(maxWidth: wide ? nil : .infinity)
-                .environment(\.layoutDirection, direction)
-                .modifier(DuoSwapCard(lifted: lifted && wide))
-                // The front screen's page passes over the other one.
-                .zIndex(1)
+            .frame(width: total, height: geo.size.height, alignment: .topLeading)
+            // Positions are worked out above for either direction, so the
+            // container itself lays out left to right (each page keeps the
+            // user's direction inside).
+            .environment(\.layoutDirection, .leftToRight)
         }
-        // Swapped = the same two pages laid out the other way round.
-        .environment(\.layoutDirection, wide && swapped ? flipped : direction)
         // A grey backdrop behind the cards, like the Duo's multitasking.
         .background(Color(.systemGray3).opacity(lifted && wide ? 1 : 0).ignoresSafeArea())
     }
@@ -298,11 +326,12 @@ struct DuoSwapCard: ViewModifier {
             // against the backdrop (pages are otherwise see-through).
             .background(Theme.background.opacity(lifted ? 1 : 0))
             .mask {
-                RoundedRectangle(cornerRadius: lifted ? 38 : 0, style: .continuous)
+                RoundedRectangle(cornerRadius: lifted ? 30 : 0, style: .continuous)
                     .padding(lifted ? 0 : -80)
             }
-            .shadow(color: .black.opacity(lifted ? 0.45 : 0), radius: lifted ? 20 : 0, y: lifted ? 10 : 0)
-            .scaleEffect(lifted ? 0.88 : 1)
+            .shadow(color: .black.opacity(lifted ? 0.4 : 0), radius: lifted ? 16 : 0, y: lifted ? 8 : 0)
+            // Bigger cards (DaRon): just lifted off the page, not shrunk away.
+            .scaleEffect(lifted ? 0.95 : 1)
     }
 }
 
