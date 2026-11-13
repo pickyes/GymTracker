@@ -106,11 +106,18 @@ struct ContentView: View {
                         // The icon zone only where the status bar really is:
                         // across the top, visible. Hidden or turned to run
                         // down the side → no grey spot (DaRon, Nov 12).
-                        StatusBarFade(height: stripHeight)
-                        // The top bar: an ombré from the page color at the
-                        // very top edge to transparent (DaRon, Nov 12) —
-                        // replaces the blur bar, which showed as a band.
-                        StatusBarOmbre(height: 22)  // a soft fade along the top edge only
+                        // Both step aside while the pages swap: drawn over
+                        // the cards, they painted the gap above them dark,
+                        // so the top was the one edge with no gap (DaRon).
+                        Group {
+                            StatusBarFade(height: stripHeight)
+                            // The top bar: an ombré from the page color at the
+                            // very top edge to transparent (DaRon, Nov 12) —
+                            // replaces the blur bar, which showed as a band.
+                            StatusBarOmbre(height: 22)  // a soft fade along the top edge only
+                        }
+                        .opacity(swapInFlight ? 0 : 1)
+                        .animation(.easeInOut(duration: 0.12), value: swapInFlight)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
