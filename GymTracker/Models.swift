@@ -2331,6 +2331,30 @@ final class WorkoutStore: ObservableObject {
     /// parts by construction; the assert catches any future muscle that
     /// escapes the grouping. No program (or an empty one) falls back to
     /// 30 (10 push / 10 pull / 10 legs).
+    /// Planned working sets per muscle for one week of the program — the
+    /// per-muscle version of plannedWeeklyTargets (This week's bars).
+    func plannedSetsByMuscle() -> [MuscleGroup: Int] {
+        guard let program = adaptedActiveProgram else { return [:] }
+        var counts: [MuscleGroup: Int] = [:]
+        for day in program.days {
+            for template in day.exercises {
+                guard let muscle = ExerciseLibrary.byId(template.id, plus: customExercises)?.muscle else { continue }
+                counts[muscle, default: 0] += template.sets
+            }
+        }
+        return counts
+    }
+
+    /// Workout days the program plans in the current week.
+    func plannedWorkoutsThisWeek() -> Int {
+        let cal = Calendar.current
+        let start = weekStartDate(for: Date())
+        return (0..<7).reduce(0) { total, offset in
+            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { return total }
+            return total + (programDay(for: day) != nil ? 1 : 0)
+        }
+    }
+
     func plannedWeeklyTargets() -> WeeklyTargets {
         let fallback = WeeklyTargets(push: 10, pull: 10, legs: 10, core: 0, total: 30)
         guard let program = adaptedActiveProgram, !program.days.isEmpty else { return fallback }

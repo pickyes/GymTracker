@@ -108,9 +108,19 @@ struct HistoryView: View {
                 Section("Personal records") {
                     personalRecordsView
                 }
-                Section("This week") {
-                    historyStatsHeader
-                }
+                // A plain heading row: a section header stays pinned to
+                // the top and slid over the cards while scrolling.
+                Text("This week")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Theme.text)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 0, trailing: 16))
+                    .listRowBackground(Color.clear)
+                historyStatsHeader
+                    .padding(.trailing, cornerButtonsInset)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
                 Section("All sessions") {
                     if store.sessions.isEmpty {
                         Text("No sessions yet — finish a workout from Today and it will show up here.")
@@ -316,21 +326,132 @@ struct HistoryView: View {
 
     // MARK: - Stats header (Fitbod weekly set targets + overall strength)
 
+    /// This week (DaRon picked the activity-rings design, with every
+    /// muscle instead of four groups): three rings for workouts, sets and
+    /// pounds moved; a bar per muscle trained or planned; then the best
+    /// max lift and the streak.
     private var historyStatsHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("Leading stat", selection: statBinding) {
-                ForEach(HistoryStatChoice.allCases, id: \.self) { choice in
-                    Text(choice.label).tag(choice)
+        let done = store.setsByMuscleThisWeek()
+        let planned = store.plannedSetsByMuscle()
+        let totalSets = done.values.reduce(0, +)
+        let targetSets = planned.values.reduce(0, +)
+        let workouts = workoutsThisWeek
+        let plannedWorkouts = max(store.plannedWorkoutsThisWeek(), workouts)
+        let volume = weeklyVolume
+        let lastWeek = lastWeekVolume
+        // Volume ring: this week against last week (full once you match it).
+        let volumeProgress = lastWeek > 0 ? volume / lastWeek : (volume > 0 ? 1 : 0)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 18) {
+                ActivityRings(rings: [
+                    (ratio(workouts, plannedWorkouts), Color.accentColor),
+                    (ratio(totalSets, targetSets), Theme.vividGreen),
+                    (min(1, volumeProgress), Theme.vividOrange),
+                ])
+                .frame(width: 128, height: 128)
+                VStack(alignment: .leading, spacing: 8) {
+                    ringLegend("\(workouts)/\(plannedWorkouts)", "workouts", Color.accentColor)
+                    ringLegend(targetSets > 0 ? "\(totalSets)/\(targetSets)" : "\(totalSets)", "sets", Theme.vividGreen)
+                    ringLegend(Self.shortPounds(volume), "lb moved", Theme.vividOrange)
+                    if lastWeek > 0 {
+                        Text("Last week \(Self.shortPounds(lastWeek)) lb")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .themeCard(cornerRadius: 16)
+
+            muscleBars(done: done, planned: planned)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Max lift").font(.caption).foregroundStyle(Theme.secondaryText)
+                    Text(bestOneRepMax ?? "—").font(.headline).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Streak").font(.caption).foregroundStyle(Theme.secondaryText)
+                    let streak = store.weeklyStreak
+                    Text("\(streak) week\(streak == 1 ? "" : "s")")
+                        .font(.headline)
+                        .foregroundStyle(Theme.vividOrange)
                 }
             }
-            .pickerStyle(.segmented)
-
-            leadingStatView
-            statRow(label: "Workouts this week", value: "\(workoutsThisWeek)")
-
-            weeklyTargetsView
-            strengthScoreView
+            .padding(14)
+            .themeCard(cornerRadius: 16)
         }
+    }
+
+    private func ratio(_ a: Int, _ b: Int) -> Double {
+        b > 0 ? min(1, Double(a) / Double(b)) : 0
+    }
+
+    private func ringLegend(_ value: String, _ label: String, _ color: Color) -> some View {
+        (Text(value).foregroundStyle(color).fontWeight(.bold) + Text(" \(label)"))
+            .font(.subheadline)
+            .monospacedDigit()
+    }
+
+    private static func shortPounds(_ lb: Double) -> String {
+        lb >= 10_000 ? String(format: "%.1fk", lb / 1000) : "\(Int(lb.rounded()))"
+    }
+
+    private var lastWeekVolume: Double {
+        let start = weekStartDate(for: Date())
+        let prev = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: start) ?? start
+        return store.volume(from: prev, to: start.addingTimeInterval(-1))
+    }
+
+    /// One bar per muscle: every muscle the program plans this week, plus
+    /// any trained outside it. Filled to sets done / sets planned.
+    private func muscleBars(done: [MuscleGroup: Int], planned: [MuscleGroup: Int]) -> some View {
+        let muscles = MuscleGroup.allCases.filter { (planned[$0] ?? 0) > 0 || (done[$0] ?? 0) > 0 }
+        let palette: [Color] = [Color.accentColor, .cyan, Theme.vividGreen, Theme.vividOrange, .purple, .pink, .yellow, .mint, .indigo, .teal]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Muscles").font(.headline)
+            if muscles.isEmpty {
+                Text("Log a workout and each muscle you train shows up here.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.secondaryText)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 52), spacing: 8)], spacing: 14) {
+                    ForEach(Array(muscles.enumerated()), id: \.element) { index, muscle in
+                        let d = done[muscle] ?? 0
+                        let t = planned[muscle] ?? 0
+                        let color = palette[index % palette.count]
+                        VStack(spacing: 4) {
+                            GeometryReader { geo in
+                                ZStack(alignment: .bottom) {
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(Theme.cardElevated)
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(color)
+                                        .frame(height: max(d > 0 ? 8 : 0,
+                                                           geo.size.height * (t > 0 ? min(1, Double(d) / Double(t)) : (d > 0 ? 1 : 0))))
+                                }
+                            }
+                            .frame(width: 26, height: 80)
+                            Text(t > 0 ? "\(d)/\(t)" : "\(d)")
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(Theme.secondaryText)
+                            Text(muscle.label)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(muscle.label): \(d) of \(t) sets")
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeCard(cornerRadius: 16)
     }
 
     /// The user-chosen leading stat (one row). Extracted so the stats
@@ -662,6 +783,32 @@ struct SessionRowView: View {
 }
 
 /// A progress ring (Fitbod weekly-target pattern).
+/// Concentric rings, outermost first, each filled 0…1.
+struct ActivityRings: View {
+    var rings: [(Double, Color)]
+    var body: some View {
+        GeometryReader { geo in
+            let size = min(geo.size.width, geo.size.height)
+            let line = size * 0.1
+            ZStack {
+                ForEach(rings.indices, id: \.self) { i in
+                    let inset = CGFloat(i) * (line + 3) + line / 2
+                    Circle()
+                        .stroke(rings[i].1.opacity(0.18), lineWidth: line)
+                        .padding(inset)
+                    Circle()
+                        .trim(from: 0, to: max(0.001, rings[i].0))
+                        .stroke(rings[i].1, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .padding(inset)
+                }
+            }
+            .frame(width: size, height: size)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct WeeklyRing: View {
     var progress: Double
 
