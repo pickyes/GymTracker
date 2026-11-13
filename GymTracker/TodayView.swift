@@ -3810,6 +3810,9 @@ private struct CornerColumnOffset: ViewModifier {
     @Environment(\.duoSwapProgress) private var progress
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
+    @Environment(\.cornerColumnTop) private var columnTop
+    /// Bottom of the + on screen (before the offset, so no feedback).
+    @State private var plusBottom: CGFloat = 0
     func body(content: Content) -> some View {
         // DS: the same inset on either half, so the + always sits on the
         // swap/menu buttons' center line (DaRon: "buttons need to line
@@ -3817,8 +3820,13 @@ private struct CornerColumnOffset: ViewModifier {
         let trailing: CGFloat = !wide ? 16
             : stacked ? 3
             : (progress >= 0 ? 3 + 13 * progress : (swapped ? 16 : 3))
+        // Short bottom half (line dragged down): the column would land on
+        // the swap button, so the + stays beside the column (DaRon).
+        let collides = inset > 0 && plusBottom + 12 > columnTop
         content
             .padding(.trailing, trailing)
-            .offset(x: inset)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { plusBottom = $0 }
+            .offset(x: collides ? 0 : inset)
+            .animation(AppAnimation.snappy, value: collides)
     }
 }

@@ -261,6 +261,11 @@ extension EnvironmentValues {
         get { self[RailEdgeKey.self] }
         set { self[RailEdgeKey.self] = newValue }
     }
+    /// Top of the corner button column (swap/menu), on screen.
+    var cornerColumnTop: CGFloat {
+        get { self[CornerColumnTopKey.self] }
+        set { self[CornerColumnTopKey.self] = newValue }
+    }
     /// ContentView draws the keyboard's Done button itself (main pages).
     var appDrawsKeyboardDone: Bool {
         get { self[AppDrawsKeyboardDoneKey.self] }
@@ -281,6 +286,7 @@ extension EnvironmentValues {
 private struct DuoStackedKey: EnvironmentKey { static let defaultValue = false }
 private struct RailEdgeKey: EnvironmentKey { static let defaultValue: HorizontalEdge? = nil }
 private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
+private struct CornerColumnTopKey: EnvironmentKey { static let defaultValue: CGFloat = .infinity }
 private struct AppDrawsKeyboardDoneKey: EnvironmentKey { static let defaultValue = false }
 
 // MARK: - Duo page pair (swap like two apps, Nov 12)

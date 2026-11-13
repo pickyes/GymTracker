@@ -51,6 +51,8 @@ struct ContentView: View {
     @State private var keyboardShown = false
     /// The software keyboard's height, from its own notification.
     @State private var keyboardHeight: CGFloat = 0
+    /// Top of the swap/menu column on screen, so Today's + never sits on it.
+    @State private var cornerColumnTop: CGFloat = .infinity
     /// Where the system puts the vertical status bar (nil: nowhere).
     @State private var verticalBarEdge: HorizontalEdge?
     /// Settings → Status bar on the side, on a screen that has one: the
@@ -105,6 +107,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
                             .environment(\.railEdge, rail)
                             .environment(\.appDrawsKeyboardDone, true)
+                            .environment(\.cornerColumnTop, cornerColumnTop)
                             .environment(\.fabBottomOffset,
                                          fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom,
                                                           size: proxy.size))
@@ -179,6 +182,10 @@ struct ContentView: View {
                                 .accessibilityHidden(true)
                         }
                         bottomStack
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in
+                                // The open menu's pills don't count.
+                                if !navExpanded { cornerColumnTop = y }
+                            }
                             // Bottom-right corner, lined up with the
                             // cards' "+" column (see fabTrailingPadding /
                             // fabBottomPadding). The rest-timer panel
