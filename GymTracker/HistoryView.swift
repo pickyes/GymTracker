@@ -170,10 +170,17 @@ struct HistoryView: View {
             .infinityTopEdge()
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(item: $openTool) { tool in
-                switch tool {
-                case .strength: StrengthGraphView()
-                case .body: BodyView()
+                Group {
+                    switch tool {
+                    case .strength: StrengthGraphView()
+                    case .body: BodyView()
+                    }
                 }
+                .navigationBarBackButtonHidden(inRail)
+            }
+            .onChange(of: openTool == nil, initial: true) { _, top in store.setCanGoBack("history", !top) }
+            .onChange(of: store.backRequest.n) { _, _ in
+                if store.backRequest.page == "history" { openTool = nil }
             }
             // Picking a session or jumping here from a note closes a tool.
             .onChange(of: selectedSessionID) { _, id in if id != nil { openTool = nil } }

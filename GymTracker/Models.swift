@@ -1597,6 +1597,15 @@ final class WorkoutStore: ObservableObject {
     /// Today's + actions, shared so the + can also live in the side rail
     /// (Settings → Status bar on the side).
     @Published var todayEditing = false
+    /// Pages that have somewhere to go back to (a pushed page, an open
+    /// folder or tool), so the side bar can show its back button.
+    @Published var canGoBack: Set<String> = []
+    /// Bumped with the page's name when the side bar's back is tapped.
+    @Published var backRequest: (page: String, n: Int) = ("", 0)
+    func requestBack(_ page: String) { backRequest = (page, backRequest.n + 1) }
+    func setCanGoBack(_ page: String, _ value: Bool) {
+        if value { canGoBack.insert(page) } else { canGoBack.remove(page) }
+    }
     @Published var todayAddExercise = false
     @Published var todaySessionMod = false
     /// Set to open the Calendar page on a day (a note's linked workout).

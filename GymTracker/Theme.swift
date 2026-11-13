@@ -1420,6 +1420,10 @@ struct DuoSplitHandle: View {
 
     @State private var start: Double?
     @State private var dragging = false
+    /// Where the drag last was: snapped to rest, at a limit, or free. One
+    /// haptic per change, exactly when it happens (DaRon).
+    @State private var zone = 0
+    @State private var haptic = UIImpactFeedbackGenerator(style: .rigid)
 
     var body: some View {
         Color.clear
@@ -1445,13 +1449,22 @@ struct DuoSplitHandle: View {
                 // itself and the line shook (DaRon).
                 DragGesture(minimumDistance: 2, coordinateSpace: .global)
                     .onChanged { value in
-                        if start == nil { start = share; dragging = true }
+                        if start == nil {
+                            start = share; dragging = true
+                            haptic.prepare()
+                            zone = abs(share - rest) < 0.0001 ? 1 : 0
+                        }
                         let moved = horizontal ? value.translation.height : value.translation.width
-                        var next = Self.clamp((start ?? share) + moved / max(length, 1))
+                        let raw = (start ?? share) + moved / max(length, 1)
+                        var next = Self.clamp(raw)
                         // Sticks to its usual spot when close.
                         if abs(next - rest) < 0.02 { next = rest }
-                        if (next == rest) != (abs(share - rest) < 0.0001) {
-                            UISelectionFeedbackGenerator().selectionChanged()
+                        let newZone = next == rest ? 1 : (raw <= 1.0 / 3 || raw >= 2.0 / 3 ? 2 : 0)
+                        if newZone != zone {
+                            // Snap in and hitting a limit: firm; leaving: light.
+                            haptic.impactOccurred(intensity: newZone == 0 ? 0.45 : 1)
+                            haptic.prepare()
+                            zone = newZone
                         }
                         var t = Transaction(); t.animation = nil
                         withTransaction(t) { share = next }

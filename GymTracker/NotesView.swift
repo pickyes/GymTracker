@@ -23,6 +23,8 @@ struct NotesView: View {
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
     @Environment(\.cornerButtonsInRail) private var inRail
+    /// The grey side bar shows the back button instead.
+    @Environment(\.cornerButtonsInRail) private var inSideBar
     /// How far the list is scrolled, kept here so folding or unfolding
     /// (which rebuilds the list in its other container) lands on the
     /// same spot instead of the top (red team).
@@ -210,6 +212,7 @@ struct NotesView: View {
                         .toolbar(.hidden, for: .navigationBar)
                         .navigationDestination(for: UUID.self) { id in
                             NoteDetailView(noteID: id)
+                                .navigationBarBackButtonHidden(inSideBar)
                         }
                 }
             }
@@ -234,6 +237,16 @@ struct NotesView: View {
         .onChange(of: store.noteCategories) { _, _ in closeMissingFolder() }
         // The corner compose button (ContentView).
         .onChange(of: store.composeNoteRequest) { _, _ in compose() }
+        // Side bar back button (ContentView).
+        .onChange(of: path.isEmpty && openFolder == nil, initial: true) { _, top in
+            store.setCanGoBack("notes", !top)
+        }
+        .onChange(of: store.backRequest.n) { _, _ in
+            guard store.backRequest.page == "notes" else { return }
+            withAnimation(AppAnimation.snappy) {
+                if !path.isEmpty { path.removeLast() } else { openFolder = nil }
+            }
+        }
         .alert("New Folder", isPresented: $addingFolder) {
             TextField("Name", text: $newFolderName)
             Button("Create") {
@@ -308,7 +321,7 @@ struct NotesView: View {
     private var listPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if openFolder != nil {
+                if openFolder != nil && !inSideBar {
                     Button {
                         withAnimation(AppAnimation.snappy) { openFolder = nil }
                     } label: {
@@ -378,12 +391,13 @@ struct NotesView: View {
                 newFolderName = ""
                 addingFolder = true
             } label: {
-                Label("New Folder", systemImage: "folder.badge.plus")
+                Text("New Folder")
             }
             Divider()
             Picker("View", selection: $viewStyleRaw) {
-                Label("Icons", systemImage: "square.grid.2x2").tag(NotesViewStyle.icons.rawValue)
-                Label("List", systemImage: "list.bullet").tag(NotesViewStyle.list.rawValue)
+                // Text only, like the rest of the menu (DaRon: no icons).
+                Text("Icons").tag(NotesViewStyle.icons.rawValue)
+                Text("List").tag(NotesViewStyle.list.rawValue)
             }
             .pickerStyle(.inline)
             if viewStyle == .icons {

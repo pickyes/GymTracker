@@ -96,6 +96,23 @@ struct ContentView: View {
     private var sideBar: Bool { rail != nil && duo.sideStrip }
 
     /// One page in the side bar: icon over a short label, lit when current.
+    /// Back, in the side bar, when the page has somewhere to go back to
+    /// (DaRon: not top left).
+    @ViewBuilder private var railBackButton: some View {
+        if store.canGoBack.contains(selectedPage.rawValue) {
+            Button { store.requestBack(selectedPage.rawValue) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Theme.text)
+                    .frame(width: 56, height: 44)
+                    .liquidGlass(Capsule())
+            }
+            .buttonStyle(PressSqueeze())
+            .accessibilityLabel("Back")
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+
     /// Bottom of the side bar kept clear of the camera hole.
     static let cameraClearance: CGFloat = 92
 
@@ -106,12 +123,17 @@ struct ContentView: View {
         } label: {
             VStack(spacing: 4) {
                 // Profile shows your photo and name when set (Settings).
-                if page == .profile && identity.photo != nil {
-                    ProfileAvatar(size: 26)
-                } else {
-                    Image(systemName: page.systemImage)
-                        .font(.title3.weight(.semibold))
+                Group {
+                    if page == .profile && identity.photo != nil {
+                        ProfileAvatar(size: 26)
+                    } else {
+                        Image(systemName: page.systemImage)
+                            .font(.title3.weight(.semibold))
+                    }
                 }
+                // The current page's icon grows a little (DaRon).
+                .scaleEffect(active ? 1.22 : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: active)
                 if labeled {
                     Text(page == .profile && !identity.name.trimmingCharacters(in: .whitespaces).isEmpty
                          ? identity.name.trimmingCharacters(in: .whitespaces) : page.title)
@@ -275,9 +297,11 @@ struct ContentView: View {
                                 // never runs into the buttons below it.
                                 ViewThatFits(in: .vertical) {
                                     VStack(spacing: 6) {
+                                        railBackButton
                                         ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: true) }
                                     }
                                     VStack(spacing: 4) {
+                                        railBackButton
                                         ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: false) }
                                     }
                                 }

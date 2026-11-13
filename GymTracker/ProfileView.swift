@@ -166,11 +166,17 @@ struct ProfileView: View {
                         .toolbar(.hidden, for: .navigationBar)
                         .navigationDestination(for: ProfileSection.self) { section in
                             sectionPage(section)
+                                .navigationBarBackButtonHidden(inRail)
                         }
                 }
             }
         }
         .disableVerticalBar()
+        .onChange(of: path.isEmpty, initial: true) { _, top in store.setCanGoBack("profile", !top) }
+        .onChange(of: store.backRequest.n) { _, _ in
+            guard store.backRequest.page == "profile", !path.isEmpty else { return }
+            path.removeLast()
+        }
         .onChange(of: wide) { _, isWide in
             // Unfold keeps the open section open; fold pushes the one
             // that was showing beside the list.
@@ -954,6 +960,8 @@ struct ShareSheet: UIViewControllerRepresentable {
 /// photo goes to a crop step first: drag and pinch it inside the circle.
 struct ProfileIdentityEditor: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: WorkoutStore
+    private var accent: Color { store.isPro ? store.settings.accentColor.color : Theme.accent }
     @ObservedObject private var identity = ProfileIdentity.shared
     @State private var name = ProfileIdentity.shared.name
     @State private var item: PhotosPickerItem?
@@ -982,9 +990,9 @@ struct ProfileIdentityEditor: View {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7), spacing: 10) {
                         ForEach(0..<GeneratedAvatar.count, id: \.self) { i in
                             Button {
-                                identity.setPhoto(GeneratedAvatar.image(i))
+                                identity.setPhoto(GeneratedAvatar.image(i, accent: accent))
                             } label: {
-                                GeneratedAvatar(index: i)
+                                GeneratedAvatar(index: i, accent: accent)
                                     .aspectRatio(1, contentMode: .fit)
                                     .clipShape(Circle())
                             }
@@ -1144,27 +1152,50 @@ extension UIImage {
 struct GeneratedAvatar: View {
     static let count = 35
     var index: Int
+    /// The family's color: every avatar is a shade of the app accent.
+    var accent: Color = .accentColor
 
     var body: some View {
-        GeometryReader { g in
-            let s = min(g.size.width, g.size.height)
-            let r = Self.rand(index)
-            let h1 = r(0), h2 = (h1 + 0.12 + r(1) * 0.25).truncatingRemainder(dividingBy: 1)
-            ZStack {
-                LinearGradient(colors: [Color(hue: h1, saturation: 0.75, brightness: 0.95),
-                                        Color(hue: h2, saturation: 0.85, brightness: 0.75)],
-                               startPoint: UnitPoint(x: r(2), y: 0), endPoint: UnitPoint(x: 1 - r(3), y: 1))
-                ForEach(0..<3, id: \.self) { k in
-                    let hb = (h1 + 0.5 + r(10 + k) * 0.2).truncatingRemainder(dividingBy: 1)
-                    Circle()
-                        .fill(Color(hue: hb, saturation: 0.6, brightness: 1).opacity(0.55))
-                        .frame(width: s * (0.35 + r(20 + k) * 0.5))
-                        .position(x: s * r(30 + k), y: s * r(40 + k))
-                        .blur(radius: s * 0.12)
+        let r = Self.rand(index)
+        var base: CGFloat = 0.6, sat: CGFloat = 0.8, bri: CGFloat = 1, a: CGFloat = 1
+        UIColor(accent).getHue(&base, saturation: &sat, brightness: &bri, alpha: &a)
+        // Shades of the accent: small hue drifts, varied depth and glow.
+        func hue(_ d: Double) -> Double { (Double(base) + d + 1).truncatingRemainder(dividingBy: 1) }
+        let h1 = hue((r(0) - 0.5) * 0.08)
+        let h2 = hue((r(1) - 0.5) * 0.1)
+        let wax = hue((r(2) - 0.5) * 0.12)
+        let deep = 0.25 + r(4) * 0.3, lit = 0.75 + r(5) * 0.25
+        return ZStack {
+            // The glowing liquid behind the wax.
+            LinearGradient(colors: [Color(hue: h1, saturation: 0.9, brightness: deep),
+                                    Color(hue: h2, saturation: 0.75 + r(6) * 0.25, brightness: lit)],
+                           startPoint: .top, endPoint: .bottom)
+            // Wax blobs that merge like a lava lamp (blur + threshold).
+            Canvas { ctx, size in
+                let s = min(size.width, size.height)
+                ctx.addFilter(.alphaThreshold(min: 0.5, color: Color(hue: wax, saturation: 0.35 + r(7) * 0.45, brightness: 1)))
+                ctx.addFilter(.blur(radius: s * 0.06))
+                ctx.drawLayer { layer in
+                    let n = 4 + Int(r(3) * 3)
+                    for k in 0..<n {
+                        let d = s * (0.18 + r(10 + k) * 0.3)
+                        // Big blob low, smaller ones rising, a few drips.
+                        let x = s * (0.15 + r(20 + k) * 0.7)
+                        let y = s * (k == 0 ? 0.92 : 0.1 + r(30 + k) * 0.75)
+                        layer.fill(Path(ellipseIn: CGRect(x: x - d / 2, y: y - d * 0.6, width: d, height: d * 1.2)),
+                                   with: .color(.black))
+                    }
                 }
             }
-            .frame(width: s, height: s)
+            // Warm glow through the wax, then a glass shine.
+            RadialGradient(colors: [Color.white.opacity(0.25), .clear],
+                           center: UnitPoint(x: 0.5, y: 0.85), startRadius: 0, endRadius: 60)
+                .blendMode(.plusLighter)
+            LinearGradient(colors: [Color.white.opacity(0.35), .clear],
+                           startPoint: .topLeading, endPoint: UnitPoint(x: 0.5, y: 0.45))
+                .mask(Ellipse().scale(x: 0.7, y: 0.45).offset(x: -6, y: -14))
         }
+        .aspectRatio(1, contentMode: .fit)
     }
 
     /// Deterministic 0…1 values for one avatar.
@@ -1175,8 +1206,8 @@ struct GeneratedAvatar: View {
         }
     }
 
-    @MainActor static func image(_ i: Int) -> UIImage? {
-        let r = ImageRenderer(content: GeneratedAvatar(index: i).frame(width: 256, height: 256))
+    @MainActor static func image(_ i: Int, accent: Color = .accentColor) -> UIImage? {
+        let r = ImageRenderer(content: GeneratedAvatar(index: i, accent: accent).frame(width: 256, height: 256))
         r.scale = 2
         return r.uiImage
     }
