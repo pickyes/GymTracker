@@ -257,7 +257,10 @@ extension EnvironmentValues {
     /// the side), so pages no longer need to keep clear of them.
     /// The corner buttons stay on the pages beside the rail (DaRon: keep
     /// the side strip clear), so pages keep their usual gaps for them.
-    var cornerButtonsInRail: Bool { false }
+    var cornerButtonsInRail: Bool {
+        get { self[CornerButtonsInRailKey.self] }
+        set { self[CornerButtonsInRailKey.self] = newValue }
+    }
     /// Side status bar on: Today's + joins the corner column.
     var todayPlusInColumn: Bool { railEdge != nil }
     /// The edge of the side rail, when it's shown.
@@ -275,6 +278,12 @@ extension EnvironmentValues {
         get { self[AppDrawsKeyboardDoneKey.self] }
         set { self[AppDrawsKeyboardDoneKey.self] = newValue }
     }
+    /// The hinge's x within the page area (the screen's middle, minus a
+    /// side bar on the left). 0 = unknown.
+    var duoHingeX: CGFloat {
+        get { self[DuoHingeXKey.self] }
+        set { self[DuoHingeXKey.self] = newValue }
+    }
     /// This page is the one on screen (hidden pages stay mounted).
     var pageVisible: Bool {
         get { self[PageVisibleKey.self] }
@@ -289,7 +298,9 @@ extension EnvironmentValues {
 
 private struct DuoStackedKey: EnvironmentKey { static let defaultValue = false }
 private struct RailEdgeKey: EnvironmentKey { static let defaultValue: HorizontalEdge? = nil }
+private struct CornerButtonsInRailKey: EnvironmentKey { static let defaultValue = false }
 private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
+private struct DuoHingeXKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 private struct CornerColumnTopKey: EnvironmentKey { static let defaultValue: CGFloat = .infinity }
 private struct AppDrawsKeyboardDoneKey: EnvironmentKey { static let defaultValue = false }
 
@@ -359,6 +370,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     }
 
     @Environment(\.layoutDirection) private var direction
+    @Environment(\.duoHingeX) private var hingeX
     /// The page size without the keyboard: the keyboard must never flip
     /// the DS layout or move its split off the hinge (red team).
     @State private var steady: CGSize = .zero
@@ -398,6 +410,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
                          split: Binding(get: { liveSplit ?? split }, set: { liveSplit = $0 }),
                          sideShift: Binding(get: { liveShift ?? sideShift }, set: { liveShift = $0 }),
+                         hingeX: hingeX,
                          commit: {
                              if let v = liveSplit { split = v; liveSplit = nil }
                              if let v = liveShift { sideShift = v; liveShift = nil }
@@ -436,6 +449,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var size: CGSize
     @Binding var split: Double
     @Binding var sideShift: Double
+    var hingeX: CGFloat = 0
     var commit: () -> Void
     var mainMinWidth: CGFloat?
     var mainWidth: CGFloat?
@@ -456,9 +470,17 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         let topH = stacked ? size.height * DuoSplitHandle.clamp(split) : size.height / 2
         // Side by side: the companion page's share of the width, dragged
         // from its default and kept between a third and two thirds.
-        let sideDefault = DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
+        // Its usual spot is the real hinge (DaRon), on every page.
+        let sideDefault = hingeX > 0 && total > 0
+            ? Double(min(max(hingeX / total, 0), 1))
+            : DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
         let maxPane = DuoPagePair<Pane, Main>.maxPaneShare(total: total, mainMinWidth: mainMinWidth)
-        let paneShare = min(DuoSplitHandle.clamp(sideDefault + sideShift), maxPane)
+        // The left page's share of the width: the line stays where it is
+        // when the pages swap (they trade widths), at the hinge unless
+        // dragged (DaRon).
+        let leftShare = DuoSplitHandle.clamp(sideDefault + sideShift)
+        let swapT = Double(min(max((progress - 0.2) / 0.6, 0), 1))
+        let paneShare = min(leftShare * (1 - swapT) + (1 - leftShare) * swapT, maxPane)
         let botH = size.height - topH
         // Side by side: the main page keeps the front screen's width.
         // Stacked (DS): both pages are full width, half height each.
@@ -577,11 +599,11 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // the left page more room. Swapped, the main page is on the
                 // left, so the same drag shrinks the companion.
                 let lineX = slide < 0.5 ? paneW : mainW
-                let mirrored = (slide >= 0.5) != (direction == .rightToLeft)
+                let mirrored = direction == .rightToLeft
                 DuoSplitHandle(
                     share: Binding(
-                        get: { mirrored ? 1 - paneShare : paneShare },
-                        set: { sideShift = min(mirrored ? 1 - $0 : $0, maxPane) - sideDefault }
+                        get: { mirrored ? 1 - leftShare : leftShare },
+                        set: { sideShift = (mirrored ? 1 - $0 : $0) - sideDefault }
                     ),
                     length: total, span: size.height,
                     horizontal: false,
@@ -977,22 +999,37 @@ struct HingeReveal: ViewModifier {
     /// Kept for call sites; the pane no longer scales from the hinge.
     var anchor: UnitPoint = .trailing
     @State private var openSize: CGSize = .zero
+    /// The hinge moved within this time: hold the size until then. Held
+    /// still at any angle the pane fits its space again (a phone resting
+    /// part-open kept an old, wider size and cut the body off).
+    @State private var movingUntil: Date = .distantPast
+    @State private var tick = 0
 
     func body(content: Content) -> some View {
-        let moving = hinge.openness > 0 && hinge.openness < 1 && openSize.width > 0
+        let moving = Date() < movingUntil && openSize.width > 0
         content
             .frame(width: moving ? openSize.width : nil,
                    height: moving ? openSize.height : nil,
                    alignment: .topLeading)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                // Remember the size only while the phone is fully open
-                // (or has no hinge): that's the size to hold mid-fold.
-                if HingeState.shared.openness >= 1, size.width > 0, size.height > 0 {
+                guard size.width > 0, size.height > 0 else { return }
+                if Date() >= movingUntil {
+                    // At rest (any angle): that's the size to hold mid-fold.
                     openSize = size
                 } else if openSize.width > 0,
                           (size.width > size.height) != (openSize.width > openSize.height) {
                     // Rotated mid-fold: the held size no longer fits.
                     openSize = .zero
+                }
+            }
+            .onChange(of: hinge.openness) { _, now in
+                guard now > 0 && now < 1 else { movingUntil = .distantPast; tick += 1; return }
+                movingUntil = Date().addingTimeInterval(0.6)
+                tick += 1
+                let mine = tick
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+                    // Settled: lay out at the real size again.
+                    if tick == mine { tick += 1 }
                 }
             }
     }
@@ -1330,7 +1367,8 @@ struct DuoSplitHandle: View {
             .contentShape(Rectangle())
             .overlay {
                 Capsule()
-                    .fill(Theme.secondaryText.opacity(dragging ? 0.9 : 0.45))
+                    // Accent while held (DaRon).
+                    .fill(dragging ? Color.accentColor : Theme.secondaryText.opacity(0.45))
                     .frame(width: horizontal ? (dragging ? 56 : 40) : 5,
                            height: horizontal ? 5 : (dragging ? 56 : 40))
                     .animation(.snappy(duration: 0.2), value: dragging)
@@ -1608,5 +1646,37 @@ struct StatusBarOmbre: View {
         .ignoresSafeArea(edges: bottom ? .bottom : .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+
+/// Your photo (Settings → Profile) in a circle, or a person glyph.
+struct ProfileAvatar: View {
+    @ObservedObject private var identity = ProfileIdentity.shared
+    var size: CGFloat
+    var body: some View {
+        Group {
+            if let photo = identity.photo {
+                Image(uiImage: photo).resizable().scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable().scaledToFit()
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
+}
+
+
+/// Press feedback for the side bar: a quick springy squeeze.
+struct PressSqueeze: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }

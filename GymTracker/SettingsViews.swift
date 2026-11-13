@@ -1,5 +1,6 @@
 import SwiftUI
 import UserNotifications
+import PhotosUI
 
 // MARK: - Settings (P1/P2 customization, on-device only)
 
@@ -18,6 +19,8 @@ struct SettingsView: View {
     /// Show the swap-sides button on the open Duo (Nov 12). Saved with the
     /// swap itself, straight to disk, so it survives updates and power-off.
     @ObservedObject private var duo = DuoSettings.shared
+    @ObservedObject private var identity = ProfileIdentity.shared
+    @State private var photoItem: PhotosPickerItem?
     /// Extra sections at the end (Profile puts Privacy & About here).
     var trailingSections: AnyView? = nil
     /// Sections at the top (Profile puts its header card here).
@@ -26,6 +29,37 @@ struct SettingsView: View {
     var body: some View {
         Form {
             if let leadingSections { leadingSections }
+            Section {
+                HStack(spacing: 14) {
+                    ProfileAvatar(size: 56)
+                    VStack(alignment: .leading, spacing: 6) {
+                        PhotosPicker(selection: $photoItem, matching: .images) {
+                            Text(identity.photo == nil ? "Add photo" : "Change photo")
+                        }
+                        if identity.photo != nil {
+                            Button("Remove photo", role: .destructive) { identity.setPhoto(nil) }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                TextField("Your name", text: $identity.name)
+                    .textContentType(.givenName)
+                    .submitLabel(.done)
+            } header: {
+                Text("Profile")
+            } footer: {
+                Text("Shown in the side bar and in Today's greeting.")
+            }
+            .onChange(of: photoItem) { _, item in
+                guard let item else { return }
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        await MainActor.run { identity.setPhoto(image) }
+                    }
+                    await MainActor.run { photoItem = nil }
+                }
+            }
             Section("Rest timer") {
                 HStack {
                     Text("Default rest")
@@ -77,6 +111,9 @@ struct SettingsView: View {
                 Toggle("Status bar on the side", isOn: $duo.sideStatusBar)
                 if duo.sideStatusBar {
                     Toggle("Side bar strip", isOn: $duo.sideStrip)
+                    if duo.sideStrip {
+                        Toggle("Accent tint on side bar", isOn: $duo.sideTint)
+                    }
                 }
             } header: {
                 Text("Open display")

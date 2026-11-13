@@ -37,6 +37,8 @@ final class DuoSettings: ObservableObject {
     /// With the side status bar: keep its dark grey strip (a real side
     /// bar the pages stop at). Off: pages run under the status bar.
     @Published var sideStrip: Bool { didSet { if sideStrip != oldValue { save() } } }
+    /// A light accent-color tint on the side bar.
+    @Published var sideTint: Bool { didSet { if sideTint != oldValue { save() } } }
 
     private struct Values: Codable {
         var swapSides = false
@@ -44,6 +46,7 @@ final class DuoSettings: ObservableObject {
         /// Optional: files saved before this setting existed lack it.
         var sideStatusBar: Bool? = nil
         var sideStrip: Bool? = nil
+        var sideTint: Bool? = nil
     }
 
     private static var fileURL: URL {
@@ -70,16 +73,68 @@ final class DuoSettings: ObservableObject {
         showSwapButton = values.showSwapButton
         sideStatusBar = values.sideStatusBar ?? false
         sideStrip = values.sideStrip ?? true
+        sideTint = values.sideTint ?? true
         save()
     }
 
     private func save() {
-        let values = Values(swapSides: swapSides, showSwapButton: showSwapButton, sideStatusBar: sideStatusBar, sideStrip: sideStrip)
+        let values = Values(swapSides: swapSides, showSwapButton: showSwapButton, sideStatusBar: sideStatusBar, sideStrip: sideStrip, sideTint: sideTint)
         guard let data = try? JSONEncoder().encode(values) else { return }
         let url = Self.fileURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Atomic write: the file is either the old choice or the new one,
         // never half-written, and it is on disk when this returns.
         try? data.write(to: url, options: .atomic)
+    }
+}
+
+import UIKit
+
+/// The name and photo shown in the side bar (Settings → Profile).
+/// Saved in the shared app container: name in a small JSON file, the
+/// photo as a JPEG beside it.
+final class ProfileIdentity: ObservableObject {
+    static let shared = ProfileIdentity()
+
+    @Published var name: String { didSet { if name != oldValue { saveName() } } }
+    @Published private(set) var photo: UIImage?
+
+    private static var folder: URL {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedDefaults.suiteName)
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    }
+    private static var nameURL: URL { folder.appendingPathComponent("profile-name.json") }
+    private static var photoURL: URL { folder.appendingPathComponent("profile-photo.jpg") }
+
+    private init() {
+        name = (try? JSONDecoder().decode(String.self, from: Data(contentsOf: Self.nameURL))) ?? ""
+        photo = (try? Data(contentsOf: Self.photoURL)).flatMap(UIImage.init(data:))
+    }
+
+    /// Sets (or clears, with nil) the photo; stored as a small square JPEG.
+    func setPhoto(_ image: UIImage?) {
+        guard let image else {
+            photo = nil
+            try? FileManager.default.removeItem(at: Self.photoURL)
+            return
+        }
+        let side: CGFloat = 256
+        let scale = side / min(image.size.width, image.size.height)
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let square = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            image.draw(in: CGRect(x: (side - size.width) / 2, y: (side - size.height) / 2,
+                                  width: size.width, height: size.height))
+        }
+        photo = square
+        if let data = square.jpegData(compressionQuality: 0.85) {
+            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+            try? data.write(to: Self.photoURL, options: .atomic)
+        }
+    }
+
+    private func saveName() {
+        guard let data = try? JSONEncoder().encode(name) else { return }
+        try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+        try? data.write(to: Self.nameURL, options: .atomic)
     }
 }

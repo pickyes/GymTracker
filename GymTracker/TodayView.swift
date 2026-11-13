@@ -75,6 +75,8 @@ struct TodayView: View {
     /// "DaRon" when the active program is his preset (his saved profile
     /// predates the name field). Nil for a quiz user with no name.
     private var greetingName: String? {
+        let set = ProfileIdentity.shared.name.trimmingCharacters(in: .whitespaces)
+        if !set.isEmpty { return set }
         if let name = store.profile?.name, !name.isEmpty { return name }
         if store.activeProgram?.id == Program.daronPreset.id { return "DaRon" }
         return nil
@@ -290,7 +292,7 @@ struct TodayView: View {
         // (The line between the pages can be dragged: follow it.)
         let paneShare = min(DuoSplitHandle.clamp(
             DuoPagePair<EmptyView, EmptyView>.sideDefault(total: size.width, mainWidth: Self.outerDisplayWidth) + sideShift),
-            DuoPagePair<EmptyView, EmptyView>.maxPaneShare(total: size.width, mainMinWidth: Self.outerDisplayWidth))
+            DuoPagePair<EmptyView, EmptyView>.maxPaneShare(total: size.width, mainMinWidth: 380))
         let columnX: CGFloat = kind == .split && !duoSwapped ? size.width * paneShare : 0
         // Open Duo: a full calendar across both pages (DaRon). Folded:
         // the screen's width.
@@ -957,7 +959,7 @@ struct TodayView: View {
         let swapped = split && duoSwapped
         // One pair of pages that trade sides like two apps (DuoPagePair).
         return DuoPagePair(wide: split, swapped: swapped, paneClearsCorner: false,
-                           mainMinWidth: Self.outerDisplayWidth) {
+                           mainMinWidth: 380) {
             splitBodyPane(for: plan, anchor: swapped ? .leading : .trailing)
         } main: {
             compactColumn(for: plan, showBody: !split)
@@ -1067,6 +1069,9 @@ struct TodayView: View {
                 }
             }
             .padding(.horizontal, 16)
+            // DS: the body's labels end clear of the fold's fade and the
+            // divider grabber, so "Next up" reads in full (DaRon).
+            .modifier(FoldClearance())
             // "Working now" sits in the clock's row, level with the
             // Today title (same top strip, DaRon Nov 12).
             // On the right page (sides swapped) the clock is above it, so
@@ -2194,6 +2199,8 @@ struct RestTimerCard: View {
     /// above the menu button; tap it for the full controls, the chevron
     /// shrinks it back. Every new rest starts as the pill.
     var pill: Bool = false
+    /// The pill's height (the side bar fits it to the room it has).
+    var pillHeight: CGFloat = 200
 
     /// D33 (2026-11-10): collapsed to the compact countdown chip.
     /// Per-rest — resets whenever a new rest starts.
@@ -2251,7 +2258,7 @@ struct RestTimerCard: View {
                             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                             // As tall as three buttons in the column below,
                             // gaps included (3 × 56 + 2 × 16), DaRon Nov 12.
-                            .frame(width: 56, height: 200)
+                            .frame(width: 56, height: pillHeight)
                             // Same material as the swap and menu buttons:
                             // frosted, plain border, soft shadow — no gloss.
                             // The liquid sits inside real Liquid Glass, like
@@ -2875,6 +2882,15 @@ struct SetRow: View {
     }
 
     var body: some View {
+        // Narrow page (side bar on, line at the hinge): a compact row with
+        // smaller boxes, so the whole row fits instead of being cut off.
+        ViewThatFits(in: .horizontal) {
+            row(compact: false)
+            row(compact: true)
+        }
+    }
+
+    private func row(compact: Bool) -> some View {
         // Row alignment (DaRon 2026-11-10: "the alignment of the set +
         // buttons are off"): the checkbox, the "Set N" label, and the
         // "+" are all exactly 32pt tall inside ONE center-aligned
@@ -2883,7 +2899,7 @@ struct SetRow: View {
         // text's 32pt frame is what makes it exact: a bare Text's line
         // box is shorter than the circles, so its visual center sat
         // above theirs and the row looked ragged.
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: compact ? 5 : 8) {
             Button {
                 set.done.toggle()
                 if set.done {
@@ -2968,7 +2984,7 @@ struct SetRow: View {
             Spacer()
 
             HStack(spacing: 2) {
-                NumberField(prompt: "–", keyboardType: .decimalPad, range: weightRange, value: weightBinding, width: fieldWidth, fieldID: "field-weight-\(template.id)-\(number)", onFocusChange: { focused in
+                NumberField(prompt: "–", keyboardType: .decimalPad, range: weightRange, value: weightBinding, width: compact ? 50 : fieldWidth, fieldID: "field-weight-\(template.id)-\(number)", onFocusChange: { focused in
                     onFieldFocus?(focused ? "field-weight-\(template.id)-\(number)" : nil)
                 })
                     .layoutPriority(1)
@@ -2980,11 +2996,11 @@ struct SetRow: View {
             }
 
             HStack(spacing: 2) {
-                NumberField(prompt: "–", keyboardType: .numberPad, range: 1...30, value: repsBinding, width: fieldWidth, fieldID: "field-reps-\(template.id)-\(number)", onFocusChange: { focused in
+                NumberField(prompt: "–", keyboardType: .numberPad, range: 1...30, value: repsBinding, width: compact ? 50 : fieldWidth, fieldID: "field-reps-\(template.id)-\(number)", onFocusChange: { focused in
                     onFieldFocus?(focused ? "field-reps-\(template.id)-\(number)" : nil)
                 })
                     .layoutPriority(1)
-                Text("reps")
+                Text(compact ? "×" : "reps")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(1)
@@ -3008,7 +3024,7 @@ struct SetRow: View {
                 Image(systemName: "trash")
                     .scaledFont(size: 15, weight: .regular)
                     .foregroundStyle(Theme.tertiaryText)
-                    .frame(width: setRowControlHeight, height: setRowControlHeight)
+                    .frame(width: compact ? 30 : setRowControlHeight, height: setRowControlHeight)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -3831,5 +3847,15 @@ private struct CornerColumnOffset: ViewModifier {
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { plusBottom = $0 }
             .offset(x: collides ? 0 : inset)
             .animation(AppAnimation.snappy, value: collides)
+    }
+}
+
+
+/// DS layout: keeps the body pane's labels clear of the fold's fade and
+/// the divider grabber. Reads the pair's values from inside it.
+private struct FoldClearance: ViewModifier {
+    @Environment(\.duoStacked) private var stacked
+    func body(content: Content) -> some View {
+        content.padding(.bottom, stacked ? FoldFade.reach + 18 : 0)
     }
 }

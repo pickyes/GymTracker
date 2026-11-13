@@ -1005,8 +1005,18 @@ struct TrainingHeatmap: View {
                 heatmap(cell: fittedCell(to: geo.size))
             }
         } else {
-            heatmap(cell: 26)
+            // Squares as wide as the space allows, seven across (DaRon:
+            // use the full space), never smaller than before.
+            heatmap(cell: widthCell)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
+    }
+
+    @State private var width: CGFloat = 0
+    private var widthCell: CGFloat {
+        guard width > 0 else { return 26 }
+        return max(26, min((width - 6 * gap) / 7, 56))
     }
 
     /// Squares as big as fit: seven across the width, every week down the height.

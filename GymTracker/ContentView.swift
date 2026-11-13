@@ -40,6 +40,8 @@ struct ContentView: View {
     /// Swap + swap-button choices, saved to their own file on every tap
     /// so nothing (closing, updates, power-off) can undo them.
     @ObservedObject private var duo = DuoSettings.shared
+    @ObservedObject private var identity = ProfileIdentity.shared
+    @Namespace private var railNS
     private var swapSides: Bool { duo.swapSides }
     /// The page area ignoring the keyboard. Pose decisions (two pages
     /// or one, Today's layout) use this: with the keyboard up the safe
@@ -55,6 +57,17 @@ struct ContentView: View {
     @State private var cornerColumnTop: CGFloat = .infinity
     /// Where the system puts the vertical status bar (nil: nowhere).
     @State private var verticalBarEdge: HorizontalEdge?
+    /// UIInterfaceOrientation raw value: which end of the side bar the
+    /// folded screen's camera hole is at.
+    @State private var interfaceOrientation = 0
+    /// Folded and sideways: the camera hole sits at one end of the side
+    /// bar. Never put a button there (DaRon).
+    private var cameraAtTop: Bool {
+        !Self.isWide(steadySize) && interfaceOrientation == UIInterfaceOrientation.landscapeLeft.rawValue
+    }
+    private var cameraAtBottom: Bool {
+        !Self.isWide(steadySize) && interfaceOrientation == UIInterfaceOrientation.landscapeRight.rawValue
+    }
     /// Settings → Status bar on the side, on a screen that has one: the
     /// buttons move into a rail along that edge (DaRon, like Reddit).
     private var rail: HorizontalEdge? { duo.sideStatusBar ? verticalBarEdge : nil }
@@ -63,7 +76,66 @@ struct ContentView: View {
     /// Side status bar on: the buttons' own column beside the strip.
     static let buttonColumn: CGFloat = 76
     /// Side bar: where Today's + sits, below the status icons.
-    static let railButtonTop: CGFloat = 124
+    static let railButtonTop: CGFloat = 116
+
+    /// Side bar: the rest pill fills the room between the page list and
+    /// the buttons below it (DaRon: big, never overlapping).
+    private var sideBarPillHeight: CGFloat {
+        let h = steadySize.height
+        let folded = !Self.isWide(steadySize)
+        let list = Self.railButtonTop + (folded ? 4 * 44 + 3 * 4 : 4 * 58 + 3 * 6) + (cameraAtTop ? Self.cameraClearance : 0)
+        let bottom: CGFloat = cameraAtBottom ? Self.cameraClearance : 16 + 34
+        var buttons: CGFloat = 0
+        if selectedPage == .today { buttons += 56 + 16 }
+        if selectedPage == .notes { buttons += 56 + 16 }
+        if showSwapButton && Self.isWide(steadySize) { buttons += 56 + 16 }
+        return max(80, min(260, h - list - 16 - buttons - bottom))
+    }
+
+    /// The grey side bar is showing (Settings → Side bar strip).
+    private var sideBar: Bool { rail != nil && duo.sideStrip }
+
+    /// One page in the side bar: icon over a short label, lit when current.
+    /// Bottom of the side bar kept clear of the camera hole.
+    static let cameraClearance: CGFloat = 92
+
+    private func railNavItem(_ page: Page, labeled: Bool) -> some View {
+        let active = page == selectedPage
+        return Button {
+            withAnimation(AppAnimation.snappy) { selectedPage = page }
+        } label: {
+            VStack(spacing: 4) {
+                // Profile shows your photo and name when set (Settings).
+                if page == .profile && identity.photo != nil {
+                    ProfileAvatar(size: 26)
+                } else {
+                    Image(systemName: page.systemImage)
+                        .font(.title3.weight(.semibold))
+                }
+                if labeled {
+                    Text(page == .profile && !identity.name.trimmingCharacters(in: .whitespaces).isEmpty
+                         ? identity.name.trimmingCharacters(in: .whitespaces) : page.title)
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            .foregroundStyle(active ? (duo.sideTint ? effectiveAccent : Theme.text) : Theme.secondaryText)
+            .frame(width: 70, height: labeled ? 58 : 44)
+            .background {
+                // One highlight that slides to the page you pick.
+                if active {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(duo.sideTint ? effectiveAccent.opacity(0.18) : Theme.text.opacity(0.12))
+                        .matchedGeometryEffect(id: "railHighlight", in: railNS)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressSqueeze())
+        .accessibilityLabel(page.title)
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
     /// The Calendar companion page's width (narrow when upright).
     @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
@@ -113,11 +185,19 @@ struct ContentView: View {
                             // Plus a clear column for the buttons beside the
                             // strip, so nothing runs under them (DaRon).
                             .frame(width: rail == nil ? proxy.size.width
-                                   : strip ? proxy.size.width - extraRail - 1 - Self.buttonColumn
+                                   : strip ? proxy.size.width - extraRail - 1
                                    : proxy.size.width + systemRail)
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
+                            // Nothing drawn past the page area's sides (shadows,
+                            // glows); top and bottom still run to the edges.
+                            .mask(Rectangle().padding(.vertical, -600))
                             .ignoresSafeArea(.container, edges: rail != nil && !strip ? (rail == .leading ? .leading : .trailing) : [])
                             .environment(\.railEdge, rail)
+                            // Where the hinge is across the pages.
+                            .environment(\.duoHingeX,
+                                         (proxy.size.width + proxy.safeAreaInsets.leading + proxy.safeAreaInsets.trailing) / 2
+                                         - (rail == .leading && strip ? railTotal + 1 : 0))
+                            .environment(\.cornerButtonsInRail, strip)
                             .environment(\.appDrawsKeyboardDone, true)
                             .environment(\.cornerColumnTop, cornerColumnTop)
                             .environment(\.fabBottomOffset,
@@ -136,30 +216,6 @@ struct ContentView: View {
                             .blur(radius: navExpanded ? 10 : 0)
                             .saturation(navExpanded ? 0 : 1)
                             .animation(AppAnimation.snappy, value: navExpanded)
-                        // Over the pages (their backgrounds bleed to the edge).
-                        if let rail, strip {
-                            GeometryReader { full in
-                                Rectangle()
-                                    .fill(Theme.railBackground)
-                                    .frame(width: railTotal + 1, height: full.size.height)
-                                    .position(x: rail == .leading ? (railTotal + 1) / 2 : full.size.width - (railTotal + 1) / 2,
-                                              y: full.size.height / 2)
-                            }
-                            .ignoresSafeArea()
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                            // Today's blue + lives in the side bar, under the
-                            // status icons (DaRon: "an actual side bar").
-                            if selectedPage == .today && !navExpanded && !store.calendarDropdownOpen {
-                                railTodayActions
-                                    .frame(width: railTotal)
-                                    .padding(.top, Self.railButtonTop)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity,
-                                           alignment: rail == .leading ? .topLeading : .topTrailing)
-                                    .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
-                                    .transition(.opacity)
-                            }
-                        }
                         // Content scrolling up under the status bar blurs
                         // and greys out, ombre-style (Nov 12).
                         // Smaller strip on Today and Profile (DaRon): a hard
@@ -189,6 +245,46 @@ struct ContentView: View {
                         // On or off, never half faded: a blend under a
                         // partial opacity draws a grey band (red team).
                         .transaction { $0.animation = nil }
+                        // Above the edge fades too: nothing from the pages
+                        // tints the side bar (DaRon).
+                        // Over the pages (their backgrounds bleed to the edge).
+                        if let rail, strip {
+                            GeometryReader { full in
+                                Rectangle()
+                                    .fill(Theme.railBackground)
+                                    .frame(width: railTotal + 1, height: full.size.height)
+                                    // A light wash of the accent color (Settings).
+                                    .overlay(effectiveAccent.opacity(duo.sideTint ? 0.12 : 0))
+                                    .position(x: rail == .leading ? (railTotal + 1) / 2 : full.size.width - (railTotal + 1) / 2,
+                                              y: full.size.height / 2)
+                            }
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                            // Today's blue + lives in the side bar, under the
+                            // status icons (DaRon: "an actual side bar").
+                            // The pages, listed like Claude's side bar (DaRon):
+                            // tap to go, the current one lit up.
+                            if !store.calendarDropdownOpen {
+                                // Short bar (folded): icons only, so the list
+                                // never runs into the buttons below it.
+                                ViewThatFits(in: .vertical) {
+                                    VStack(spacing: 6) {
+                                        ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: true) }
+                                    }
+                                    VStack(spacing: 4) {
+                                        ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: false) }
+                                    }
+                                }
+                                    .frame(maxHeight: max(0, cornerColumnTop - 12 - Self.railButtonTop - (cameraAtTop ? Self.cameraClearance : 0)), alignment: .top)
+                                    .frame(width: railTotal)
+                                    .padding(.top, Self.railButtonTop + (cameraAtTop ? Self.cameraClearance : 0))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                           alignment: rail == .leading ? .topLeading : .topTrailing)
+                                    .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
+                                    .transition(.opacity)
+                            }
+                        }
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -221,11 +317,18 @@ struct ContentView: View {
                             // beside the strip, which stays clear (DaRon).
                             // Measured from the screen's own edge.
                             .padding(rail == .leading ? .leading : .trailing,
-                                     strip ? railTotal + (Self.buttonColumn - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
+                                     strip ? (railTotal - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.
-                            .padding(.bottom, fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
+                            // Side bar: the camera hole sits at the bottom of
+                            // the bar on the folded screen; keep the buttons
+                            // well above it (DaRon: never under the camera).
+                            // (Folded only: the open screen has no camera there,
+                            // and the buttons sit at the bottom as usual.)
+                            .padding(.bottom, strip && cameraAtBottom
+                                     ? max(Self.cameraClearance - proxy.safeAreaInsets.bottom, 12)
+                                     : fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom, size: proxy.size))
                             .frame(maxWidth: .infinity, maxHeight: .infinity,
                                    alignment: rail == .leading ? .bottomLeading : .bottomTrailing)
                             .ignoresSafeArea(.container, edges: rail == nil ? [] : (rail == .leading ? .leading : .trailing))
@@ -245,7 +348,9 @@ struct ContentView: View {
                         // calendar closes it too.
                         // Done for the keyboard, floating a clear gap above
                         // it (the system's sat right on the keys, DaRon).
-                        if keyboardShown && !navExpanded {
+                        // Only for the on-screen keyboard (a hardware keyboard
+                        // reports a short bar and needs no Done).
+                        if keyboardShown && keyboardHeight > 120 && !navExpanded {
                             Button { dismissKeyboard() } label: {
                                 Text("Done")
                                     .font(.body.weight(.semibold))
@@ -283,7 +388,7 @@ struct ContentView: View {
                     // bottom-trailing menu button rode off the bottom edge.
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .background {
-                        VerticalBarEdgeReader(edge: $verticalBarEdge)
+                        VerticalBarEdgeReader(edge: $verticalBarEdge, orientation: $interfaceOrientation)
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
@@ -422,7 +527,7 @@ struct ContentView: View {
                 .frame(width: 56, height: 56)
                 .liquidGlass(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressSqueeze())
         // Never holds keyboard focus: with a hardware keyboard a focused
         // button takes the space bar, so typing a note flipped the pages.
         .focusable(false)
@@ -658,7 +763,7 @@ struct ContentView: View {
             // button column (above swap), growing out of the corner. Tap
             // it for the full controls. Tent pose has its own tile.
             if restActive && !isTentPose && !navExpanded && !store.calendarDropdownOpen {
-                RestTimerCard(pill: true)
+                RestTimerCard(pill: true, pillHeight: sideBar ? sideBarPillHeight : 200)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
             // Notes: the blue compose button joins the button column, on
@@ -685,7 +790,7 @@ struct ContentView: View {
             // is open.
             // Today's + joins the rail too, above swap (DaRon).
             // (With the grey strip on, it sits in the strip instead.)
-            if rail != nil && !duo.sideStrip && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
+            if rail != nil && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
                 railTodayActions
                     .transition(.scale.combined(with: .opacity))
             }
@@ -699,7 +804,8 @@ struct ContentView: View {
                         insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
                         removal: .opacity.animation(.easeIn(duration: 0.15))))
             }
-            fabButton
+            // Side bar: the pages are listed in the bar, so no menu button.
+            if !sideBar { fabButton }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: restActive)
         .animation(AppAnimation.snappy, value: selectedPage)
@@ -725,7 +831,7 @@ struct ContentView: View {
                     Button("Add exercise") { store.todayAddExercise = true }
                     Button("Modify today") { store.todaySessionMod = true }
                 } label: { railActionIcon("plus") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressSqueeze())
                     .accessibilityLabel("Workout actions")
             }
         }
@@ -974,19 +1080,23 @@ private struct CompactWhen: ViewModifier {
 /// (UITraitCollection.verticalBarEdge, iOS 27.1), or nil where there is none.
 struct VerticalBarEdgeReader: UIViewRepresentable {
     @Binding var edge: HorizontalEdge?
+    @Binding var orientation: Int
 
     func makeUIView(context: Context) -> EdgeView {
         let view = EdgeView()
-        view.onChange = { new in if edge != new { edge = new } }
+        updateUIView(view, context: context)
         return view
     }
 
     func updateUIView(_ view: EdgeView, context: Context) {
         view.onChange = { new in if edge != new { edge = new } }
+        view.onOrientation = { o in if orientation != o { orientation = o } }
     }
 
     final class EdgeView: UIView {
         var onChange: ((HorizontalEdge?) -> Void)?
+        var onOrientation: ((Int) -> Void)?
+        private var lastOrientation = -1
         private var last: HorizontalEdge?? = .none
 
         override func didMoveToWindow() { super.didMoveToWindow(); report() }
@@ -996,6 +1106,13 @@ struct VerticalBarEdgeReader: UIViewRepresentable {
         }
 
         private func report() {
+            if let o = window?.windowScene?.effectiveGeometry.interfaceOrientation {
+                let raw = o.rawValue
+                if raw != lastOrientation {
+                    lastOrientation = raw
+                    DispatchQueue.main.async { [weak self] in self?.onOrientation?(raw) }
+                }
+            }
             var value: HorizontalEdge?
             if #available(iOS 27.1, *) {
                 switch traitCollection.verticalBarEdge {
