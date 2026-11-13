@@ -7,6 +7,7 @@ struct TodayView: View {
     @Environment(\.pageContainerSize) private var pageContainerSize
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoSwapProgress) private var duoSwapProgress
+    @AppStorage("duoSideShift") private var sideShift: Double = 0
     @Environment(\.duoWide) private var duoWide
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject var store: WorkoutStore
@@ -287,7 +288,10 @@ struct TodayView: View {
     private func calendarDropdownOverlay(size: CGSize, kind: TodayLayoutKind) -> some View {
         // Which part of the screen the Today title is on: the workout
         // column (the right page on the open Duo unless swapped).
-        let columnX: CGFloat = kind == .split && !duoSwapped ? size.width - Self.outerDisplayWidth : 0
+        // (The line between the pages can be dragged: follow it.)
+        let paneShare = DuoSplitHandle.clamp(
+            DuoPagePair<EmptyView, EmptyView>.sideDefault(total: size.width, mainWidth: Self.outerDisplayWidth) + sideShift)
+        let columnX: CGFloat = kind == .split && !duoSwapped ? size.width * paneShare : 0
         // Open Duo: a full calendar across both pages (DaRon). Folded:
         // the screen's width.
         let wide = kind == .split && size.width > size.height

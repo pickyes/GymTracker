@@ -305,6 +305,12 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
 
+    /// The companion page's default share of the width side by side.
+    static func sideDefault(total: CGFloat, mainWidth: CGFloat?) -> Double {
+        guard total > 0 else { return 0.5 }
+        return Double(max(total - min(mainWidth ?? total / 2, total), 0) / total)
+    }
+
     @Environment(\.layoutDirection) private var direction
     /// The page size without the keyboard: the keyboard must never flip
     /// the DS layout or move its split off the hinge (red team).
@@ -313,6 +319,10 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// the height from the top. DaRon can drag it; 0.5 is the hinge.
     /// One setting for every page.
     @AppStorage("duoFoldSplit") private var split: Double = 0.5
+    /// Side by side: how far the line has been dragged from its default
+    /// (the main page at the front screen's width), as a share of the
+    /// width. One setting for every page.
+    @AppStorage("duoSideShift") private var sideShift: Double = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -336,6 +346,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          // keyboard's safe area and scroll above it.
                          size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
                          split: $split,
+                         sideShift: $sideShift,
                          mainWidth: mainWidth, direction: direction,
                          pane: pane, main: main)
         }
@@ -368,6 +379,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var mainClearsCorner = true
     var size: CGSize
     @Binding var split: Double
+    @Binding var sideShift: Double
     var mainWidth: CGFloat?
     var direction: LayoutDirection
     var pane: () -> Pane
@@ -383,10 +395,14 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         let total = size.width
         // DS: the line between the halves (draggable, 0.5 = the hinge).
         let topH = stacked ? size.height * DuoSplitHandle.clamp(split) : size.height / 2
+        // Side by side: the companion page's share of the width, dragged
+        // from its default and kept between a third and two thirds.
+        let sideDefault = DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
+        let paneShare = DuoSplitHandle.clamp(sideDefault + sideShift)
         let botH = size.height - topH
         // Side by side: the main page keeps the front screen's width.
         // Stacked (DS): both pages are full width, half height each.
-        let mainW = stacked ? total : (wide ? min(mainWidth ?? total / 2, total) : total)
+        let mainW = stacked ? total : (wide ? total * (1 - paneShare) : total)
         let paneW = stacked ? total : max(total - mainW, 0)
         let p = min(max(progress, 0), 1)
         // One continuous motion in three overlapping beats: the cards lift
@@ -486,8 +502,28 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .accessibilityHidden(true)
                     .zIndex(2)
                 // Drag the line to give either half more room (DaRon).
-                DuoSplitHandle(split: $split, height: size.height, width: total)
+                DuoSplitHandle(share: $split, length: size.height, span: total,
+                               horizontal: true, rest: 0.5)
                     .offset(y: topH - DuoSplitHandle.grab / 2)
+                    .opacity(lift > 0 ? 0 : 1)
+                    .allowsHitTesting(lift == 0)
+                    .zIndex(3)
+            }
+            if wide && !stacked {
+                // The line between side-by-side pages: dragging right gives
+                // the left page more room. Swapped, the main page is on the
+                // left, so the same drag shrinks the companion.
+                let lineX = slide < 0.5 ? paneW : mainW
+                let mirrored = (slide >= 0.5) != (direction == .rightToLeft)
+                DuoSplitHandle(
+                    share: Binding(
+                        get: { mirrored ? 1 - paneShare : paneShare },
+                        set: { sideShift = (mirrored ? 1 - $0 : $0) - sideDefault }
+                    ),
+                    length: total, span: size.height,
+                    horizontal: false,
+                    rest: mirrored ? 1 - sideDefault : sideDefault)
+                    .offset(x: (direction == .rightToLeft ? total - lineX : lineX) - DuoSplitHandle.grab / 2)
                     .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(lift == 0)
                     .zIndex(3)
@@ -1184,54 +1220,63 @@ private struct ControlBorder<S: Shape>: ViewModifier {
 /// The DS fold: a hairline with, on each side, the top bar's two
 /// effects mirrored toward the line: a black-and-white strip (keeps
 /// brightness, drops color) and an eased fade into the page color.
-/// The DS layout's line between the halves, made draggable: a grab band
-/// along the line with a small pill in the middle. It snaps to the hinge
-/// when dragged close, and a double tap puts it back there.
+/// The line between the two pages, made draggable (DaRon): a grab band
+/// along the line with a small pill in the middle. `share` is the room
+/// before the line (top, or left), kept between a third and two thirds
+/// of the screen. It sticks to its usual spot (`rest`) when dragged
+/// close, and a double tap puts it back there.
 struct DuoSplitHandle: View {
-    @Binding var split: Double
-    var height: CGFloat
-    var width: CGFloat
-    /// Height of the touch band centred on the line.
+    @Binding var share: Double
+    /// Screen length across the line (height for the DS fold line).
+    var length: CGFloat
+    /// Length of the line itself.
+    var span: CGFloat
+    /// true: a horizontal line (DS); false: a vertical one (side by side).
+    var horizontal: Bool
+    var rest: Double
+    /// Thickness of the touch band centred on the line.
     static let grab: CGFloat = 28
-    static func clamp(_ v: Double) -> Double { min(max(v, 0.28), 0.72) }
+    static func clamp(_ v: Double) -> Double { min(max(v, 1.0 / 3), 2.0 / 3) }
 
     @State private var start: Double?
     @State private var dragging = false
 
     var body: some View {
         Color.clear
-            .frame(width: width, height: Self.grab)
+            .frame(width: horizontal ? span : Self.grab, height: horizontal ? Self.grab : span)
             .contentShape(Rectangle())
             .overlay {
                 Capsule()
                     .fill(Theme.secondaryText.opacity(dragging ? 0.9 : 0.45))
-                    .frame(width: dragging ? 56 : 40, height: 5)
+                    .frame(width: horizontal ? (dragging ? 56 : 40) : 5,
+                           height: horizontal ? 5 : (dragging ? 56 : 40))
                     .animation(.snappy(duration: 0.2), value: dragging)
             }
             .gesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged { value in
-                        if start == nil { start = split; dragging = true }
-                        var next = Self.clamp((start ?? split) + value.translation.height / max(height, 1))
-                        // Sticks to the hinge when close.
-                        if abs(next - 0.5) < 0.02 { next = 0.5 }
-                        if (next == 0.5) != (split == 0.5) {
+                        if start == nil { start = share; dragging = true }
+                        let moved = horizontal ? value.translation.height : value.translation.width
+                        var next = Self.clamp((start ?? share) + moved / max(length, 1))
+                        // Sticks to its usual spot when close.
+                        if abs(next - rest) < 0.02 { next = rest }
+                        if (next == rest) != (abs(share - rest) < 0.0001) {
                             UISelectionFeedbackGenerator().selectionChanged()
                         }
                         var t = Transaction(); t.animation = nil
-                        withTransaction(t) { split = next }
+                        withTransaction(t) { share = next }
                     }
                     .onEnded { _ in start = nil; dragging = false }
             )
             .onTapGesture(count: 2) {
-                withAnimation(.snappy) { split = 0.5 }
+                withAnimation(.snappy) { share = rest }
             }
             .accessibilityElement()
             .accessibilityLabel("Divider")
-            .accessibilityValue("\(Int((Self.clamp(split) * 100).rounded())) percent from the top")
+            .accessibilityValue("\(Int((Self.clamp(share) * 100).rounded())) percent")
             .accessibilityAdjustableAction { dir in
                 withAnimation(.snappy) {
-                    split = Self.clamp(split + (dir == .increment ? 0.05 : -0.05))
+                    share = Self.clamp(share + (dir == .increment ? 0.05 : -0.05))
                 }
             }
     }
