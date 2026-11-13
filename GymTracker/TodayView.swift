@@ -289,8 +289,9 @@ struct TodayView: View {
         // Which part of the screen the Today title is on: the workout
         // column (the right page on the open Duo unless swapped).
         // (The line between the pages can be dragged: follow it.)
-        let paneShare = DuoSplitHandle.clamp(
-            DuoPagePair<EmptyView, EmptyView>.sideDefault(total: size.width, mainWidth: Self.outerDisplayWidth) + sideShift)
+        let paneShare = min(DuoSplitHandle.clamp(
+            DuoPagePair<EmptyView, EmptyView>.sideDefault(total: size.width, mainWidth: Self.outerDisplayWidth) + sideShift),
+            DuoPagePair<EmptyView, EmptyView>.maxPaneShare(total: size.width, mainMinWidth: Self.outerDisplayWidth))
         let columnX: CGFloat = kind == .split && !duoSwapped ? size.width * paneShare : 0
         // Open Duo: a full calendar across both pages (DaRon). Folded:
         // the screen's width.
@@ -952,7 +953,8 @@ struct TodayView: View {
         // the left page and the body waits on the right.
         let swapped = split && duoSwapped
         // One pair of pages that trade sides like two apps (DuoPagePair).
-        return DuoPagePair(wide: split, swapped: swapped, paneClearsCorner: false) {
+        return DuoPagePair(wide: split, swapped: swapped, paneClearsCorner: false,
+                           mainMinWidth: Self.outerDisplayWidth) {
             splitBodyPane(for: plan, anchor: swapped ? .leading : .trailing)
         } main: {
             compactColumn(for: plan, showBody: !split)
@@ -1908,9 +1910,8 @@ struct TodayView: View {
         // same center line as the swap/menu buttons, under the Wi-Fi icon
         // (47pt from the edge; the column's own 16pt inset + 3 + 28).
         // Glides with the pages during a swap (no snap afterwards).
-        .padding(.trailing, duoWide
-                 ? (duoSwapProgress >= 0 ? 3 + 13 * duoSwapProgress : (duoSwapped ? 16 : 3))
-                 : 16)
+        // (Trailing padding lives in CornerColumnOffset, which reads the
+        // pair's values from inside it.)
         // DS layout, page beside the corner buttons: the + moves out into
         // their column (DaRon: "with the other buttons").
         .modifier(CornerColumnOffset())
@@ -3797,7 +3798,19 @@ private struct Triangle: Shape {
 /// from TodayView, which sits outside it.
 private struct CornerColumnOffset: ViewModifier {
     @Environment(\.duoCornerInset) private var inset
+    @Environment(\.duoStacked) private var stacked
+    @Environment(\.duoSwapProgress) private var progress
+    @Environment(\.duoWide) private var wide
+    @Environment(\.duoSwapped) private var swapped
     func body(content: Content) -> some View {
-        content.offset(x: inset)
+        // DS: the same inset on either half, so the + always sits on the
+        // swap/menu buttons' center line (DaRon: "buttons need to line
+        // up" — on the top half it used the side-by-side rule, 13pt off).
+        let trailing: CGFloat = !wide ? 16
+            : stacked ? 3
+            : (progress >= 0 ? 3 + 13 * progress : (swapped ? 16 : 3))
+        content
+            .padding(.trailing, trailing)
+            .offset(x: inset)
     }
 }

@@ -302,8 +302,18 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// Same for the main page. Notes' list keeps its full width (its
     /// search bar stopped short); its last rows scroll clear instead.
     var mainClearsCorner = true
+    /// Side by side: the main page never gets narrower than this when the
+    /// line is dragged (Today's workout rows need the folded width).
+    var mainMinWidth: CGFloat? = nil
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
+
+    /// The most of the width the companion page may take, so the main page
+    /// keeps its minimum.
+    static func maxPaneShare(total: CGFloat, mainMinWidth: CGFloat?) -> Double {
+        guard let m = mainMinWidth, total > 0 else { return 1 }
+        return max(Double(1 - m / total), 0)
+    }
 
     /// The companion page's default share of the width side by side.
     static func sideDefault(total: CGFloat, mainWidth: CGFloat?) -> Double {
@@ -347,6 +357,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
                          split: $split,
                          sideShift: $sideShift,
+                         mainMinWidth: mainMinWidth,
                          mainWidth: mainWidth, direction: direction,
                          pane: pane, main: main)
         }
@@ -380,6 +391,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var size: CGSize
     @Binding var split: Double
     @Binding var sideShift: Double
+    var mainMinWidth: CGFloat?
     var mainWidth: CGFloat?
     var direction: LayoutDirection
     var pane: () -> Pane
@@ -398,7 +410,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // Side by side: the companion page's share of the width, dragged
         // from its default and kept between a third and two thirds.
         let sideDefault = DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
-        let paneShare = DuoSplitHandle.clamp(sideDefault + sideShift)
+        let maxPane = DuoPagePair<Pane, Main>.maxPaneShare(total: total, mainMinWidth: mainMinWidth)
+        let paneShare = min(DuoSplitHandle.clamp(sideDefault + sideShift), maxPane)
         let botH = size.height - topH
         // Side by side: the main page keeps the front screen's width.
         // Stacked (DS): both pages are full width, half height each.
@@ -518,7 +531,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 DuoSplitHandle(
                     share: Binding(
                         get: { mirrored ? 1 - paneShare : paneShare },
-                        set: { sideShift = (mirrored ? 1 - $0 : $0) - sideDefault }
+                        set: { sideShift = min(mirrored ? 1 - $0 : $0, maxPane) - sideDefault }
                     ),
                     length: total, span: size.height,
                     horizontal: false,
