@@ -470,8 +470,38 @@ final class HingeState: ObservableObject {
     static let shared = HingeState()
     /// 0° = closed, 180° = flat. Devices without a hinge stay at 180.
     @Published var degrees: Double = 180
-    /// 0…1 across the whole travel, closed to flat.
-    var openness: Double { min(max(degrees / 180, 0), 1) }
+    /// 0…1 across the whole travel, closed to fully open. The hinge's
+    /// "fully open" is "as far as the device allows" (not necessarily
+    /// 180°), so the end points come from the status and the span from
+    /// the widest angle this phone has reported while fully open.
+    @Published private(set) var openness: Double = 1
+
+    /// Widest angle seen at `.fullyOpen`, remembered across launches.
+    private var fullOpenDegrees: Double = {
+        let v = UserDefaults.standard.double(forKey: "hingeFullOpenDegrees")
+        return v > 90 ? v : 180
+    }()
+
+    enum Pose { case closed, partial, full, none }
+
+    func update(degrees deg: Double, pose: Pose) {
+        degrees = deg
+        switch pose {
+        case .none:
+            openness = 1
+        case .closed:
+            openness = 0
+        case .full:
+            if deg > 90, abs(deg - fullOpenDegrees) > 0.5 {
+                fullOpenDegrees = deg
+                UserDefaults.standard.set(deg, forKey: "hingeFullOpenDegrees")
+            }
+            openness = 1
+        case .partial:
+            // Never claim fully open (or closed) mid-travel.
+            openness = min(max(deg / fullOpenDegrees, 0.001), 0.999)
+        }
+    }
 }
 
 /// Attach once at the root: keeps HingeState current from 0° to 180°.
@@ -479,9 +509,23 @@ struct HingeReader: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
             content.onHingeChange { _, context in
-                let deg = context.hinge?.angle.degrees ?? 180
+                let pose: HingeState.Pose
+                let deg: Double
+                if let hinge = context.hinge {
+                    deg = hinge.angle.degrees
+                    switch hinge.status {
+                    case .closed: pose = .closed
+                    case .fullyOpen: pose = .full
+                    default: pose = .partial
+                    }
+                } else {
+                    // No hinge in this hierarchy: show everything as open.
+                    deg = 180; pose = .none
+                }
+                // Update rate is system policy, so a short critically
+                // damped spring glides between samples instead of stepping.
                 withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 1)) {
-                    HingeState.shared.degrees = deg
+                    HingeState.shared.update(degrees: deg, pose: pose)
                 }
             }
         } else {
