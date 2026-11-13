@@ -180,6 +180,8 @@ struct ContentView: View {
                     .liquidGlass(Circle())
             }
             .buttonStyle(PressSqueeze())
+            // A clear gap under the pages' capsule.
+            .padding(.top, 6)
             .accessibilityLabel("Back")
             .transition(.scale.combined(with: .opacity))
         }
@@ -408,7 +410,19 @@ struct ContentView: View {
                                     // open (the camera pushes the status icons into
                                     // it when folded).
                                     Color.clear.frame(width: 52, height: 52)
-                                    ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled, width: railItemWidth) }
+                                    // The pages share one Liquid Glass capsule, like
+                                    // the grouped buttons in the system's own side
+                                    // bar (DaRon's reference). Drawn behind them, so
+                                    // the icons stay exactly where they were.
+                                    VStack(spacing: railLabeled ? 6 : 4) {
+                                        ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled, width: railItemWidth) }
+                                    }
+                                    .background {
+                                        Color.clear
+                                            .liquidGlass(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                                            .padding(.horizontal, -3)
+                                            .padding(.vertical, -4)
+                                    }
                                     // Back sits under Profile (DaRon), full size,
                                     // clear of the status icons. It's the last item,
                                     // so showing it never moves the page icons.
@@ -1332,7 +1346,8 @@ struct VerticalBarEdgeReader: UIViewRepresentable {
 private struct RailGlassHighlight: View {
     var tint: Color?
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        // Rounded to nest inside the pages' glass capsule.
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         let fill = tint ?? Theme.text.opacity(0.18)
         if #available(iOS 26.0, *) {
             Color.clear
