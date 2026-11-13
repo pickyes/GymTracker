@@ -75,10 +75,13 @@ struct SettingsView: View {
             Section {
                 Toggle("Swap button", isOn: $duo.showSwapButton)
                 Toggle("Status bar on the side", isOn: $duo.sideStatusBar)
+                if duo.sideStatusBar {
+                    Toggle("Side bar strip", isOn: $duo.sideStrip)
+                }
             } header: {
                 Text("Open display")
             } footer: {
-                Text("Swap button: switches which side each page is on when the phone is open. Turning it off keeps the sides the way you left them. Status bar on the side: the time and icons run down the edge, and the app's buttons sit in that strip.")
+                Text("Swap button: switches which side each page is on when the phone is open. Turning it off keeps the sides the way you left them. Status bar on the side: the time and icons run down the edge. Side bar strip: a dark grey bar behind them that the pages stop at; off, the pages run underneath.")
             }
 
             Section("Appearance") {

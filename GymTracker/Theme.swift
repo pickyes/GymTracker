@@ -1438,17 +1438,20 @@ struct StatusBarFade: View {
     var statusBarHeight: CGFloat = 0
     /// How far in from the right edge the status icons reach.
     var clusterWidth: CGFloat = 140
+    /// The same strip along the bottom edge instead (DaRon).
+    var bottom = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Rectangle()
                 .fill(Color(white: 0.5))
-                .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
+                .mask(LinearGradient(colors: [.black, .clear],
+                                     startPoint: bottom ? .bottom : .top, endPoint: bottom ? .top : .bottom))
                 .frame(height: height)
                 .frame(maxWidth: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .ignoresSafeArea(edges: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: bottom ? .bottom : .top)
+        .ignoresSafeArea(edges: bottom ? .bottom : .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         // Last: blend with the page beneath (keeps brightness, drops color).
@@ -1586,6 +1589,8 @@ struct StatusBarBlur: View {
 /// the status bar. No blur, no band — content just fades out under it.
 struct StatusBarOmbre: View {
     var height: CGFloat
+    /// Along the bottom edge instead (DaRon).
+    var bottom = false
 
     var body: some View {
         // Eased (smooth-step) so there's no visible edge where it starts
@@ -1597,10 +1602,10 @@ struct StatusBarOmbre: View {
             .init(color: Theme.background.opacity(0.26), location: 0.6),
             .init(color: Theme.background.opacity(0.1), location: 0.8),
             .init(color: Theme.background.opacity(0), location: 1),
-        ], startPoint: .top, endPoint: .bottom)
+        ], startPoint: bottom ? .bottom : .top, endPoint: bottom ? .top : .bottom)
         .frame(height: height)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .ignoresSafeArea(edges: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: bottom ? .bottom : .top)
+        .ignoresSafeArea(edges: bottom ? .bottom : .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

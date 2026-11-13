@@ -34,12 +34,16 @@ final class DuoSettings: ObservableObject {
     /// Status bar down the side of the screen (the system's vertical bar),
     /// with the corner buttons in that rail, instead of across the top.
     @Published var sideStatusBar: Bool { didSet { if sideStatusBar != oldValue { save() } } }
+    /// With the side status bar: keep its dark grey strip (a real side
+    /// bar the pages stop at). Off: pages run under the status bar.
+    @Published var sideStrip: Bool { didSet { if sideStrip != oldValue { save() } } }
 
     private struct Values: Codable {
         var swapSides = false
         var showSwapButton = true
         /// Optional: files saved before this setting existed lack it.
         var sideStatusBar: Bool? = nil
+        var sideStrip: Bool? = nil
     }
 
     private static var fileURL: URL {
@@ -65,11 +69,12 @@ final class DuoSettings: ObservableObject {
         swapSides = values.swapSides
         showSwapButton = values.showSwapButton
         sideStatusBar = values.sideStatusBar ?? false
+        sideStrip = values.sideStrip ?? true
         save()
     }
 
     private func save() {
-        let values = Values(swapSides: swapSides, showSwapButton: showSwapButton, sideStatusBar: sideStatusBar)
+        let values = Values(swapSides: swapSides, showSwapButton: showSwapButton, sideStatusBar: sideStatusBar, sideStrip: sideStrip)
         guard let data = try? JSONEncoder().encode(values) else { return }
         let url = Self.fileURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

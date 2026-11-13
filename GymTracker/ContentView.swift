@@ -62,6 +62,8 @@ struct ContentView: View {
     static let railWidth: CGFloat = 84
     /// Side status bar on: the buttons' own column beside the strip.
     static let buttonColumn: CGFloat = 76
+    /// Side bar: where Today's + sits, below the status icons.
+    static let railButtonTop: CGFloat = 124
     /// The Calendar companion page's width (narrow when upright).
     @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
@@ -98,8 +100,11 @@ struct ContentView: View {
                         // area), topped up to the full width if it gives less.
                         let systemRail = rail == .leading ? proxy.safeAreaInsets.leading
                             : rail == .trailing ? proxy.safeAreaInsets.trailing : 0
-                        let extraRail = rail == nil ? 0 : max(0, Self.railWidth - systemRail)
-                        let railTotal = systemRail + extraRail
+                        // Strip off (Settings): the pages run under the side
+                        // status bar; only the button column stays clear.
+                        let strip = rail != nil && duo.sideStrip
+                        let extraRail = strip ? max(0, Self.railWidth - systemRail) : 0
+                        let railTotal = strip ? systemRail + extraRail : 0
                         // The pages stop at the rail. They're drawn edge to edge
                         // (ignoring safe areas), and a view that touches the
                         // safe area's edge spreads into it — so they stop 1pt
@@ -107,8 +112,11 @@ struct ContentView: View {
                         pageStack
                             // Plus a clear column for the buttons beside the
                             // strip, so nothing runs under them (DaRon).
-                            .frame(width: rail == nil ? proxy.size.width : proxy.size.width - extraRail - 1 - Self.buttonColumn)
+                            .frame(width: rail == nil ? proxy.size.width
+                                   : strip ? proxy.size.width - extraRail - 1 - Self.buttonColumn
+                                   : proxy.size.width + systemRail)
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
+                            .ignoresSafeArea(.container, edges: rail != nil && !strip ? (rail == .leading ? .leading : .trailing) : [])
                             .environment(\.railEdge, rail)
                             .environment(\.appDrawsKeyboardDone, true)
                             .environment(\.cornerColumnTop, cornerColumnTop)
@@ -129,7 +137,7 @@ struct ContentView: View {
                             .saturation(navExpanded ? 0 : 1)
                             .animation(AppAnimation.snappy, value: navExpanded)
                         // Over the pages (their backgrounds bleed to the edge).
-                        if let rail {
+                        if let rail, strip {
                             GeometryReader { full in
                                 Rectangle()
                                     .fill(Theme.railBackground)
@@ -140,6 +148,17 @@ struct ContentView: View {
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
+                            // Today's blue + lives in the side bar, under the
+                            // status icons (DaRon: "an actual side bar").
+                            if selectedPage == .today && !navExpanded && !store.calendarDropdownOpen {
+                                railTodayActions
+                                    .frame(width: railTotal)
+                                    .padding(.top, Self.railButtonTop)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                           alignment: rail == .leading ? .topLeading : .topTrailing)
+                                    .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
+                                    .transition(.opacity)
+                            }
                         }
                         // Content scrolling up under the status bar blurs
                         // and greys out, ombre-style (Nov 12).
@@ -162,6 +181,9 @@ struct ContentView: View {
                             // very top edge to transparent (DaRon, Nov 12) —
                             // replaces the blur bar, which showed as a band.
                             StatusBarOmbre(height: 22)  // a soft fade along the top edge only
+                            // The same at the bottom edge (DaRon).
+                            StatusBarFade(height: stripHeight, bottom: true)
+                            StatusBarOmbre(height: 22, bottom: true)
                         }
                         .opacity(swapInFlight ? 0 : 1)
                         // On or off, never half faded: a blend under a
@@ -199,7 +221,7 @@ struct ContentView: View {
                             // beside the strip, which stays clear (DaRon).
                             // Measured from the screen's own edge.
                             .padding(rail == .leading ? .leading : .trailing,
-                                     rail != nil ? railTotal + (Self.buttonColumn - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
+                                     strip ? railTotal + (Self.buttonColumn - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.
@@ -662,7 +684,8 @@ struct ContentView: View {
             // above the rest pill while one runs). Hidden while the menu
             // is open.
             // Today's + joins the rail too, above swap (DaRon).
-            if rail != nil && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
+            // (With the grey strip on, it sits in the strip instead.)
+            if rail != nil && !duo.sideStrip && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
                 railTodayActions
                     .transition(.scale.combined(with: .opacity))
             }
