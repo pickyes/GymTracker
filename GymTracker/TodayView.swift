@@ -1903,6 +1903,9 @@ struct TodayView: View {
         .padding(.trailing, duoWide
                  ? (duoSwapProgress >= 0 ? 3 + 13 * duoSwapProgress : (duoSwapped ? 16 : 3))
                  : 16)
+        // DS layout, page beside the corner buttons: the + moves out into
+        // their column (DaRon: "with the other buttons").
+        .modifier(CornerColumnOffset())
     }
 
     /// The vivid circular action button (56pt, accent fill, glow):
@@ -3777,5 +3780,16 @@ private struct Triangle: Shape {
         p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         p.closeSubpath()
         return p
+    }
+}
+
+
+/// Shifts a view into the corner-button column on the DS layout's bottom
+/// page. Reads the inset where the view is (inside the page pair), not
+/// from TodayView, which sits outside it.
+private struct CornerColumnOffset: ViewModifier {
+    @Environment(\.duoCornerInset) private var inset
+    func body(content: Content) -> some View {
+        content.offset(x: inset)
     }
 }

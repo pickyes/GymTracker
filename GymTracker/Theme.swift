@@ -216,6 +216,10 @@ private struct DuoSwappedKey: EnvironmentKey { static let defaultValue = false }
 /// How far the open Duo's pages are through a swap, 0 (pane on the
 /// left) to 1 (pane on the right), moving smoothly while they slide.
 /// Side-dependent details read it so they glide with the pages.
+/// How far this page is pulled in on the right to clear the corner
+/// buttons (the DS layout's bottom page). Things that belong in the
+/// button column (Today's +) shift right by it.
+private struct DuoCornerInsetKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 private struct DuoSwapProgressKey: EnvironmentKey { static let defaultValue: Double = -1 }
 
 extension EnvironmentValues {
@@ -234,6 +238,10 @@ extension EnvironmentValues {
     var duoSwapped: Bool {
         get { self[DuoSwappedKey.self] }
         set { self[DuoSwappedKey.self] = newValue }
+    }
+    var duoCornerInset: CGFloat {
+        get { self[DuoCornerInsetKey.self] }
+        set { self[DuoCornerInsetKey.self] = newValue }
     }
     var duoSwapProgress: Double {
         get { self[DuoSwapProgressKey.self] }
@@ -403,6 +411,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .environment(\.layoutDirection, direction)
                     // DS: the bottom half keeps clear of the corner buttons.
                     .safeAreaPadding(.trailing, stacked && slide >= 0.5 ? 76 : 0)
+                    .environment(\.duoCornerInset, stacked && slide >= 0.5 ? 76 : 0)
                     .frame(width: paneW, height: pageH, alignment: .top)
                     .clipped()
                     .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: pageH),
@@ -415,6 +424,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
             main()
                 .environment(\.layoutDirection, direction)
                 .safeAreaPadding(.trailing, stacked && slide < 0.5 ? 76 : 0)
+                .environment(\.duoCornerInset, stacked && slide < 0.5 ? 76 : 0)
                 .frame(width: mainW, height: pageH, alignment: .top)
                 .clipped(antialiased: stacked)
                 .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: pageH),
