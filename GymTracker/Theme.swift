@@ -336,13 +336,13 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 pane()
                     .environment(\.layoutDirection, direction)
                     .frame(width: paneW, height: size.height, alignment: .top)
-                    .modifier(DuoSwapCard(lift: lift))
+                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: size.height)))
                     .offset(x: paneX)
             }
             main()
                 .environment(\.layoutDirection, direction)
                 .frame(width: mainW, height: size.height, alignment: .top)
-                .modifier(DuoSwapCard(lift: lift))
+                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: size.height)))
                 .offset(x: wide ? mainX : 0)
                 // The front screen's page passes over the other one.
                 .zIndex(1)
@@ -353,11 +353,21 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     }
 }
 
-/// A page mid-swap: nearly full size (98.5% at the very middle), rounded
+/// A page mid-swap: inset 10pt on every side at the very middle, rounded
 /// and shadowed in proportion to `lift`; exactly the page at rest.
 struct DuoSwapCard: ViewModifier {
     var lift: Double
+    /// The page's size, so the card can be inset by the same number of
+    /// points on every side.
+    var size: CGSize
+    /// The gap to the screen edge (and half the gap between the two
+    /// cards) at mid-slide (DaRon: even space around the edges).
+    static let inset: CGFloat = 10
+
     func body(content: Content) -> some View {
+        let m = Self.inset * lift
+        let sx = size.width > 0 ? max(0, 1 - 2 * m / size.width) : 1
+        let sy = size.height > 0 ? max(0, 1 - 2 * m / size.height) : 1
         // Always the same modifiers (only their amounts change), so the
         // page is never rebuilt when a swap starts or ends. At rest the
         // mask sits far outside the page and nothing is clipped.
@@ -369,8 +379,10 @@ struct DuoSwapCard: ViewModifier {
                     .padding(-200 * (1 - edge))
             }
             .shadow(color: .black.opacity(0.35 * lift), radius: 14 * lift, y: 6 * lift)
-            // Bigger cards (DaRon): 98.5% of the page at the very middle.
-            .scaleEffect(1 - 0.015 * lift)
+            // Inset evenly: the same gap at the top, bottom and sides
+            // (a plain percentage left the tall pages more space top and
+            // bottom than at the sides).
+            .scaleEffect(x: sx, y: sy)
     }
 }
 
