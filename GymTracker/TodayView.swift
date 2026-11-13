@@ -285,7 +285,9 @@ struct TodayView: View {
         // Open Duo: a full calendar across both pages (DaRon). Folded:
         // the screen's width.
         let wide = kind == .split && size.width > size.height
-        let cardWidth = size.width - 24
+        // Ends left of the corner button column (the ✓ that closes it), so
+        // the two never overlap (DaRon, Nov 12).
+        let cardWidth = size.width - 12 - 84
         // The pointer sits under the arrow wherever the title is.
         let pointerX = columnX + 135 - 12 - 9
         // Just under the title row (the title sits 30pt down, ~41pt tall).
