@@ -102,7 +102,10 @@ struct ContentView: View {
                         // blend can't see through the blur — under it, it
                         // drew a flat grey band); the blur on top then
                         // blurs the greyed content.
-                        StatusBarFade(height: stripHeight, statusBarHeight: proxy.safeAreaInsets.top)
+                        // The icon zone only where the status bar really is:
+                        // across the top, visible. Hidden or turned to run
+                        // down the side → no grey spot (DaRon, Nov 12).
+                        StatusBarFade(height: stripHeight, statusBarHeight: Self.horizontalStatusBarHeight(proxy.size))
                         StatusBarBlur(height: stripHeight)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
@@ -236,6 +239,20 @@ struct ContentView: View {
             .environment(\.duoWide, wide)
             .environment(\.duoSwapped, wide && swapSides)
         }
+    }
+
+    /// The status bar's height when it runs across the top of the screen
+    /// and is showing; 0 when it's hidden or turned down the side. (Takes
+    /// the page size only so it re-reads whenever the screen rotates.)
+    static func horizontalStatusBarHeight(_ pageSize: CGSize) -> CGFloat {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) ?? UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let manager = scene.statusBarManager,
+              !manager.isStatusBarHidden else { return 0 }
+        let frame = manager.statusBarFrame
+        guard frame.height > 0, frame.width > frame.height, frame.minY <= 1 else { return 0 }
+        return frame.height
     }
 
     /// Two pages side by side: the open inner display only (669×951 /
