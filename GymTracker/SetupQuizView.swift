@@ -382,11 +382,12 @@ struct SetupQuizView: View {
                 .foregroundStyle(Theme.secondaryText)
             optionCard(selected: profile.injuredParts.isEmpty && profile.otherLimitText.isEmpty) {
                 profile.injuredParts = []
+                profile.injuredMuscles = []
                 profile.otherLimitText = ""
             } label: {
                 Text("None").font(.headline)
             }
-            BodyDiagramView(selected: $state.profile.injuredParts)
+            BodyDiagramView(selected: $state.profile.injuredParts, muscles: $state.profile.injuredMuscles)
             TextField("Something else? Tell us briefly (stays on this phone)", text: $state.profile.otherLimitText)
                 .textFieldStyle(.roundedBorder)
                 .withKeyboardDoneToolbar(system: true)

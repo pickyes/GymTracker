@@ -951,6 +951,7 @@ struct InjuryEditorView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     @State private var parts: Set<BodyPart> = []
+    @State private var muscles: Set<MuscleID> = []
     @State private var otherText: String = ""
     @State private var didSetup = false
     /// Inside the combined Body page's list: just the editor (no scroll
@@ -966,6 +967,7 @@ struct InjuryEditorView: View {
                 // One save shortly after you stop tapping or typing
                 // (each save rebuilds the program; text also saves).
                 .onChange(of: parts) { _, _ in scheduleSave() }
+                .onChange(of: muscles) { _, _ in scheduleSave() }
                 .onChange(of: otherText) { _, _ in scheduleSave() }
         } else {
             standalone
@@ -988,6 +990,7 @@ struct InjuryEditorView: View {
         if !didSetup {
             didSetup = true
             parts = store.profile?.injuredParts ?? []
+            muscles = store.profile?.injuredMuscles ?? []
             otherText = store.profile?.otherLimitText ?? ""
         }
     }
@@ -1000,10 +1003,10 @@ struct InjuryEditorView: View {
                 Text("Marking a spot only changes your exercises — it isn't a diagnosis, and it doesn't mean an exercise is safe for you. Check with your doctor or physical therapist before training around an injury.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                BodyDiagramView(selected: $parts)
+                BodyDiagramView(selected: $parts, muscles: $muscles)
                 if !parts.isEmpty {
                     Button("Clear all marked spots") {
-                        withAnimation(AppAnimation.snappy) { parts = [] }
+                        withAnimation(AppAnimation.snappy) { parts = []; muscles = [] }
                     }
                     .font(.subheadline.weight(.semibold))
                     .buttonStyle(.bordered)
@@ -1058,6 +1061,7 @@ struct InjuryEditorView: View {
             if !didSetup {
                 didSetup = true
                 parts = store.profile?.injuredParts ?? []
+                muscles = store.profile?.injuredMuscles ?? []
                 otherText = store.profile?.otherLimitText ?? ""
             }
         }
@@ -1073,8 +1077,9 @@ struct InjuryEditorView: View {
     private func save() {
         let currentParts = store.profile?.injuredParts ?? []
         let currentOther = store.profile?.otherLimitText ?? ""
-        guard parts != currentParts || otherText != currentOther else { return }
-        store.updateInjuries(parts: parts, otherText: otherText)
+        let currentMuscles = store.profile?.injuredMuscles ?? []
+        guard parts != currentParts || muscles != currentMuscles || otherText != currentOther else { return }
+        store.updateInjuries(parts: parts, muscles: muscles, otherText: otherText)
     }
 }
 

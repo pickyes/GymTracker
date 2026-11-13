@@ -684,6 +684,12 @@ struct UserProfile: Codable, Equatable {
     /// Body parts marked on the body diagram. The source of truth for
     /// injuries — `limits` is derived from this.
     var injuredParts: Set<BodyPart> = []
+    /// The exact muscles tapped on the diagram, so it lights and names
+    /// just those (a biceps tap lit the triceps and elbow too and read
+    /// "Left elbow"). The program still works from `injuredParts`; a part
+    /// with none of its muscles here was marked before this existed and
+    /// shows as its whole zone.
+    var injuredMuscles: Set<MuscleID> = []
     var otherLimitText: String = ""
     var bodyweightLb: Double? = nil
     var bodyweightIsKg: Bool = false
@@ -756,6 +762,14 @@ struct UserProfile: Codable, Equatable {
             }
             injuredParts = parts
         }
+        // Unknown names (a muscle renamed later) are dropped, not fatal.
+        if let muscleNames = try container.decodeIfPresent([String].self, forKey: .injuredMuscles) {
+            injuredMuscles = Set(muscleNames.compactMap(MuscleID.init(rawValue:)))
+        } else {
+            // Saved before single muscles were: each zone becomes its own
+            // joint (a marked wrist is the wrist, not forearm + hand too).
+            injuredMuscles = injuredParts.reduce(into: []) { $0.formUnion($1.canonicalMuscles) }
+        }
         otherLimitText = try container.decodeIfPresent(String.self, forKey: .otherLimitText) ?? ""
         bodyweightLb = try container.decodeIfPresent(Double.self, forKey: .bodyweightLb)
         bodyweightIsKg = try container.decodeIfPresent(Bool.self, forKey: .bodyweightIsKg) ?? false
@@ -790,7 +804,7 @@ struct UserProfile: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case goal, experience, daysPerWeek, equipmentHave, injuredParts, otherLimitText,
+        case goal, experience, daysPerWeek, equipmentHave, injuredParts, injuredMuscles, otherLimitText,
              bodyweightLb, bodyweightIsKg, notificationsAllowed, targetAreas, name
     }
 
@@ -2990,9 +3004,10 @@ final class WorkoutStore: ObservableObject {
     /// injuries). Only the profile changes: the swaps are applied live by
     /// `adaptedActiveProgram` (InjuryAdaptation), so regenerating the
     /// program here threw away the user's edits to it for nothing.
-    func updateInjuries(parts: Set<BodyPart>, otherText: String) {
+    func updateInjuries(parts: Set<BodyPart>, muscles: Set<MuscleID>, otherText: String) {
         guard var profile else { return }
         profile.injuredParts = parts
+        profile.injuredMuscles = muscles
         profile.otherLimitText = otherText
         self.profile = profile
         persistProfileAndProgram()
