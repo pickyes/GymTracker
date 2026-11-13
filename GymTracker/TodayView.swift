@@ -2944,7 +2944,7 @@ struct SetRow: View {
                     onFieldFocus?(focused ? "field-weight-\(template.id)-\(number)" : nil)
                 })
                     .layoutPriority(1)
-                Text(isPair && unit == .lb ? "lbs" : unit.label)  // pair: was "s" (as in "40s")
+                Text(unit.label)  // pairs too: "lb", not the old "s" (as in "40s")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(1)

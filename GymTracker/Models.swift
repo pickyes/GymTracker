@@ -2491,10 +2491,7 @@ final class WorkoutStore: ObservableObject {
     func displayWeightLabel(_ weightLb: Double?, isPair: Bool, for template: ExerciseTemplate? = nil) -> String {
         let unit = template.map { unit(for: $0) } ?? settings.weightUnit
         guard let display = unit.displayValue(for: weightLb), display > 0 else { return "Set weight" }
-        if isPair {
-            // Per dumbbell, spelled out ("40 lbs", not the old "40s").
-            return "\(formatNumber(display)) \(unit == .lb ? "lbs" : unit.label)"
-        }
+        // Pairs read the same as any weight ("40 lb", not the old "40s").
         return "\(formatNumber(display)) \(unit.label)"
     }
 
