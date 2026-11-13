@@ -383,6 +383,23 @@ struct ContentView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 20)
                     .background(Theme.background)
+                    // The workout above fades out into the heatmap, the
+                    // same eased fade as the top of the screen (DaRon: the
+                    // cards were cut off flat against it).
+                    .background(alignment: .top) {
+                        LinearGradient(stops: [
+                            .init(color: Theme.background.opacity(0), location: 0),
+                            .init(color: Theme.background.opacity(0.1), location: 0.2),
+                            .init(color: Theme.background.opacity(0.26), location: 0.4),
+                            .init(color: Theme.background.opacity(0.52), location: 0.6),
+                            .init(color: Theme.background.opacity(0.8), location: 0.8),
+                            .init(color: Theme.background, location: 1),
+                        ], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 64)
+                        .offset(y: -64)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
             }
     }
 
