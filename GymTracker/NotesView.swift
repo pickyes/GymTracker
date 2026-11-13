@@ -19,6 +19,7 @@ import SwiftUI
 /// Actions (DaRon 22:42): pin a note to the top, delete it (asks
 /// first), and file it in a category.
 struct NotesView: View {
+    @Environment(\.pageTitleTop) private var pageTitleTop
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
@@ -389,7 +390,7 @@ struct NotesView: View {
             }
             .padding(.horizontal, 16)
             // In the clock's row, like Today (Nov 12).
-            .padding(.top, 30)
+            .padding(.top, pageTitleTop)
 
             HStack(spacing: 10) {
                 searchField

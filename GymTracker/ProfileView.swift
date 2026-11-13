@@ -100,6 +100,7 @@ struct SectionIconTile: View {
 }
 
 struct ProfileView: View {
+    @Environment(\.pageTitleTop) private var pageTitleTop
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
@@ -225,10 +226,13 @@ struct ProfileView: View {
     /// Folded: the Settings-style list; each row pushes its page.
     private var rootList: some View {
         List {
+            Group {
             PageTitle(text: "Profile")
                 // In the clock's row, like Today (Nov 12).
-                .padding(.top, 30)
-                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+                .padding(.top, pageTitleTop)
+                // Same left edge as Today, Calendar and Notes.
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             Section {
                 // Your photo and name: tap to edit (DaRon).
@@ -246,8 +250,15 @@ struct ProfileView: View {
                 }
             }
             clearanceRow
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .listStyle(.insetGrouped)
+        // Same margins and title row as the open sidebar and the other
+        // pages (the title sat lower and further in when folded).
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .contentMargins(.top, 0, for: .scrollContent)
         .oledList()
         .ignoresSafeArea(edges: .top)
         .infinityTopEdge()
@@ -257,9 +268,12 @@ struct ProfileView: View {
     /// its page shows beside it.
     private var sidebar: some View {
         List {
+            Group {
             PageTitle(text: "Profile")
-                .padding(.top, 30)
-                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+                .padding(.top, pageTitleTop)
+                // Same left edge as Today, Calendar and Notes.
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             Section {
                 // The header opens Your Program too, but only the row
@@ -279,6 +293,9 @@ struct ProfileView: View {
                 }
             }
             clearanceRow
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         // Grouped rounded sections inside the page margins, like the
         // Settings app (the plain list ran the icons off the edge).
@@ -389,6 +406,7 @@ struct ProfileView: View {
                 .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
         case .injuries, .bodyweight, .limits:
             List {
+                Group {
                 Section { headerCard(.injuries) }
                 bodyweightContent
                 Section("Sore spots") {
@@ -399,6 +417,9 @@ struct ProfileView: View {
                     limitsContent
                 }
                 clearanceRow
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .listStyle(.insetGrouped)
             .oledList()
@@ -409,9 +430,13 @@ struct ProfileView: View {
             .scrollDismissesKeyboard(.interactively)
         default:
             List {
+                Group {
                 Section { headerCard(section) }
                 sectionContent(section)
                 clearanceRow
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .listStyle(.insetGrouped)
             .oledList()

@@ -207,6 +207,7 @@ struct PlanRevealView: View {
                 // replacement — the picker must not undo the injury swap.
                 .filter { InjuryAdaptation.excludedLimit(for: $0, limits: profile.limits) == nil } ?? []
             List {
+                Group {
                 Section {
                     if let current {
                         Text("Current: \(current.name) — \(current.sets) × \(current.repRange)")
@@ -234,6 +235,9 @@ struct PlanRevealView: View {
                         }
                     }
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .oledList()
             .navigationTitle("Swap exercise")

@@ -268,6 +268,14 @@ extension EnvironmentValues {
         get { self[RailEdgeKey.self] }
         set { self[RailEdgeKey.self] = newValue }
     }
+    /// Where a main page's big title starts, from the screen's top edge.
+    /// The Duo's status icons sit only at the top right, so the title
+    /// shares their row (30); a slab iPhone's clock is at the top left,
+    /// so the title starts below the status bar there.
+    var pageTitleTop: CGFloat {
+        get { self[PageTitleTopKey.self] }
+        set { self[PageTitleTopKey.self] = newValue }
+    }
     /// Top of the corner button column (swap/menu), on screen.
     var cornerColumnTop: CGFloat {
         get { self[CornerColumnTopKey.self] }
@@ -307,6 +315,7 @@ private struct CornerButtonsInRailKey: EnvironmentKey { static let defaultValue 
 private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
 private struct ScreenIsOpenKey: EnvironmentKey { static let defaultValue = false }
 private struct DuoHingeXKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+private struct PageTitleTopKey: EnvironmentKey { static let defaultValue: CGFloat = 30 }
 private struct CornerColumnTopKey: EnvironmentKey { static let defaultValue: CGFloat = .infinity }
 private struct AppDrawsKeyboardDoneKey: EnvironmentKey { static let defaultValue = false }
 
@@ -955,6 +964,9 @@ final class HingeState: ObservableObject {
     /// 180°), so the end points come from the status and the span from
     /// the widest angle this phone has reported while fully open.
     @Published private(set) var openness: Double = 1
+    /// This phone folds (it has reported a hinge), remembered across
+    /// launches. Slab iPhones never set it.
+    @Published private(set) var hasHinge = UserDefaults.standard.bool(forKey: "deviceHasHinge")
 
     /// Widest angle seen at `.fullyOpen`, remembered across launches.
     private var fullOpenDegrees: Double = {
@@ -966,6 +978,10 @@ final class HingeState: ObservableObject {
 
     func update(degrees deg: Double, pose: Pose) {
         degrees = deg
+        if pose != .none, !hasHinge {
+            hasHinge = true
+            UserDefaults.standard.set(true, forKey: "deviceHasHinge")
+        }
         switch pose {
         case .none:
             openness = 1

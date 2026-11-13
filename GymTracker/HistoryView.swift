@@ -5,6 +5,7 @@ import SwiftUI
 /// details), then the strength links, this week's stats, records, and
 /// every session.
 struct HistoryView: View {
+    @Environment(\.pageTitleTop) private var pageTitleTop
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @EnvironmentObject var store: WorkoutStore
     /// The day chosen in the grid (shared with the open Duo's other page).
@@ -84,7 +85,7 @@ struct HistoryView: View {
                 // leading), not flush to the edge.
                 PageTitle(text: "Calendar")
                     // In the clock's row, like Today (Nov 12).
-                    .padding(.top, 30)
+                    .padding(.top, pageTitleTop)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
                     .listRowBackground(Color.clear)
@@ -934,6 +935,7 @@ struct SessionDetailView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 Text(session.date, format: .dateTime.weekday(.wide).month().day().year().hour().minute())
                 if session.finisherDone {
@@ -998,6 +1000,9 @@ struct SessionDetailView: View {
                 .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle("\(session.dayKey) · \(session.dayTitle)")

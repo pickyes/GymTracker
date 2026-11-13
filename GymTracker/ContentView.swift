@@ -35,6 +35,7 @@ struct ContentView: View {
     /// The -sampleHistory launch argument loads once, not on every appear.
     private static var sampleArgLoaded = false
     #endif
+    @ObservedObject private var hinge = HingeState.shared
     @State private var selectedPage: Page = .today
     @State private var navExpanded = false
     @State private var showCalendar = false
@@ -301,6 +302,8 @@ struct ContentView: View {
                             .environment(\.cornerButtonsInRail, strip)
                             .environment(\.appDrawsKeyboardDone, true)
                             .environment(\.cornerColumnTop, cornerColumnTop)
+                            .environment(\.pageTitleTop,
+                                         rail != nil || hinge.hasHinge ? 30 : proxy.safeAreaInsets.top + 2)
                             .environment(\.fabBottomOffset,
                                          fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom,
                                                           size: proxy.size))

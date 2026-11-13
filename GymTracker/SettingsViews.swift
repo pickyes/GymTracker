@@ -32,6 +32,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Group {
             if let leadingSections { leadingSections }
             // Test data is a developer tool — never in release builds.
             #if DEBUG
@@ -256,6 +257,9 @@ struct SettingsView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle("Settings")
@@ -535,6 +539,7 @@ struct GymProfilesView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 ForEach(store.gymProfiles) { profile in
                     let isActive = store.activeGymProfileID == profile.id
@@ -611,6 +616,9 @@ struct GymProfilesView: View {
                 .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle("Gym Profiles")
@@ -680,6 +688,7 @@ struct GymProfileEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Group {
                 Section("Name") {
                     TextField("Home, Gym, Travel…", text: $profile.name)
                 }
@@ -714,6 +723,9 @@ struct GymProfileEditorView: View {
                     .disabled(profile.name.trimmingCharacters(in: .whitespaces).isEmpty
                               || profile.equipment.isEmpty)
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .searchable(text: $search, prompt: "Search equipment")
             .oledList()
@@ -754,6 +766,7 @@ struct CustomExercisesView: View {
 
     var body: some View {
         List {
+            Group {
             if let leadingSections { leadingSections }
             Section("Custom exercises") {
                 ForEach(store.customExercises) { exercise in
@@ -803,6 +816,9 @@ struct CustomExercisesView: View {
                 .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle(leadingSections == nil ? "Custom exercises" : "Exercises")
@@ -865,6 +881,7 @@ struct CustomExerciseEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Group {
                 Section("Exercise") {
                     TextField("Name", text: $exercise.name)
                     Picker("Muscle", selection: $exercise.muscle) {
@@ -914,6 +931,9 @@ struct CustomExerciseEditorView: View {
                     .disabled(exercise.name.trimmingCharacters(in: .whitespaces).isEmpty
                               || exercise.equipment.isEmpty)
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .oledList()
             .navigationTitle("Custom exercise")
@@ -949,6 +969,7 @@ struct ProgramsView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 NavigationLink {
                     ProgramLibraryView()
@@ -1106,6 +1127,9 @@ struct ProgramsView: View {
                 .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle("Programs")
@@ -1212,6 +1236,7 @@ struct CustomProgramBuilderView: View {
 
     var body: some View {
         Form {
+            Group {
             Section("Details") {
                 TextField("Program name", text: $name)
                 HStack {
@@ -1314,6 +1339,9 @@ struct CustomProgramBuilderView: View {
                     Button("View Pro") { showPaywall = true }
                 }
             }
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle(editing == nil ? "Create program" : "Edit program")
@@ -1697,6 +1725,7 @@ struct ProgramLibraryView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 pillRowLayout {
                     filterMenu(title: "Goal", allLabel: "All goals",
@@ -1784,6 +1813,9 @@ struct ProgramLibraryView: View {
                 .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            }
+            // Rows take the app's card color (set on the List itself it does nothing).
+            .listRowBackground(Theme.card)
         }
         .oledList()
         .navigationTitle("Program library")

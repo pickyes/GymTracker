@@ -3,6 +3,7 @@ import AudioToolbox
 import UIKit
 
 struct TodayView: View {
+    @Environment(\.pageTitleTop) private var pageTitleTop
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.pageContainerSize) private var pageContainerSize
     @Environment(\.screenIsOpen) private var screenIsOpen
@@ -1272,7 +1273,7 @@ struct TodayView: View {
                             // status icons sit only at the top-right, so the
                             // title uses the empty strip beside them instead
                             // of starting below it.
-                            .padding(.top, 30)
+                            .padding(.top, pageTitleTop)
                         // Date directly under "Today". (DaRon 21:20:
                         // Today on top, Monday, Nov 9 under it.)
                         // Hold it down to open the workout calendar.
@@ -2761,6 +2762,16 @@ struct ExerciseCard: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // The room the card is given, not the card's own width: a row
+            // too wide for the page stretched the card, the stretched
+            // width read as "wide enough", and the page stayed cut off
+            // after folding (it never went back to the compact row).
+            Color.clear
+                .frame(height: 0)
+                .frame(maxWidth: .infinity)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+                .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 10) {
             // Large accessibility text: the name gets its own line and the
             // pills sit under it (side by side the name shrank to nothing).
@@ -2854,6 +2865,11 @@ struct ExerciseCard: View {
                     compact: rowsCompact,
                     canDelete: sets.count > 1
                 )
+                // A row never stretches its card. The full row is as wide
+                // as the card's cut-off for "wide enough", so after a fold
+                // it held the card open at that width, the card measured
+                // itself as wide, and the page stayed cut off on the left.
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
 
             // Set-table actions, one compact row (Nov 12 UI pass): a
@@ -2939,7 +2955,7 @@ struct ExerciseCard: View {
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        }
         .padding()
         .background(Theme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -3477,6 +3493,7 @@ struct AddExerciseSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 // Dropdown filters — always at the top, so the list below
                 // is a short filtered set instead of one long scroll.
                 Section {
@@ -3540,6 +3557,9 @@ struct AddExerciseSheet: View {
                         Text("\(sortedPool.count) exercise\(sortedPool.count == 1 ? "" : "s")")
                     }
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .searchable(text: $search, prompt: "Search exercises")
             .oledList()
@@ -3701,6 +3721,7 @@ struct SwapExerciseSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 Section("Current") {
                     Text(current.name)
                         .font(.headline)
@@ -3731,6 +3752,9 @@ struct SwapExerciseSheet: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .searchable(text: $search, prompt: "Search replacements")
             .oledList()
@@ -3773,6 +3797,7 @@ struct ExerciseHistorySheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 if let best = store.bestSet(for: template.id) {
                     Section("Best set") {
                         Text("\(store.displayWeightLabel(best.weightLb, isPair: template.isPair, for: template)) × \(best.reps)")
@@ -3806,6 +3831,9 @@ struct ExerciseHistorySheet: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .oledList()
             .navigationTitle(template.name)
@@ -3835,6 +3863,7 @@ struct PlateCalculatorSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 Section("Plates per side") {
                     let result = platesPerSide(targetLb: workingWeight,
                                                barWeightLb: store.settings.barWeightLb,
@@ -3873,6 +3902,9 @@ struct PlateCalculatorSheet: View {
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .oledList()
             .navigationTitle("Plates — \(template.name)")
@@ -3900,6 +3932,7 @@ struct SessionModSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Group {
                 Section("Today only — your saved program doesn't change") {
                     Toggle("Shorter session (2 sets per exercise)", isOn: $shorter)
                     Toggle("Deload — half the sets", isOn: $deload)
@@ -3941,6 +3974,9 @@ struct SessionModSheet: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
+                }
+                // Rows take the app's card color (set on the List itself it does nothing).
+                .listRowBackground(Theme.card)
             }
             .oledList()
             .navigationTitle("Modify this workout")

@@ -13,13 +13,6 @@ struct WelcomeView: View {
     /// present in the app: ContentView injects the store into the
     /// environment for the whole hierarchy, including this intro flow.)
     @EnvironmentObject private var store: WorkoutStore
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
-    /// Compact-width screens (Duo folded outer display, iPhones) get a
-    /// tighter intro so the whole screen fits without scrolling.
-    /// Regular-width screens keep the roomy layout.
-    private var compactWidth: Bool { horizontalSizeClass == .compact }
-
     var body: some View {
         // Vertically centered on compact width: without the preset card
         // the content left ~30% dead space at the bottom on the folded
@@ -29,21 +22,21 @@ struct WelcomeView: View {
         // only on DaRon's unlocked device — other users never see it.)
         GeometryReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: compactWidth ? 12 : 20) {
-                VStack(alignment: .leading, spacing: compactWidth ? 6 : 8) {
+                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
                     Image(systemName: "dumbbell.fill")
-                        .scaledFont(size: compactWidth ? 40 : 52)
+                        .scaledFont(size: 52)
                         .foregroundStyle(Color.accentColor)
                     Text("Status")
-                        .font(compactWidth ? .title : .largeTitle)
+                        .font(.largeTitle)
                         .bold()
                     Text("Log. Lift. Get stronger.")
-                        .font(compactWidth ? .headline : .title3)
+                        .font(.title3)
                         .foregroundStyle(Theme.secondaryText)
                 }
-                .padding(.top, compactWidth ? 8 : 24)
+                .padding(.top, 24)
 
-                VStack(alignment: .leading, spacing: compactWidth ? 10 : 14) {
+                VStack(alignment: .leading, spacing: 14) {
                     valueProp(icon: "list.clipboard.fill",
                               title: "Your program, built in",
                               detail: "Answer a few questions and your week is planned for you.")
@@ -84,29 +77,29 @@ struct WelcomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
-
-                Button(action: onBuild) {
-                    Text("Build my program")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(compactWidth ? 12 : 16)
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-
+            }
+            // Full width, so the text lines up with the button's left edge
+            // (without the buttons inside, the block centered itself).
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            // Starts at the top like the Privacy screen that follows it;
+            // the buttons sit at the bottom on both (they floated
+            // mid-screen here and mid-page there).
+            .frame(minHeight: proxy.size.height, alignment: .top)
+        }
+        .safeAreaInset(edge: .bottom) {
+            IntroBottomBar {
+                Button(action: onBuild) { IntroPrimaryLabel(text: "Build my program") }
+                    .buttonStyle(.plain)
                 Button(action: onSkip) {
                     Text("Just want to log? Skip to the gym →")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondaryText)
                         .frame(maxWidth: .infinity)
+                        .frame(minHeight: 32)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, compactWidth ? 8 : 16)
-            .frame(minHeight: proxy.size.height, alignment: .center)
         }
         }
     }
@@ -156,34 +149,62 @@ struct PrivacyView: View {
                     privacyRow(icon: "checkmark", text: "No account, no sign-up, no email address.")
                     privacyRow(icon: "checkmark", text: "No analytics, no tracking, no ads, no third-party SDKs.")
                     privacyRow(icon: "checkmark", text: "Subscriptions go through Apple (StoreKit) only — the app itself collects nothing.")
-                    privacyRow(icon: "xmark", text: "Nothing is uploaded or shared unless you turn on a feature that does it, like Apple Calendar or Export.")
+                    privacyRow(icon: "info", text: "Nothing is uploaded or shared unless you turn on a feature that does it, like Apple Calendar or Export.")
                 }
 
                 Text("Read the full privacy policy anytime in Profile. If the app ever changes how it handles data, the policy will be updated first.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-
-                Button(action: onContinue) {
-                    Text("Got it")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
             }
             .padding()
+        }
+        .safeAreaInset(edge: .bottom) {
+            IntroBottomBar {
+                Button(action: onContinue) { IntroPrimaryLabel(text: "Got it") }
+                    .buttonStyle(.plain)
+            }
         }
     }
 
     private func privacyRow(icon: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon == "checkmark" ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(icon == "checkmark" ? Theme.vividGreen : Theme.vividRed)
+            // The last line is a note, not a failure: a red cross on a
+            // reassuring sentence read as something being wrong.
+            Image(systemName: icon == "checkmark" ? "checkmark.circle.fill" : "info.circle.fill")
+                .foregroundStyle(icon == "checkmark" ? Theme.vividGreen : Theme.secondaryText)
             Text(text)
                 .font(.subheadline)
         }
+    }
+}
+
+
+// MARK: - Shared intro pieces
+
+/// The bottom button area every intro screen uses, so the main button is
+/// in the same place on each one.
+struct IntroBottomBar<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(spacing: 10) { content }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+            .frame(maxWidth: .infinity)
+            .background(Theme.background)
+    }
+}
+
+/// The intro's main button face.
+struct IntroPrimaryLabel: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.accentColor)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
