@@ -149,7 +149,10 @@ struct ProfileView: View {
                     detailPane
                         // On the right page the swap and menu buttons sit
                         // over its right edge: keep the values clear.
-                        .contentMargins(.trailing, swapped && !inRail ? 92 : 0, for: .scrollContent)
+                        // Inside the page's margins on both sides, so the cards end
+                        // short of the middle line instead of running into it.
+                        .contentMargins(.leading, 16, for: .scrollContent)
+                        .contentMargins(.trailing, swapped && !inRail ? 92 : 16, for: .scrollContent)
                 } main: {
                     sidebar
                         .background(Theme.card.opacity(0.45))

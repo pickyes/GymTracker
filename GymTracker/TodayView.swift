@@ -1938,7 +1938,7 @@ struct TodayView: View {
             .scaledFont(size: 26, weight: .bold)
             .foregroundStyle(.white)
             .frame(width: 56, height: 56)
-            .background(Color.accentColor, in: Circle())
+            .accentGlass(Circle())
             .shadow(color: Color.accentColor.opacity(0.5), radius: 10, x: 0, y: 4)
     }
 

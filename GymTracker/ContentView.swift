@@ -76,14 +76,14 @@ struct ContentView: View {
     /// Side status bar on: the buttons' own column beside the strip.
     static let buttonColumn: CGFloat = 76
     /// Side bar: where Today's + sits, below the status icons.
-    static let railButtonTop: CGFloat = 116
+    static let railButtonTop: CGFloat = 168
 
     /// Side bar: the rest pill fills the room between the page list and
     /// the buttons below it (DaRon: big, never overlapping).
     private var sideBarPillHeight: CGFloat {
         let h = steadySize.height
         let folded = !Self.isWide(steadySize)
-        let list = Self.railButtonTop + (folded ? 4 * 44 + 3 * 4 : 4 * 58 + 3 * 6) + (cameraAtTop ? Self.cameraClearance : 0)
+        let list = Self.railButtonTop + 4 * 58 + 3 * 6
         let bottom: CGFloat = cameraAtBottom ? Self.cameraClearance : 16 + 34
         var buttons: CGFloat = 0
         if selectedPage == .today { buttons += 56 + 16 }
@@ -120,13 +120,14 @@ struct ContentView: View {
                         .minimumScaleFactor(0.7)
                 }
             }
-            .foregroundStyle(active ? (duo.sideTint ? effectiveAccent : Theme.text) : Theme.secondaryText)
+            // Selected: lit white on the accent highlight (DaRon).
+            .foregroundStyle(active ? Color.white : Theme.secondaryText)
             .frame(width: 70, height: labeled ? 58 : 44)
             .background {
                 // One highlight that slides to the page you pick.
                 if active {
                     // Liquid Glass, tinted with the accent (DaRon).
-                    RailGlassHighlight(tint: duo.sideTint ? effectiveAccent : nil)
+                    RailGlassHighlight(tint: duo.sideTint ? Color.accentColor : nil)
                         .matchedGeometryEffect(id: "railHighlight", in: railNS)
                 }
             }
@@ -276,9 +277,12 @@ struct ContentView: View {
                                         ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: false) }
                                     }
                                 }
-                                    .frame(maxHeight: max(0, cornerColumnTop - 12 - Self.railButtonTop - (cameraAtTop ? Self.cameraClearance : 0)), alignment: .top)
+                                    .frame(maxHeight: max(0, cornerColumnTop - 12 - Self.railButtonTop), alignment: .top)
                                     .frame(width: railTotal)
-                                    .padding(.top, Self.railButtonTop + (cameraAtTop ? Self.cameraClearance : 0))
+                                    // One spot in every pose, below the status icons
+                                    // even with the camera above them, so nothing
+                                    // moves when the phone opens (DaRon).
+                                    .padding(.top, Self.railButtonTop)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity,
                                            alignment: rail == .leading ? .topLeading : .topTrailing)
                                     .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
@@ -843,7 +847,7 @@ struct ContentView: View {
             .scaledFont(size: 26, weight: .bold)
             .foregroundStyle(.white)
             .frame(width: 56, height: 56)
-            .background(Color.accentColor, in: Circle())
+            .accentGlass(Circle())
             .shadow(color: Color.accentColor.opacity(0.5), radius: 10, x: 0, y: 4)
     }
 
@@ -1132,16 +1136,20 @@ struct VerticalBarEdgeReader: UIViewRepresentable {
 }
 
 
-/// The side bar's current-page highlight: a Liquid Glass pill, tinted.
+/// The side bar's current-page highlight: the same accent and glow as
+/// the + button (DaRon: identical), with Liquid Glass on top.
 private struct RailGlassHighlight: View {
     var tint: Color?
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let fill = tint ?? Theme.text.opacity(0.18)
         if #available(iOS 26.0, *) {
             Color.clear
-                .glassEffect(tint.map { .regular.tint($0.opacity(0.45)) } ?? .regular, in: shape)
+                .accentGlass(shape, tint: tint ?? Theme.text.opacity(0.18))
+                .shadow(color: (tint ?? .clear).opacity(0.5), radius: 10, x: 0, y: 4)
         } else {
-            shape.fill((tint ?? Theme.text).opacity(tint == nil ? 0.12 : 0.18))
+            shape.fill(fill)
+                .shadow(color: (tint ?? .clear).opacity(0.5), radius: 10, x: 0, y: 4)
         }
     }
 }

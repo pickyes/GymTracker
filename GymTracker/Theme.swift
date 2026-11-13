@@ -482,15 +482,21 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // Side by side: the companion page's share of the width, dragged
         // from its default and kept between a third and two thirds.
         // Its usual spot is the real hinge (DaRon), on every page.
+        let maxPane = DuoPagePair<Pane, Main>.maxPaneShare(total: total, mainMinWidth: mainMinWidth)
         let sideDefault = hingeX > 0 && total > 0
             ? Double(min(max(hingeX / total, 0), 1))
             : DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
-        let maxPane = DuoPagePair<Pane, Main>.maxPaneShare(total: total, mainMinWidth: mainMinWidth)
         // The left page's share of the width: the line stays where it is
         // when the pages swap (they trade widths), at the hinge unless
         // dragged (DaRon).
-        let leftShare = DuoSplitHandle.clamp(sideDefault + sideShift)
         let swapT = Double(min(max((progress - 0.2) / 0.6, 0), 1))
+        // The left page's share, kept so the main page never gets
+        // narrower than its minimum (the line and the pages always agree).
+        func capLeft(_ v: Double) -> Double {
+            let c = DuoSplitHandle.clamp(v)
+            return swapT < 0.5 ? min(c, maxPane) : max(c, 1 - maxPane)
+        }
+        let leftShare = capLeft(sideDefault + sideShift)
         let paneShare = min(leftShare * (1 - swapT) + (1 - leftShare) * swapT, maxPane)
         let botH = size.height - topH
         // Side by side: the main page keeps the front screen's width.
@@ -610,13 +616,13 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // the left page more room. Swapped, the main page is on the
                 // left, so the same drag shrinks the companion.
                 // Follows the finger; the pages catch up on release.
-                let dragLeft = DuoSplitHandle.clamp(sideDefault + dragShift)
+                let dragLeft = capLeft(sideDefault + dragShift)
                 let lineX = total * (direction == .rightToLeft ? 1 - dragLeft : dragLeft)
                 let mirrored = direction == .rightToLeft
                 DuoSplitHandle(
                     share: Binding(
                         get: { mirrored ? 1 - dragLeft : dragLeft },
-                        set: { dragShift = (mirrored ? 1 - $0 : $0) - sideDefault }
+                        set: { dragShift = capLeft(mirrored ? 1 - $0 : $0) - sideDefault }
                     ),
                     length: total, span: size.height,
                     horizontal: false,
@@ -1092,6 +1098,36 @@ struct LavaLiquidFill: View {
                 // less tilted — gives the surface depth.
                 ctx.fill(sim.surfacePath(size: size, surfaceY: surfaceY + 3, tiltScale: 0.75), with: .color(color.opacity(0.5)))
                 ctx.fill(sim.surfacePath(size: size, surfaceY: surfaceY, tiltScale: 1), with: .color(color))
+                // Boiling (DaRon): bubbles rise from the bottom, wobble,
+                // grow and pop at the surface. Worked out from the clock,
+                // so nothing is stored between frames.
+                if level > 0.02 {
+                    let t = now.timeIntervalSinceReferenceDate
+                    let depth = size.height - surfaceY
+                    for i in 0..<9 {
+                        let seed = Double(i) * 12.9898
+                        let speed = 0.55 + (sin(seed) * 0.5 + 0.5) * 0.6
+                        let phase = (t * speed + Double(i) * 0.37).truncatingRemainder(dividingBy: 1)
+                        let x0 = (sin(seed * 1.7) * 0.5 + 0.5) * Double(size.width - 12) + 6
+                        let y = Double(size.height) - phase * Double(depth + 4)
+                        guard y > Double(surfaceY) + 1 else { continue }
+                        let wobble = sin(t * 6 + seed) * 2.5
+                        let r = 1.5 + phase * 3.2
+                        let rect = CGRect(x: x0 + wobble - r, y: y - r, width: r * 2, height: r * 2)
+                        ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(0.18 + 0.2 * phase)))
+                        ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.35)), lineWidth: 0.8)
+                    }
+                    // Pops breaking the surface.
+                    for i in 0..<4 {
+                        let seed = Double(i) * 78.233
+                        let cycle = (t * 1.3 + Double(i) * 0.25).truncatingRemainder(dividingBy: 1)
+                        guard cycle < 0.3 else { continue }
+                        let x = (sin(seed) * 0.5 + 0.5) * Double(size.width - 10) + 5
+                        let r = 2 + cycle * 10
+                        let rect = CGRect(x: x - r, y: Double(surfaceY) - r * 0.6, width: r * 2, height: r * 1.2)
+                        ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.45 * (1 - cycle / 0.3))), lineWidth: 1)
+                    }
+                }
                 // Spray thrown off the glass.
                 for drop in sim.drops {
                     let r = drop.size / 2
@@ -1697,5 +1733,20 @@ struct PressSqueeze: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.88 : 1)
             .opacity(configuration.isPressed ? 0.85 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+
+extension View {
+    /// Accent button finish: real Liquid Glass tinted with the accent
+    /// (the + buttons and the side bar highlight match, DaRon). The accent
+    /// is the glass's own tint; glass laid over a solid accent fill tinted
+    /// the whole screen blue.
+    @ViewBuilder func accentGlass<S: Shape>(_ shape: S, tint: Color = .accentColor) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.tint(tint).interactive(), in: shape)
+        } else {
+            self.background(tint, in: shape)
+        }
     }
 }
