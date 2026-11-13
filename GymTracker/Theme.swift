@@ -853,8 +853,11 @@ extension View {
     /// edge effect (a progressive blur with no tint, so no grey band).
     @ViewBuilder
     func infinityTopEdge() -> some View {
+        // The system scroll-edge blur is OFF: on the Duo it draws as a
+        // hard-edged pill around the status icons that cuts text off
+        // ("tricep|s", DaRon). The app's own StatusBarOmbre fades the top.
         if #available(iOS 26.0, *) {
-            self.scrollEdgeEffectStyle(.soft, for: .top)
+            self.scrollEdgeEffectHidden(true, for: .top)
         } else {
             self
         }
