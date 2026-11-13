@@ -493,13 +493,16 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // The front screen's page passes over the other one.
                 .zIndex(1)
             // At rest: a hairline at the hinge (DS fold, or Notes' pages).
-            if wide && !stacked && showsDivider {
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(width: 0.5, height: size.height)
-                    .offset(x: (1 - slide) * paneW + slide * mainW)
-                    .opacity(1 - min(1, lift * 3))
+            if wide && !stacked {
+                // Side by side: the same fade as the DS fold, on both
+                // sides of the line between the pages, wherever it's
+                // dragged (DaRon). (Notes' hairline is part of it.)
+                let x = (1 - slide) * paneW + slide * mainW
+                FoldFade(width: size.height, vertical: true)
+                    .offset(x: (direction == .rightToLeft ? total - x : x) - FoldFade.reach)
+                    .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                     .zIndex(2)
             }
             if stacked {
@@ -547,7 +550,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // pages under it. Without a solid backdrop, a page fading in (page
         // switch) left it blending with nothing, so it showed as a grey
         // band and then popped back (red team, animations).
-        .background(stacked ? Theme.background : Color.clear)
+        .background(wide ? Theme.background : Color.clear)
         .compositingGroup()
         .opacity(calm && wide ? abs(1 - 2 * p) * 0.85 + 0.15 : 1)
         .environment(\.layoutDirection, .leftToRight)
@@ -1296,7 +1299,10 @@ struct DuoSplitHandle: View {
 }
 
 struct FoldFade: View {
+    /// Length of the line (the screen's width for the DS fold).
     var width: CGFloat
+    /// A vertical line (pages side by side) instead of the DS fold.
+    var vertical = false
     /// How far each effect reaches from the line.
     static let reach: CGFloat = 26
 
@@ -1311,7 +1317,10 @@ struct FoldFade: View {
             .init(color: Theme.background.opacity(0.72), location: 0.8),
             .init(color: Theme.background.opacity(0.9), location: 1),
         ]
-        ZStack(alignment: .top) {
+        let w = vertical ? r * 2 : width, h = vertical ? width : r * 2
+        let start: UnitPoint = vertical ? .leading : .top
+        let end: UnitPoint = vertical ? .trailing : .bottom
+        ZStack(alignment: .topLeading) {
             // Black and white toward the line, from both sides.
             Rectangle()
                 .fill(Color(white: 0.5))
@@ -1319,21 +1328,32 @@ struct FoldFade: View {
                     .init(color: .clear, location: 0),
                     .init(color: .black, location: 0.5),
                     .init(color: .clear, location: 1),
-                ], startPoint: .top, endPoint: .bottom))
-                .frame(width: width, height: r * 2)
+                ], startPoint: start, endPoint: end))
+                .frame(width: w, height: h)
                 .blendMode(.saturation)
-            VStack(spacing: 0) {
-                LinearGradient(stops: ease, startPoint: .top, endPoint: .bottom)
-                    .frame(width: width, height: r)
-                LinearGradient(stops: ease, startPoint: .bottom, endPoint: .top)
-                    .frame(width: width, height: r)
+            Group {
+                if vertical {
+                    HStack(spacing: 0) {
+                        LinearGradient(stops: ease, startPoint: .leading, endPoint: .trailing)
+                            .frame(width: r, height: h)
+                        LinearGradient(stops: ease, startPoint: .trailing, endPoint: .leading)
+                            .frame(width: r, height: h)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        LinearGradient(stops: ease, startPoint: .top, endPoint: .bottom)
+                            .frame(width: w, height: r)
+                        LinearGradient(stops: ease, startPoint: .bottom, endPoint: .top)
+                            .frame(width: w, height: r)
+                    }
+                }
             }
             Rectangle()
                 .fill(Theme.border)
-                .frame(width: width, height: 0.5)
-                .offset(y: r - 0.25)
+                .frame(width: vertical ? 0.5 : w, height: vertical ? h : 0.5)
+                .offset(x: vertical ? r - 0.25 : 0, y: vertical ? 0 : r - 0.25)
         }
-        .frame(width: width, height: r * 2, alignment: .top)
+        .frame(width: w, height: h, alignment: .topLeading)
     }
 }
 

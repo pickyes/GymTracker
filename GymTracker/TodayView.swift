@@ -2206,7 +2206,10 @@ struct RestTimerCard: View {
     }
 
     var body: some View {
-        if store.restEndsAt != nil || store.restPausedRemaining != nil {
+        // The pill's presence is the corner column's call: it keeps
+        // drawing while it shrinks away after the rest ends (it used to
+        // turn empty at once, so it vanished instead of shrinking).
+        if pill || store.restEndsAt != nil || store.restPausedRemaining != nil {
             TimelineView(.periodic(from: Date(), by: 1.0)) { context in
                 let remaining = store.restRemainingSeconds ?? 0
                 let paused = store.isRestPaused

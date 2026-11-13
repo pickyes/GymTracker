@@ -47,6 +47,8 @@ struct ContentView: View {
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
     @State private var swapInFlight = false
+    /// The software keyboard is on screen.
+    @State private var keyboardShown = false
     /// The Calendar companion page's width (narrow when upright).
     @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
@@ -203,6 +205,12 @@ struct ContentView: View {
             }
         }
         .disableVerticalBar()
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(AppAnimation.snappy) { keyboardShown = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(AppAnimation.snappy) { keyboardShown = false }
+        }
         // Hinge read from launch, 0° to 180°, the whole time.
         .hingeReader()
         // Full-bleed: the navigation bar background extends under the
@@ -551,6 +559,25 @@ struct ContentView: View {
                 RestTimerCard(pill: true)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
+            // Notes: the blue compose button joins the button column, on
+            // the same center line as swap and menu (DaRon: "the 3
+            // buttons" need to line up).
+            // Hidden while typing: you're already writing one, and with
+            // the keyboard up a third button pushed the column into the
+            // clock (landscape).
+            if selectedPage == .notes && !navExpanded && !store.calendarDropdownOpen && !keyboardShown {
+                Button { store.composeNoteRequest += 1 } label: {
+                    Image(systemName: "square.and.pencil")
+                        .scaledFont(size: 22, weight: .semibold, maxScale: 1.3)
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(effectiveAccent, in: Circle())
+                        .shadow(color: effectiveAccent.opacity(0.5), radius: 10, y: 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New note")
+                .transition(.scale.combined(with: .opacity))
+            }
             // Swap sides (open Duo only): above the menu button (and
             // above the rest pill while one runs). Hidden while the menu
             // is open.
@@ -564,27 +591,10 @@ struct ContentView: View {
                         insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
                         removal: .opacity.animation(.easeIn(duration: 0.15))))
             }
-            // Notes: the blue compose button sits beside the menu button
-            // (DaRon, Nov 12).
-            HStack(spacing: 16) {
-                if selectedPage == .notes && !navExpanded {
-                    Button { store.composeNoteRequest += 1 } label: {
-                        Image(systemName: "square.and.pencil")
-                            .scaledFont(size: 22, weight: .semibold, maxScale: 1.3)
-                            .foregroundStyle(.white)
-                            .frame(width: 56, height: 56)
-                            .background(effectiveAccent, in: Circle())
-                            .shadow(color: effectiveAccent.opacity(0.5), radius: 10, y: 4)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("New note")
-                    .transition(.scale.combined(with: .opacity))
-                }
-                fabButton
-            }
-            .animation(AppAnimation.snappy, value: selectedPage)
+            fabButton
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: restActive)
+        .animation(AppAnimation.snappy, value: selectedPage)
     }
 
     /// Today on the folded screen held sideways / in tent pose (the same
@@ -716,23 +726,20 @@ struct ContentView: View {
         } label: {
             let calendarDone = store.calendarDropdownOpen
             let open = navExpanded || showCalendar || calendarDone
-            let icon = Image(systemName: calendarDone ? "checkmark" : open ? "xmark" : "list.bullet")
+            // One view in both states (red team): the symbol morphs
+            // (list ↔ ✕) and the accent fades in over the glass. Two
+            // separate views cross-faded with both glyphs showing.
+            Image(systemName: calendarDone ? "checkmark" : open ? "xmark" : "list.bullet")
                 .contentTransition(.symbolEffect(.replace))
                 .font(.title3.weight(.semibold))
+                .foregroundStyle(open ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
                 .frame(width: 56, height: 56)
-            Group {
-                if open {
-                    // Accent when open, as before.
-                    icon.foregroundStyle(.white)
-                        .background(effectiveAccent, in: Circle())
-                        .controlBorder(Circle(), tint: effectiveAccent)
-                        .shadow(color: effectiveAccent.opacity(0.55), radius: 14)
-                } else {
-                    // Closed: Liquid Glass, following the system setting.
-                    icon.foregroundStyle(.primary)
-                        .liquidGlass(Circle())
+                .background {
+                    Circle().fill(effectiveAccent).opacity(open ? 1 : 0)
                 }
-            }
+                // Closed: Liquid Glass, following the system setting.
+                .liquidGlass(Circle())
+                .shadow(color: effectiveAccent.opacity(open ? 0.55 : 0), radius: 14)
         }
         .buttonStyle(.plain)
         .scaleEffect(navExpanded || showCalendar ? 1.25 : 1.0)

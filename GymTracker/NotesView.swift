@@ -22,6 +22,10 @@ struct NotesView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
+    /// How far the list is scrolled, kept here so folding or unfolding
+    /// (which rebuilds the list in its other container) lands on the
+    /// same spot instead of the top (red team).
+    @State private var listOffset: CGFloat = 0
     @EnvironmentObject var store: WorkoutStore
     @State private var searchText = ""
     @State private var notePendingDelete: UserNote?
@@ -342,9 +346,9 @@ struct NotesView: View {
                 .padding(.top, 24)
                 Spacer()
             } else if viewStyle == .icons {
-                iconGrid
+                iconGrid.keepsScroll($listOffset)
             } else {
-                itemList
+                itemList.keepsScroll($listOffset)
             }
         }
         .withKeyboardDoneToolbar()
@@ -974,5 +978,47 @@ private struct NoteDetailView: View {
             Image(systemName: "ellipsis.circle")
         }
         .accessibilityLabel("Note actions")
+    }
+}
+
+
+/// Remembers a scroll view's offset in `offset` and scrolls back there
+/// when a rebuilt copy appears.
+@available(iOS 18.0, *)
+private struct KeepsScroll: ViewModifier {
+    @Binding var offset: CGFloat
+    @State private var position = ScrollPosition(edge: .top)
+    @State private var restored = false
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: CGFloat.self) {
+                $0.contentOffset.y + $0.contentInsets.top
+            } action: { _, y in
+                // Ignore the new copy's first report (it starts at the top).
+                if restored { offset = max(0, y) }
+            }
+            .onAppear {
+                let target = offset
+                if target > 1 {
+                    DispatchQueue.main.async {
+                        position.scrollTo(y: target)
+                        restored = true
+                    }
+                } else {
+                    restored = true
+                }
+            }
+    }
+}
+
+private extension View {
+    @ViewBuilder func keepsScroll(_ offset: Binding<CGFloat>) -> some View {
+        if #available(iOS 18.0, *) {
+            modifier(KeepsScroll(offset: offset))
+        } else {
+            self
+        }
     }
 }
