@@ -387,11 +387,16 @@ struct ContentView: View {
             if dsHalf {
                 HStack(alignment: .top, spacing: 0) {
                     historyCompanionDay
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    TrainingHeatmap(selectedDay: $calendarDay)
-                        .frame(width: 200, alignment: .leading)
-                        .padding(.top, 96)
+                        .frame(width: companionSize.width * 0.55)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                    // Fills the rest of the half, below the clock row and
+                    // clear of the corner buttons when they're on this half.
+                    TrainingHeatmap(selectedDay: $calendarDay, fill: true)
+                        .padding(.top, 104)
+                        .padding(.bottom, 20)
+                        .padding(.leading, 8)
                         .padding(.trailing, 16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else {
                 historyCompanionWithHeatmapBelow(clockSide: clockSide)
@@ -441,23 +446,9 @@ struct ContentView: View {
                     // No bar background or hairline: the share/trash
                     // buttons float like the rest of the page.
                     .toolbarBackground(.hidden, for: .navigationBar)
-                    // No frosted band with a hard edge when scrolled: the
-                    // same eased fade as the top of the screen instead, so
-                    // sets fade out under the title.
-                    .infinityTopEdge()
-                    .overlay(alignment: .top) {
-                        LinearGradient(stops: [
-                            .init(color: Theme.background, location: 0),
-                            .init(color: Theme.background, location: 0.55),
-                            .init(color: Theme.background.opacity(0.6), location: 0.75),
-                            .init(color: Theme.background.opacity(0.2), location: 0.9),
-                            .init(color: Theme.background.opacity(0), location: 1),
-                        ], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 150)
-                        .ignoresSafeArea(edges: .top)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                    }
+                    // Scrolled sets fade softly under the title (the system's
+                    // soft edge) instead of the hard-edged frosted band.
+                    .softTopEdge()
             }
                 .id(session.id)
                 // On the left page (no clock there) it starts at the very

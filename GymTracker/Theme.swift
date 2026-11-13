@@ -1150,6 +1150,17 @@ struct StatusBarFade: View {
 
 
 extension View {
+    /// A soft fade at the top once content scrolls under the bar, instead
+    /// of the hard-edged band.
+    @ViewBuilder
+    func softTopEdge() -> some View {
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+    }
+
     /// Infinity-display top edge (Nov 12): content softly blurs and fades
     /// as it scrolls off the top of the screen — iOS's own soft scroll
     /// edge effect (a progressive blur with no tint, so no grey band).
