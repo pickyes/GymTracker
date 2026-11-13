@@ -178,6 +178,10 @@ struct ContentView: View {
                         let strip = rail != nil && duo.sideStrip
                         let extraRail = strip ? max(0, Self.railWidth - systemRail) : 0
                         let railTotal = strip ? systemRail + extraRail : 0
+                        // The status icons sit centered in the system's own
+                        // strip at the edge; everything in the bar lines up
+                        // on that same center (DaRon: with the WiFi icon).
+                        let iconCenter = systemRail > 0 ? systemRail / 2 : railTotal / 2
                         // The pages stop at the rail. They're drawn edge to edge
                         // (ignoring safe areas), and a view that touches the
                         // safe area's edge spreads into it — so they stop 1pt
@@ -278,7 +282,7 @@ struct ContentView: View {
                                     }
                                 }
                                     .frame(maxHeight: max(0, cornerColumnTop - 12 - Self.railButtonTop), alignment: .top)
-                                    .frame(width: railTotal)
+                                    .frame(width: iconCenter * 2)
                                     // One spot in every pose, below the status icons
                                     // even with the camera above them, so nothing
                                     // moves when the phone opens (DaRon).
@@ -321,7 +325,7 @@ struct ContentView: View {
                             // beside the strip, which stays clear (DaRon).
                             // Measured from the screen's own edge.
                             .padding(rail == .leading ? .leading : .trailing,
-                                     strip ? (railTotal - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
+                                     strip ? max(2, iconCenter - 28) : fabTrailingPadding(screenWidth: proxy.size.width))
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.

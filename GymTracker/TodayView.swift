@@ -2037,8 +2037,14 @@ struct TodayView: View {
     /// bottom of the list could never clear the keyboard.
     private func scrollToFocusedField(proxy: ScrollViewProxy) {
         if let id = focusedFieldID {
+            // The middle of what's above the keyboard (and its floating
+            // Done), not of the whole page: the page ignores the keyboard,
+            // so .center put the field behind it in landscape (DaRon).
+            let h = max(pageContainerSize.height, 1)
+            let open = max(h - keyboardHeight - 70, h * 0.2)
+            let y = min(0.5, max(0.08, open / h * 0.5))
             withAnimation(AppAnimation.snappy) {
-                proxy.scrollTo(id, anchor: .center)
+                proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: y))
             }
         }
     }

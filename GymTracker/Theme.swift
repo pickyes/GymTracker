@@ -1081,7 +1081,9 @@ struct LavaLiquidFill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation) { context in
+        // Paused: the water holds still and nothing redraws (it ran at
+        // full frame rate the whole pause).
+        TimelineView(.animation(minimumInterval: nil, paused: endsAt == nil)) { context in
             let now = context.date
             let remaining = endsAt.map { max(0, $0.timeIntervalSince(now)) } ?? pausedRemaining ?? 0
             let level = total > 0 ? min(1, remaining / total) : 0
@@ -1098,27 +1100,27 @@ struct LavaLiquidFill: View {
                 // less tilted — gives the surface depth.
                 ctx.fill(sim.surfacePath(size: size, surfaceY: surfaceY + 3, tiltScale: 0.75), with: .color(color.opacity(0.5)))
                 ctx.fill(sim.surfacePath(size: size, surfaceY: surfaceY, tiltScale: 1), with: .color(color))
-                // Boiling (DaRon): bubbles rise from the bottom, wobble,
-                // grow and pop at the surface. Worked out from the clock,
+                // Bubbles drift slowly up through the water, like the gyro
+                // water face DaRon picked. Worked out from the clock,
                 // so nothing is stored between frames.
                 if level > 0.02 {
                     let t = now.timeIntervalSinceReferenceDate
                     let depth = size.height - surfaceY
-                    for i in 0..<9 {
+                    for i in 0..<6 {
                         let seed = Double(i) * 12.9898
-                        let speed = 0.55 + (sin(seed) * 0.5 + 0.5) * 0.6
+                        let speed = 0.12 + (sin(seed) * 0.5 + 0.5) * 0.14
                         let phase = (t * speed + Double(i) * 0.37).truncatingRemainder(dividingBy: 1)
                         let x0 = (sin(seed * 1.7) * 0.5 + 0.5) * Double(size.width - 12) + 6
                         let y = Double(size.height) - phase * Double(depth + 4)
                         guard y > Double(surfaceY) + 1 else { continue }
-                        let wobble = sin(t * 6 + seed) * 2.5
-                        let r = 1.5 + phase * 3.2
+                        let wobble = sin(t * 1.6 + seed) * 2
+                        let r = 1.2 + (sin(seed * 3.1) * 0.5 + 0.5) * 1.8
                         let rect = CGRect(x: x0 + wobble - r, y: y - r, width: r * 2, height: r * 2)
                         ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(0.18 + 0.2 * phase)))
                         ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.35)), lineWidth: 0.8)
                     }
-                    // Pops breaking the surface.
-                    for i in 0..<4 {
+                    // (No surface pops: calm water.)
+                    for i in 0..<0 {
                         let seed = Double(i) * 78.233
                         let cycle = (t * 1.3 + Double(i) * 0.25).truncatingRemainder(dividingBy: 1)
                         guard cycle < 0.3 else { continue }
@@ -1206,7 +1208,7 @@ final class LiquidSim {
     private var h: [Double]        // column heights (in points, + = up)
     private var v: [Double]
     private var tilt = 0.0         // surface slope (dy/dx)
-    private var tiltV = 2.8        // starts mid-pour: a slosh as the rest begins
+    private var tiltV = 0.0
     private var last: Date?
     private var width: CGFloat = 56
     private var gravity = CGVector(dx: 0, dy: 1)
@@ -1238,7 +1240,9 @@ final class LiquidSim {
         // spins the surface past level and it sloshes back.
         let spin = MotionSource.shared.spinRate()
         if let spin {
-            tiltV -= spin * dt * 9
+            // Gyro water (DaRon's video): a twist nudges the surface, but
+            // it glides back level rather than rocking.
+            tiltV -= spin * dt * 2
         }
 
         let steps = 4
@@ -1246,11 +1250,13 @@ final class LiquidSim {
         for _ in 0..<steps {
             // Slosh mode: under-damped, so it overshoots and rocks.
             // Natural slosh: ~1.1 s swing that settles in about two.
-            let accel = -32 * (tilt - target) - 1.9 * tiltV
+            // Gyro water: the surface follows real gravity with a smooth,
+            // nearly critically damped glide and a tiny overshoot.
+            let accel = -40 * (tilt - target) - 10.5 * tiltV
             tiltV += accel * s
             tilt += tiltV * s
             // The rocking surface throws water up the walls it swings at.
-            let wallKick = tiltV * 8
+            let wallKick = tiltV * 1.2
             v[0] -= wallKick * s * 6
             v[n - 1] += wallKick * s * 6
 
@@ -1270,7 +1276,8 @@ final class LiquidSim {
         }
 
         // Spray: water leaving a wall fast throws drops.
-        for (i, side) in [(0, 1.0), (n - 1, -1.0)] where v[i] > 42 && drops.count < 8 {
+        // (Gyro water has no splashes: spray only on a violent shake.)
+        for (i, side) in [(0, 1.0), (n - 1, -1.0)] where v[i] > 400 && drops.count < 8 {
             let x: CGFloat = i == 0 ? 3 : width - 3
             drops.append(Drop(x: x, y: 0, vx: CGFloat(side) * CGFloat.random(in: 10...28),
                               vy: -CGFloat(v[i]) * CGFloat.random(in: 0.9...1.5),
