@@ -33,6 +33,8 @@ struct NotesView: View {
     /// True once a note was opened by hand (not the first note shown
     /// automatically). Folding only carries a hand-opened note over.
     @State private var userPicked = false
+    /// List rows or a grid of cards (DaRon: both styles), remembered.
+    @AppStorage("gymtracker.notesCardStyle.v1", store: SharedDefaults.shared) private var cardStyle = false
 
     /// Category filter for the list. All shows everything.
     private enum CategoryFilter: Hashable {
@@ -64,22 +66,32 @@ struct NotesView: View {
         return notes.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    /// Pinned first, then date groups, like Apple Notes.
+    /// Pinned first, then one section per category (in the user's
+    /// order), then Uncategorized. Newest edit first inside each.
     private var sections: [(title: String, notes: [UserNote])] {
         let notes = filteredNotes
         var result: [(String, [UserNote])] = []
         let pinned = notes.filter(\.isPinned)
         if !pinned.isEmpty { result.append(("Pinned", pinned)) }
-        var groups: [(String, [UserNote])] = []
-        for note in notes where !note.isPinned {
-            let key = Self.groupTitle(for: note.updatedAt)
-            if let i = groups.firstIndex(where: { $0.0 == key }) {
-                groups[i].1.append(note)
-            } else {
-                groups.append((key, [note]))
-            }
+        let rest = notes.filter { !$0.isPinned }
+        for name in store.noteCategories {
+            let group = rest.filter { $0.category == name }
+            if !group.isEmpty { result.append((name, group)) }
         }
-        return result + groups
+        let known = Set(store.noteCategories)
+        let other = rest.filter { $0.category == nil || !known.contains($0.category!) }
+        if !other.isEmpty { result.append(("Uncategorized", other)) }
+        return result
+    }
+
+    /// Each section's color: Workout in the accent, Food orange, the
+    /// rest the secondary gray.
+    private func sectionColor(_ title: String) -> Color {
+        switch title {
+        case "Workout": return Color.accentColor
+        case "Food": return Theme.vividOrange
+        default: return Theme.secondaryText
+        }
     }
 
     /// The first note in list order (what the open Duo shows first).
@@ -100,10 +112,14 @@ struct NotesView: View {
                 DuoPagePair(wide: true, swapped: swapped) {
                     detailPane
                         // The line between the pages, on the hinge side.
-                        .overlay(alignment: swapped ? .leading : .trailing) { Divider() }
+                        // (A plain Divider in an overlay draws horizontal —
+                        // it cut across the middle of the note.)
+                        .overlay(alignment: swapped ? .leading : .trailing) {
+                            Rectangle().fill(Theme.border).frame(width: 0.5)
+                        }
                 } main: {
+                    // Same black as the note page beside it.
                     listPane
-                        .background(Theme.card.opacity(0.35))
                 }
             } else {
                 NavigationStack(path: $path) {
@@ -187,24 +203,13 @@ struct NotesView: View {
             .padding(.top, 30)
 
             // Compose lives beside the menu button in the corner now.
-            searchField
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    categoryChip("All", isSelected: categoryFilter == .all) { categoryFilter = .all }
-                    ForEach(store.noteCategories, id: \.self) { name in
-                        categoryChip(name, isSelected: categoryFilter == .named(name)) {
-                            categoryFilter = .named(name)
-                        }
-                    }
-                    categoryChip("Uncategorized", isSelected: categoryFilter == .uncategorized) {
-                        categoryFilter = .uncategorized
-                    }
-                }
-                .padding(.horizontal, 16)
+            // The notes are grouped by category below, so no filter
+            // chips; the button beside search flips list ⇄ cards.
+            HStack(spacing: 10) {
+                searchField
+                styleToggle
             }
+            .padding(.horizontal, 16)
             .padding(.top, 12)
 
             if store.userNotes.isEmpty {
@@ -220,6 +225,8 @@ struct NotesView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 24)
                 Spacer()
+            } else if cardStyle {
+                noteCards
             } else {
                 List {
                     ForEach(sections, id: \.title) { section in
@@ -228,10 +235,7 @@ struct NotesView: View {
                                 noteButton(note)
                             }
                         } header: {
-                            Text(section.title)
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(Theme.text)
-                                .textCase(nil)
+                            sectionHeader(section.title, count: section.notes.count)
                         }
                     }
                     // Bottom breathing room: the last row scrolls clear
@@ -241,6 +245,9 @@ struct NotesView: View {
                         .listRowBackground(Color.clear)
                 }
                 .listStyle(.insetGrouped)
+                // Rows sit inside the page's 16pt margins (the selected
+                // row's highlight ran off the screen edge).
+                .contentMargins(.horizontal, 16, for: .scrollContent)
                 .scrollContentBackground(.hidden)
                 .infinityTopEdge()
             }
@@ -248,6 +255,102 @@ struct NotesView: View {
         .withKeyboardDoneToolbar()
         .scrollDismissesKeyboard(.interactively)
         .ignoresSafeArea(edges: .top)
+    }
+
+    /// List ⇄ cards.
+    private var styleToggle: some View {
+        Button {
+            withAnimation(AppAnimation.snappy) { cardStyle.toggle() }
+        } label: {
+            Image(systemName: cardStyle ? "list.bullet" : "square.grid.2x2")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 44, height: 44)
+                .background(Theme.card, in: Circle())
+                .overlay(Circle().stroke(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(cardStyle ? "Show notes as a list" : "Show notes as cards")
+    }
+
+    /// A category heading: its name in the category's color, the count.
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(sectionColor(title))
+            Spacer()
+            Text("\(count)")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .textCase(nil)
+    }
+
+    /// Card style: each section as a two-column grid of cards.
+    private var noteCards: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(sections, id: \.title) { section in
+                    sectionHeader(section.title, count: section.notes.count)
+                        .padding(.top, 8)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        ForEach(section.notes) { note in
+                            noteCard(note)
+                        }
+                    }
+                }
+                Color.clear
+                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+        }
+        .infinityTopEdge()
+    }
+
+    /// One note card: title, a few lines of the note, then the date.
+    private func noteCard(_ note: UserNote) -> some View {
+        let isSelected = wide && note.id == selectedID
+        return Button { open(note.id) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    if note.isPinned {
+                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                    }
+                    Text(note.displayTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(2)
+                }
+                Text(note.previewLine.isEmpty ? "No additional text" : note.previewLine)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(3)
+                Spacer(minLength: 0)
+                Text(Self.rowDate(note.updatedAt))
+                    .font(.caption2)
+                    .foregroundStyle(Theme.tertiaryText)
+            }
+            .frame(maxWidth: .infinity, minHeight: 116, maxHeight: 116, alignment: .topLeading)
+            .padding(12)
+            .background(isSelected ? Color.accentColor.opacity(0.2) : Theme.card,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Theme.border, lineWidth: isSelected ? 2 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button { store.setNotePinned(note, pinned: !note.isPinned) } label: {
+                Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
+            }
+            Button(role: .destructive) { notePendingDelete = note } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 
     private var searchField: some View {
@@ -269,21 +372,6 @@ struct NotesView: View {
         .padding(.vertical, 10)
         .background(Theme.card, in: Capsule())
         .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
-    }
-
-    /// One filter chip: selected = filled accent, unselected = card.
-    private func categoryChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : Theme.secondaryText)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(isSelected ? Color.accentColor : Theme.card, in: Capsule())
-                .overlay(Capsule().stroke(isSelected ? Color.clear : Theme.border, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show \(label) notes")
     }
 
     /// One row: tap to open. Swipe right to pin/unpin, swipe left to
@@ -316,36 +404,32 @@ struct NotesView: View {
         }
     }
 
-    /// Apple Notes row: bold title, then time/date + preview on one
-    /// line, then the category (and the workout it came from).
+    /// List row: the title, the date on the right, the first line of
+    /// the note under it.
     private func noteRow(_ note: UserNote) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(note.displayTitle)
-                .font(.headline)
-                .foregroundStyle(Theme.text)
-                .lineLimit(1)
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                if note.isPinned {
+                    Image(systemName: "pin.fill").font(.caption).foregroundStyle(Color.accentColor)
+                }
+                Text(note.displayTitle)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 Text(Self.rowDate(note.updatedAt))
                     .font(.subheadline)
-                    .foregroundStyle(Theme.text.opacity(0.85))
-                Text(note.previewLine.isEmpty ? "No additional text" : note.previewLine)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if !note.previewLine.isEmpty {
+                Text(note.previewLine)
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(1)
             }
-            if note.category != nil || note.workoutTitle != nil {
-                HStack(spacing: 4) {
-                    Image(systemName: "folder")
-                        .font(.caption2)
-                    Text([note.category, note.workoutTitle].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption)
-                        .lineLimit(1)
-                }
-                .foregroundStyle(Theme.secondaryText)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
     }
 
@@ -454,19 +538,16 @@ private struct NoteDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let note {
                 HStack(spacing: 10) {
-                    if wide { actionsMenu.font(.title2) }
                     Text(note.updatedAt.formatted(date: .long, time: .shortened))
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                         .frame(maxWidth: wide ? nil : .infinity)
-                    if wide { Spacer(minLength: 0) }
+                    if wide {
+                        Spacer(minLength: 0)
+                        actionsMenu.font(.title2)
+                    }
                 }
-                if let workout = note.workoutTitle {
-                    Text("From \(workout)")
-                        .font(.caption)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(maxWidth: .infinity)
-                }
+                linkedWorkout(for: note)
             }
             TextField("Title", text: $title, axis: .vertical)
                 .font(.title.weight(.bold))
@@ -478,13 +559,15 @@ private struct NoteDetailView: View {
                     Text("Write a note…")
                         .foregroundStyle(Theme.tertiaryText)
                         .padding(.top, 8)
-                        .padding(.leading, 5)
                         .allowsHitTesting(false)
                 }
                 TextEditor(text: $bodyText)
                     .font(.body)
                     .scrollContentBackground(.hidden)
                     .focused($focus, equals: .body)
+                    // The editor pads its text 5pt in from its edge; pull
+                    // it out so the note lines up with the title.
+                    .padding(.horizontal, -5)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -543,6 +626,45 @@ private struct NoteDetailView: View {
                 newCategoryName = ""
             }
             Button("Cancel", role: .cancel) { newCategoryName = "" }
+        }
+    }
+
+    /// The workout this note goes with: the one it was written on, or
+    /// the workout logged (or planned) the day it was made. Tap to open
+    /// that day on the Calendar.
+    @ViewBuilder
+    private func linkedWorkout(for note: UserNote) -> some View {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: note.createdAt)
+        let title = note.workoutTitle
+            ?? store.sessions.first(where: { cal.isDate($0.date, inSameDayAs: day) })?.dayTitle
+            ?? store.programDay(for: day)?.title
+        if let title {
+            Button {
+                store.calendarJumpRequest = day
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "dumbbell")
+                        .foregroundStyle(Color.accentColor)
+                    Text("Linked to ")
+                        .foregroundStyle(Theme.secondaryText)
+                    + Text("\(day.formatted(.dateTime.weekday(.abbreviated))) · \(title)")
+                        .foregroundStyle(Theme.text)
+                        .fontWeight(.semibold)
+                    Spacer(minLength: 8)
+                    Text("Open")
+                        .foregroundStyle(Theme.secondaryText)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .themeCard(cornerRadius: 14)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Linked to \(title) on \(day.formatted(.dateTime.weekday(.wide).month().day())). Open in Calendar")
         }
     }
 

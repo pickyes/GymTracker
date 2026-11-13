@@ -21,6 +21,10 @@ struct HistoryView: View {
     /// Open Duo: the chosen day lives on the other page, so this page
     /// doesn't repeat it.
     @Environment(\.duoWide) private var duoWide
+    @Environment(\.duoSwapped) private var duoSwapped
+    /// On the open Duo's right page the swap and menu buttons sit in the
+    /// bottom-right corner; the summary and tiles stop short of them.
+    private var cornerButtonsInset: CGFloat { duoWide && !duoSwapped ? 76 : 0 }
 
     /// Sidebar visibility, persisted in the shared App Group suite (the
     /// migration in WorkoutStore.init moves this key there with the rest).
@@ -76,7 +80,8 @@ struct HistoryView: View {
                     .listRowBackground(Color.clear)
                 // Calendar, legend, and the month at a glance (Nov 12
                 // layout DaRon picked: calendar with the stuff below it).
-                CalendarView(externalSelection: $selectedDay, gridOnly: true, showsMonthSummary: true)
+                CalendarView(externalSelection: $selectedDay, gridOnly: true, showsMonthSummary: true,
+                             summaryTrailingInset: cornerButtonsInset)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
@@ -90,6 +95,7 @@ struct HistoryView: View {
                     }
                 }
                 toolTiles
+                    .padding(.trailing, cornerButtonsInset)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)

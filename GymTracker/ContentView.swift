@@ -255,6 +255,13 @@ struct ContentView: View {
             }
             .environment(\.duoWide, wide)
             .environment(\.duoSwapped, wide && swapSides)
+            // A note's linked workout: open the Calendar on that day.
+            .onChange(of: store.calendarJumpRequest) { _, day in
+                guard let day else { return }
+                calendarDay = Calendar.current.startOfDay(for: day)
+                withAnimation(AppAnimation.snappy) { selectedPage = .history }
+                store.calendarJumpRequest = nil
+            }
         }
     }
 

@@ -37,6 +37,9 @@ struct CalendarView: View {
     /// Calendar page (Nov 12 layout): the month's done / missed /
     /// planned counts and the weekly streak, in a card under the legend.
     var showsMonthSummary: Bool = false
+    /// Room kept clear at the summary's trailing edge (the open Duo's
+    /// corner buttons sit there when this page is on their side).
+    var summaryTrailingInset: CGFloat = 0
     /// Wide dropdown on the open Duo (Nov 12, "I want a full
     /// calendar"): the whole month on the left, the chosen day's detail
     /// beside it, so nothing has to scroll.
@@ -84,7 +87,7 @@ struct CalendarView: View {
                 weekdayHeader
                 monthGrid
                 legend
-                if showsMonthSummary { monthSummary }
+                if showsMonthSummary { monthSummary.padding(.trailing, summaryTrailingInset) }
             }
             .onAppear {
                 // Show the month of the chosen day.
