@@ -905,6 +905,10 @@ struct ContentView: View {
             mainPage
                 .modifier(CompactWhen(wide))
         }
+        // Where iOS draws the side bar: the bar's buttons belong to a stack
+        // around BOTH pages, so they stay put while the pages trade places
+        // (DaRon: Calendar's swap button slid away with its page).
+        .modifier(FixedSideBarStack(page: page, on: wide && nativeBar))
         .modifier(StillWhenHidden(hidden: selectedPage != page))
         .opacity(selectedPage == page ? 1 : 0)
         .allowsHitTesting(selectedPage == page)

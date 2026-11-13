@@ -19,9 +19,11 @@ struct HistoryView: View {
     /// D6 (2026-11-10): the session awaiting delete confirmation —
     /// set by the row swipe action or the detail trash button.
     @State private var sessionToDelete: SessionLog?
-    /// All sessions: folded away or open, and how it's sorted and
-    /// filtered. Remembered between launches.
-    @AppStorage("gymtracker.sessionsCollapsed.v1", store: SharedDefaults.shared) private var sessionsCollapsed = false
+    /// All sessions: folded away or open. Starts folded on every visit and
+    /// folds back when you leave the page (DaRon); its sort and filters
+    /// below are remembered between launches.
+    @State private var sessionsCollapsed = true
+    @Environment(\.pageVisible) private var pageVisible
     @AppStorage("gymtracker.sessionsSort.v1", store: SharedDefaults.shared) private var sessionsSortRaw = SessionSort.newest.rawValue
     @AppStorage("gymtracker.sessionsRange.v1", store: SharedDefaults.shared) private var sessionsRangeRaw = SessionRange.all.rawValue
     /// The workout shown ("" = every workout). Not saved: a filter left on
@@ -35,6 +37,7 @@ struct HistoryView: View {
     /// Open Duo: the chosen day lives on the other page, so this page
     /// doesn't repeat it.
     @Environment(\.duoWide) private var duoWide
+    @Environment(\.systemSideBar) private var systemSideBar
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoStacked) private var duoStacked
     @Environment(\.cornerButtonsInRail) private var inRail
@@ -45,7 +48,8 @@ struct HistoryView: View {
     /// following the swap (the List ignores the pair's safe-area padding,
     /// so the month's Saturday column sat under the buttons).
     private var cornerButtonsInset: CGFloat {
-        if inRail { return 0 }
+        // In a side bar (ours or iOS's) the buttons aren't on the page.
+        if inRail || systemSideBar { return 0 }
         return duoStacked ? duoCornerInset : (duoWide && !duoSwapped ? 76 : 0)
     }
 
@@ -85,167 +89,223 @@ struct HistoryView: View {
             // pose instead of popping.
             .animation(FoldAnimation.morph, value: horizontalSizeClass)
             .disableVerticalBar()
+            // Leaving the page: All sessions folds back and its month
+            // groups reset, so the next visit starts tidy.
+            .onChange(of: pageVisible) { _, visible in
+                guard !visible else { return }
+                sessionsCollapsed = true
+                groupToggles = [:]
+            }
             .sheet(item: $exportRequest) { request in
                 ExportSheet(request: request)
             }
     }
 
-    private var sessionsSplitView: some View {
-        NavigationSplitView(columnVisibility: sidebarVisibility) {
-            List(selection: $selectedSessionID) {
-                // Title lines up with the list rows below it (same 16pt
-                // leading), not flush to the edge.
-                PageTitle(text: "Calendar")
-                    // In the clock's row, like Today (Nov 12).
-                    .padding(.top, pageTitleTop)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
-                    .listRowBackground(Color.clear)
-                // Calendar, legend, and the month at a glance (Nov 12
-                // layout DaRon picked: calendar with the stuff below it).
-                CalendarView(externalSelection: $selectedDay, gridOnly: true, showsMonthSummary: true,
-                             summaryTrailingInset: duoStacked ? 0 : cornerButtonsInset)
-                    // DS bottom half: the whole month steps clear.
-                    .padding(.trailing, duoStacked ? cornerButtonsInset : 0)
+    /// The page's list: links, calendar, stats and all sessions.
+    private var sessionsList: some View {
+        List(selection: $selectedSessionID) {
+            // Title lines up with the list rows below it (same 16pt
+            // leading), not flush to the edge.
+            PageTitle(text: "Calendar")
+                // In the clock's row, like Today (Nov 12).
+                .padding(.top, pageTitleTop)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
+                .listRowBackground(Color.clear)
+            // Calendar, legend, and the month at a glance (Nov 12
+            // layout DaRon picked: calendar with the stuff below it).
+            CalendarView(externalSelection: $selectedDay, gridOnly: true, showsMonthSummary: true,
+                         summaryTrailingInset: duoStacked ? 0 : cornerButtonsInset)
+                // DS bottom half: the whole month steps clear.
+                .padding(.trailing, duoStacked ? cornerButtonsInset : 0)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            // Folded there's no other page: the chosen day and the
+            // training heatmap sit here instead.
+            if !duoWide {
+                // Plain heading rows, not section headers: a header
+                // pins to the top and the rows slid under it
+                // ("Rest day" over "Saturday, Nov 21").
+                listHeading(Text(selectedDay, format: .dateTime.weekday(.wide).month().day()))
+                selectedDayRows
+            }
+            toolTiles
+                .padding(.trailing, cornerButtonsInset)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            if !duoWide {
+                TrainingHeatmap(selectedDay: $selectedDay)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
-                // Folded there's no other page: the chosen day and the
-                // training heatmap sit here instead.
-                if !duoWide {
-                    // Plain heading rows, not section headers: a header
-                    // pins to the top and the rows slid under it
-                    // ("Rest day" over "Saturday, Nov 21").
-                    listHeading(Text(selectedDay, format: .dateTime.weekday(.wide).month().day()))
-                    selectedDayRows
-                }
-                toolTiles
-                    .padding(.trailing, cornerButtonsInset)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                if !duoWide {
-                    TrainingHeatmap(selectedDay: $selectedDay)
-                        .listRowSeparator(.hidden)
+            }
+            listHeading(Text("Personal records"))
+            personalRecordsView
+            // A plain heading row: a section header stays pinned to
+            // the top and slid over the cards while scrolling.
+            Text("This week")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(Theme.text)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 0, trailing: 16))
+                .listRowBackground(Color.clear)
+            historyStatsHeader
+                .padding(.trailing, cornerButtonsInset)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            let shown = shownSessions
+            sessionsHeader(shown: shown.count)
+            if !sessionsCollapsed {
+                if store.sessions.isEmpty {
+                    Text("No sessions yet — finish a workout from Today and it will show up here.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .listRowBackground(Color.clear)
+                } else if shown.isEmpty {
+                    Text("No sessions match these filters.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
                 }
-                listHeading(Text("Personal records"))
-                personalRecordsView
-                // A plain heading row: a section header stays pinned to
-                // the top and slid over the cards while scrolling.
-                Text("This week")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(Theme.text)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 0, trailing: 16))
-                    .listRowBackground(Color.clear)
-                historyStatsHeader
-                    .padding(.trailing, cornerButtonsInset)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                let shown = shownSessions
-                sessionsHeader(shown: shown.count)
-                if !sessionsCollapsed {
-                    if store.sessions.isEmpty {
-                        Text("No sessions yet — finish a workout from Today and it will show up here.")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    } else if shown.isEmpty {
-                        Text("No sessions match these filters.")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.secondaryText)
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                            .listRowSeparator(.hidden)
-                    }
-                    // Grouped (by month unless changed): each group folds
-                    // away on its own, so three years of sessions is a
-                    // short list of months, not 700 rows.
-                    let groups = sessionGroups(shown)
-                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                        if sessionsGrouping == .none {
+                // Grouped (by month unless changed): each group folds
+                // away on its own, so three years of sessions is a
+                // short list of months, not 700 rows.
+                let groups = sessionGroups(shown)
+                ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                    if sessionsGrouping == .none {
+                        ForEach(group.sessions) { sessionRow($0) }
+                    } else {
+                        let open = groupIsOpen(group.id, first: index == 0)
+                        sessionGroupHeader(group, open: open)
+                        if open {
                             ForEach(group.sessions) { sessionRow($0) }
-                        } else {
-                            let open = groupIsOpen(group.id, first: index == 0)
-                            sessionGroupHeader(group, open: open)
-                            if open {
-                                ForEach(group.sessions) { sessionRow($0) }
+                        }
+                    }
+                }
+            }
+            // Bottom breathing room (shared LayoutClearance rule,
+            // Debug Pass 2): the last row must scroll fully into
+            // view clear of the floating menu button — and of the
+            // rest-timer panel above it while a rest runs. The old
+            // 40pt spacer was short of the 96pt menu-button value
+            // (the FAB's top is 41–60pt above the list's bottom
+            // edge depending on the safe area), so the last row
+            // could sit under the button at scroll-bottom.
+            Color.clear
+                .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
+        .ignoresSafeArea(edges: .top)
+        .infinityTopEdge()
+        .sideBarItems(.history)
+    }
+
+    /// The chosen session, or the empty state (the split view's detail).
+    private var sessionDetail: some View {
+        Group {
+            if let session = store.sessions.first(where: { $0.id == selectedSessionID }) {
+                // Deleting from the detail clears the selection, so a
+                // compact push never sits on a dead id.
+                SessionDetailView(session: session, onDelete: { selectedSessionID = nil })
+            } else {
+                ContentUnavailableView("Select a workout", systemImage: "clock.arrow.circlepath")
+                    .navigationTitle("History")
+                    // D9: restore the latest session whenever the
+                    // empty detail appears in regular width (page
+                    // switch after a compact back-nav clear, pose
+                    // flip, or any other nil-ing of the selection).
+                    .onAppear {
+                        if horizontalSizeClass == .regular, selectedSessionID == nil {
+                            selectedSessionID = store.sessions.first?.id
+                        }
+                    }
+            }
+        }
+        .toolbar {
+            // Explicit sidebar toggle on the detail pane (P1-3): the
+            // sidebar's own toolbar is hidden, so this is the only
+            // way to HIDE the session list. When the sidebar is
+            // already hidden, NavigationSplitView injects its own
+            // system toggle — D8 (2026-11-10): showing this one too
+            // put TWO toggles side by side. So it renders only
+            // while the sidebar is visible.
+            ToolbarItem(placement: .topBarLeading) {
+                if sidebarVisible {
+                    Button {
+                        sidebarVisible.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                    }
+                    .accessibilityLabel("Hide session list")
+                }
+            }
+        }
+    }
+
+    /// A container around both open pages carries the side bar (it stays put
+    /// while the pages swap). Inside one, a split view or stack of our own
+    /// draws nothing, so the page shows what it opens in its own pane.
+    @Environment(\.sideBarItemsHoisted) private var sideBarHoisted
+
+    @ViewBuilder
+    private var hoistedPane: some View {
+        Group {
+            if let tool = openTool {
+                switch tool {
+                case .strength: StrengthGraphView()
+                case .body: BodyView()
+                }
+            } else if let id = selectedSessionID,
+                      let session = store.sessions.first(where: { $0.id == id }) {
+                SessionDetailView(session: session, onDelete: { selectedSessionID = nil })
+            } else {
+                sessionsList
+            }
+        }
+        .transition(.opacity)
+        .animation(AppAnimation.quick, value: openTool)
+        .animation(AppAnimation.quick, value: selectedSessionID)
+        .onChange(of: openTool == nil && selectedSessionID == nil, initial: true) { _, top in
+            store.setCanGoBack("history", !top)
+        }
+        .onChange(of: store.backRequest.n) { _, _ in
+            guard store.backRequest.page == "history" else { return }
+            if openTool != nil { openTool = nil } else { selectedSessionID = nil }
+        }
+        .onChange(of: selectedDay) { _, _ in openTool = nil }
+    }
+
+    private var sessionsSplitView: some View {
+        Group {
+            if sideBarHoisted {
+                hoistedPane
+            } else {
+                NavigationSplitView(columnVisibility: sidebarVisibility) {
+                    sessionsList
+                    .navigationDestination(item: $openTool) { tool in
+                        Group {
+                            switch tool {
+                            case .strength: StrengthGraphView()
+                            case .body: BodyView()
                             }
                         }
+                        .navigationBarBackButtonHidden(inRail)
                     }
-                }
-                // Bottom breathing room (shared LayoutClearance rule,
-                // Debug Pass 2): the last row must scroll fully into
-                // view clear of the floating menu button — and of the
-                // rest-timer panel above it while a rest runs. The old
-                // 40pt spacer was short of the 96pt menu-button value
-                // (the FAB's top is 41–60pt above the list's bottom
-                // edge depending on the safe area), so the last row
-                // could sit under the button at scroll-bottom.
-                Color.clear
-                    .frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
-            .listStyle(.plain)
-            .ignoresSafeArea(edges: .top)
-            .infinityTopEdge()
-            .sideBarItems(.history)
-            .navigationDestination(item: $openTool) { tool in
-                Group {
-                    switch tool {
-                    case .strength: StrengthGraphView()
-                    case .body: BodyView()
+                    .onChange(of: openTool == nil, initial: true) { _, top in store.setCanGoBack("history", !top) }
+                    .onChange(of: store.backRequest.n) { _, _ in
+                        if store.backRequest.page == "history" { openTool = nil }
                     }
-                }
-                .navigationBarBackButtonHidden(inRail)
-            }
-            .onChange(of: openTool == nil, initial: true) { _, top in store.setCanGoBack("history", !top) }
-            .onChange(of: store.backRequest.n) { _, _ in
-                if store.backRequest.page == "history" { openTool = nil }
-            }
-            // Picking a session or jumping here from a note closes a tool.
-            .onChange(of: selectedSessionID) { _, id in if id != nil { openTool = nil } }
-            .onChange(of: selectedDay) { _, _ in openTool = nil }
-        } detail: {
-            Group {
-                if let session = store.sessions.first(where: { $0.id == selectedSessionID }) {
-                    // Deleting from the detail clears the selection, so a
-                    // compact push never sits on a dead id.
-                    SessionDetailView(session: session, onDelete: { selectedSessionID = nil })
-                } else {
-                    ContentUnavailableView("Select a workout", systemImage: "clock.arrow.circlepath")
-                        .navigationTitle("History")
-                        // D9: restore the latest session whenever the
-                        // empty detail appears in regular width (page
-                        // switch after a compact back-nav clear, pose
-                        // flip, or any other nil-ing of the selection).
-                        .onAppear {
-                            if horizontalSizeClass == .regular, selectedSessionID == nil {
-                                selectedSessionID = store.sessions.first?.id
-                            }
-                        }
-                }
-            }
-            .toolbar {
-                // Explicit sidebar toggle on the detail pane (P1-3): the
-                // sidebar's own toolbar is hidden, so this is the only
-                // way to HIDE the session list. When the sidebar is
-                // already hidden, NavigationSplitView injects its own
-                // system toggle — D8 (2026-11-10): showing this one too
-                // put TWO toggles side by side. So it renders only
-                // while the sidebar is visible.
-                ToolbarItem(placement: .topBarLeading) {
-                    if sidebarVisible {
-                        Button {
-                            sidebarVisible.toggle()
-                        } label: {
-                            Image(systemName: "sidebar.left")
-                        }
-                        .accessibilityLabel("Hide session list")
-                    }
+                    // Picking a session or jumping here from a note closes a tool.
+                    .onChange(of: selectedSessionID) { _, id in if id != nil { openTool = nil } }
+                    .onChange(of: selectedDay) { _, _ in openTool = nil }
+                } detail: {
+                    sessionDetail
                 }
             }
         }

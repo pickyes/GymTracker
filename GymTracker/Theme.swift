@@ -1881,9 +1881,47 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
 /// big titles), except where iOS runs bars down the side of the Duo: there
 /// the page's actions become real toolbar items, so they get the system's
 /// own side bar buttons.
+/// A container around both open pages carries the side bar's buttons
+/// itself: the page inside keeps no bar of its own.
+private struct SideBarItemsHoistedKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    var sideBarItemsHoisted: Bool {
+        get { self[SideBarItemsHoistedKey.self] }
+        set { self[SideBarItemsHoistedKey.self] = newValue }
+    }
+}
+
+/// Puts the side bar's buttons on a stack around the open pair (see
+/// ContentView.unfoldPage). Off: the page is left exactly as it was.
+struct FixedSideBarStack: ViewModifier {
+    let page: ContentView.Page
+    let on: Bool
+    @Environment(\.railEdge) private var edge
+
+    func body(content: Content) -> some View {
+        if on {
+            NavigationStack {
+                content
+                    .environment(\.sideBarItemsHoisted, true)
+                    // A hairline keeps both pages clear of the bar.
+                    .padding(edge == .leading ? .leading : .trailing, 1)
+                    .sideBarItems(page)
+                    .modifier(NoBarTitle())
+            }
+        } else {
+            content
+        }
+    }
+}
+
 struct SideBarItems: ViewModifier {
     let page: ContentView.Page
-    @Environment(\.systemSideBar) private var on
+    @Environment(\.systemSideBar) private var sideBarOn
+    @Environment(\.sideBarItemsHoisted) private var hoisted
+    /// The page carries the bar's buttons itself, unless a container around
+    /// it does (then the page's own bar stays hidden and unpadded).
+    private var on: Bool { sideBarOn && !hoisted }
     @Environment(\.railEdge) private var edge
     @Environment(\.sideBarInset) private var inset
     @Environment(\.duoWide) private var wide
@@ -1905,6 +1943,16 @@ struct SideBarItems: ViewModifier {
             // Only the buttons: no bar background or hairline across the top.
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
+                // Back for a page that shows what it opens in place (no
+                // push, so iOS draws no Back of its own): Calendar's
+                // Strength, Body and sessions with the Duo open.
+                if on && store.canGoBack.contains(page.rawValue) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { store.requestBack(page.rawValue) } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                    }
+                }
                 if on {
                     if page == .today {
                         ToolbarItem(placement: .primaryAction) {
