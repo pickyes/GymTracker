@@ -490,8 +490,8 @@ struct HingeReader: ViewModifier {
     }
 }
 
-/// Waiting pane revealed by the unfold: dim and slightly small while the
-/// phone is closed, full as it reaches flat — across the whole 0–180°.
+/// Waiting pane revealed by the unfold: fully lit the whole time, from 0°
+/// to 180° — it only grows out from the hinge a touch as the phone opens.
 struct HingeReveal: ViewModifier {
     @ObservedObject private var hinge = HingeState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -501,7 +501,6 @@ struct HingeReveal: ViewModifier {
     func body(content: Content) -> some View {
         let t = hinge.openness
         content
-            .opacity(0.25 + 0.75 * t)
             .scaleEffect(reduceMotion ? 1 : 0.96 + 0.04 * t, anchor: anchor)
     }
 }

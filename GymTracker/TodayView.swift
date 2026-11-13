@@ -505,11 +505,20 @@ struct TodayView: View {
     static var windowUsableHeight: CGFloat? {
         guard let window = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return nil }
-        return window.bounds.height - window.safeAreaInsets.bottom
+        let h = window.bounds.height - window.safeAreaInsets.bottom
+        // Before the window is laid out its height is 0, and a negative
+        // cap is an invalid frame that collapsed the whole Today page.
+        return h > 200 ? h : nil
+    }
+
+    /// The status bar's height (the window's top safe area).
+    static var windowSafeTop: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.safeAreaInsets.top ?? 0
     }
 
     private func visibleHeight(_ measured: CGFloat) -> CGFloat {
-        pageContainerSize == .zero ? measured : min(measured, pageContainerSize.height)
+        pageContainerSize.height > 200 ? min(measured, pageContainerSize.height) : measured
     }
 
     private func layoutKind(for measured: CGSize) -> TodayLayoutKind {
@@ -519,7 +528,7 @@ struct TodayView: View {
         // coming up shortened the measured height, so the folded screen
         // looked "sideways" and flipped to the tent view mid-typing (seen
         // on the phone, Nov 12). The keyboard never changes the pose.
-        let size = pageContainerSize == .zero ? measured : pageContainerSize
+        let size = (pageContainerSize.width > 200 && pageContainerSize.height > 200) ? pageContainerSize : measured
         if size.width > size.height * 1.2 {
             // Propped (Seated / Tent): landscape and much wider than tall.
             if size.height < 520 {
@@ -1047,13 +1056,16 @@ struct TodayView: View {
             // Today title (same top strip, DaRon Nov 12).
             // On the right page (sides swapped) the clock is above it, so
             // it starts below the status bar there instead.
-            .padding(.top, anchor == .trailing ? 34 : 12)
+            // Same top on both sides (DaRon: the body must not change size or
+            // move when the sides swap) — always just below the status bar.
+            .padding(.top, 46)  // status bar (34) + 12, same on both sides
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // Only the body pane is capped to the real page height (so its
             // progress card is never cut off at the bottom edge); the
             // workout column still runs to the bottom of the screen.
-            .frame(maxHeight: Self.windowUsableHeight ?? .infinity, alignment: .top)
-            .ignoresSafeArea(edges: anchor == .trailing ? .top : [])
+            // (no window-height cap: reading the window during layout
+            // blanked the whole Today page on a launch while open)
+            .ignoresSafeArea(edges: .top)
             // Follows the real hinge: the waiting pane comes up to full
             // brightness exactly as the phone opens flat.
             .hingeReveal(anchor: anchor)

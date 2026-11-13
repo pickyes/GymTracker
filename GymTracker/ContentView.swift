@@ -185,7 +185,7 @@ struct ContentView: View {
                 // On Today the keyboard doesn't shrink the app: the workout
                 // column scrolls clear of it itself, and shrinking lifted the
                 // body pane off the top (and flipped the pose before).
-                .ignoresSafeArea(selectedPage == .today ? .keyboard : [], edges: .bottom)
+                // (keyboard handled inside TodayView)
             } else {
                 OnboardingFlowView()
             }
@@ -230,7 +230,10 @@ struct ContentView: View {
     /// prune them) — only the visible page is exposed.
     private var pageStack: some View {
         GeometryReader { geo in
-            let size = steadySize == .zero ? geo.size : steadySize
+            // The keyboard-free size, unless it's not measured yet or came
+            // back degenerate (a zero height blanked the whole Today page).
+            let steadyOK = steadySize.width > 200 && steadySize.height > 200
+            let size = steadyOK ? steadySize : geo.size
             let wide = Self.isWide(size)
             ZStack {
                 TodayView()
