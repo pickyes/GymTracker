@@ -357,9 +357,23 @@ struct ContentView: View {
         .accessibilityHidden(selectedPage != page)
     }
 
-    /// Calendar's companion (open Duo): the chosen day's workout in
-    /// full, or what was planned that day.
-    @ViewBuilder private var historyCompanion: some View {
+    /// Calendar's companion (open Duo): the chosen day, with the
+    /// training heatmap pinned under it (Nov 12 layout DaRon picked).
+    private var historyCompanion: some View {
+        historyCompanionDay
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                TrainingHeatmap(selectedDay: $calendarDay)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 20)
+                    .background(Theme.background)
+            }
+    }
+
+    /// The chosen day's workout in full, or what was planned that day.
+    @ViewBuilder private var historyCompanionDay: some View {
         let cal = Calendar.current
         if let session = store.sessions.first(where: { cal.isDate($0.date, inSameDayAs: calendarDay) }) {
             NavigationStack { SessionDetailView(session: session) }

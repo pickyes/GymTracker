@@ -11,10 +11,16 @@ struct HistoryView: View {
     @Binding var selectedDay: Date
     @State private var selectedSessionID: UUID?
     @State private var exportRequest: ExportRequest?
+    /// The tool tiles open these (buttons, so the list adds no "›").
+    @State private var showStrengthGraph = false
+    @State private var showBody = false
     /// D6 (2026-11-10): the session awaiting delete confirmation —
     /// set by the row swipe action or the detail trash button.
     @State private var sessionToDelete: SessionLog?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Open Duo: the chosen day lives on the other page, so this page
+    /// doesn't repeat it.
+    @Environment(\.duoWide) private var duoWide
 
     /// Sidebar visibility, persisted in the shared App Group suite (the
     /// migration in WorkoutStore.init moves this key there with the rest).
@@ -68,45 +74,36 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: titleLeading, bottom: 0, trailing: 16))
                     .listRowBackground(Color.clear)
-                CalendarView(externalSelection: $selectedDay, gridOnly: true)
+                // Calendar, legend, and the month at a glance (Nov 12
+                // layout DaRon picked: calendar with the stuff below it).
+                CalendarView(externalSelection: $selectedDay, gridOnly: true, showsMonthSummary: true)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
-                Section {
-                    selectedDayRows
-                } header: {
-                    Text(selectedDay, format: .dateTime.weekday(.wide).month().day())
-                }
-                Section {
-                    NavigationLink {
-                        StrengthGraphView()
-                    } label: {
-                        Label("Strength graph", systemImage: "chart.line.uptrend.xyaxis")
-                    }
-                    NavigationLink {
-                        BodyView()
-                    } label: {
-                        Label("Body", systemImage: "figure.stand")
-                    }
-                    // Export the whole history, or a date range — the
-                    // sheet's scope picker offers both.
-                    Button {
-                        exportRequest = ExportRequest(
-                            initialScope: .all,
-                            scopeOptions: [
-                                .all,
-                                .range(from: Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date(), to: Date()),
-                            ]
-                        )
-                    } label: {
-                        Label("Export history", systemImage: "square.and.arrow.up")
+                // Folded there's no other page: the chosen day and the
+                // training heatmap sit here instead.
+                if !duoWide {
+                    Section {
+                        selectedDayRows
+                    } header: {
+                        Text(selectedDay, format: .dateTime.weekday(.wide).month().day())
                     }
                 }
-                Section("This week") {
-                    historyStatsHeader
+                toolTiles
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                if !duoWide {
+                    TrainingHeatmap(selectedDay: $selectedDay)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
                 }
                 Section("Personal records") {
                     personalRecordsView
+                }
+                Section("This week") {
+                    historyStatsHeader
                 }
                 Section("All sessions") {
                     if store.sessions.isEmpty {
@@ -144,6 +141,8 @@ struct HistoryView: View {
             .ignoresSafeArea(edges: .top)
             .infinityTopEdge()
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $showStrengthGraph) { StrengthGraphView() }
+            .navigationDestination(isPresented: $showBody) { BodyView() }
         } detail: {
             Group {
                 if let session = store.sessions.first(where: { $0.id == selectedSessionID }) {
@@ -218,6 +217,54 @@ struct HistoryView: View {
         } message: {
             Text("This removes the saved session and its sets from History. This can't be undone.")
         }
+    }
+
+    // MARK: - Tools (Strength graph, Body, Export)
+
+    /// One row of three tiles instead of three list rows.
+    private var toolTiles: some View {
+        HStack(spacing: 10) {
+            Button { showStrengthGraph = true } label: {
+                toolTile("Strength graph", systemImage: "chart.line.uptrend.xyaxis")
+            }
+            .buttonStyle(.plain)
+            Button { showBody = true } label: {
+                toolTile("Body", systemImage: "figure.stand")
+            }
+            .buttonStyle(.plain)
+            // Export the whole history, or a date range — the sheet's
+            // scope picker offers both.
+            Button {
+                exportRequest = ExportRequest(
+                    initialScope: .all,
+                    scopeOptions: [
+                        .all,
+                        .range(from: Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date(), to: Date()),
+                    ]
+                )
+            } label: {
+                toolTile("Export", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Export history")
+        }
+    }
+
+    private func toolTile(_ title: String, systemImage: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .themeCard(cornerRadius: 16)
+        .contentShape(Rectangle())
     }
 
     // MARK: - Chosen day
@@ -719,5 +766,88 @@ struct SessionDetailView: View {
     /// (same rule as Calendar's day detail, unit-override aware).
     private func setWeightText(_ set: SetLog, exercise: ExerciseLog) -> String {
         store.setWeightText(set, exercise: exercise)
+    }
+}
+
+
+// MARK: - Training heatmap (Calendar page, Nov 12)
+
+/// The last 14 weeks, one square per day: full accent color for a full
+/// workout, faded for a short one, empty for none. Columns are weeks
+/// (oldest left), rows are weekdays. Today is ringed; tap a day to pick
+/// it on the calendar. The header counts the weekly streak.
+struct TrainingHeatmap: View {
+    @EnvironmentObject var store: WorkoutStore
+    @Binding var selectedDay: Date
+
+    private let weeks = 14
+    private let cell: CGFloat = 20
+    private let gap: CGFloat = 4
+
+    private var calendar: Calendar { Calendar.current }
+
+    /// The first day shown: the start of the week, 13 weeks before this one.
+    private var firstDay: Date {
+        let today = calendar.startOfDay(for: Date())
+        let weekStart = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        return calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: weekStart) ?? weekStart
+    }
+
+    /// Sets logged per day over the window.
+    private var setsByDay: [Date: Int] {
+        var result: [Date: Int] = [:]
+        for session in store.sessions where session.date >= firstDay {
+            let day = calendar.startOfDay(for: session.date)
+            let sets = session.exercises.reduce(0) { $0 + $1.sets.count }
+            result[day, default: 0] += max(sets, 1)
+        }
+        return result
+    }
+
+    var body: some View {
+        let sets = setsByDay
+        let today = calendar.startOfDay(for: Date())
+        let streak = store.weeklyStreak
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Last \(weeks) weeks · \(streak)-week streak")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            HStack(alignment: .top, spacing: gap) {
+                ForEach(0..<weeks, id: \.self) { week in
+                    VStack(spacing: gap) {
+                        ForEach(0..<7, id: \.self) { weekday in
+                            let day = calendar.date(byAdding: .day, value: week * 7 + weekday, to: firstDay) ?? firstDay
+                            square(day: day, sets: sets[day] ?? 0, today: today)
+                        }
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Training over the last \(weeks) weeks: \(sets.count) workout days, \(streak)-week streak")
+    }
+
+    @ViewBuilder
+    private func square(day: Date, sets: Int, today: Date) -> some View {
+        if day > today {
+            Color.clear.frame(width: cell, height: cell)
+        } else {
+            // Accent color (DaRon): full for a full workout, faded for a
+            // short one.
+            let fill: Color = sets == 0 ? Theme.cardElevated
+                : (sets >= 12 ? Color.accentColor : Color.accentColor.opacity(0.4))
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(fill)
+                .frame(width: cell, height: cell)
+                .overlay {
+                    if day == today {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(Color.accentColor, lineWidth: 1.5)
+                    }
+                }
+                .onTapGesture {
+                    withAnimation(AppAnimation.snappy) { selectedDay = day }
+                }
+        }
     }
 }

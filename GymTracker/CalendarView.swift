@@ -34,6 +34,9 @@ struct CalendarView: View {
     /// Just the month grid (header, weekdays, days, legend) — no
     /// scroll view, no day detail. Used inside the Calendar page's list.
     var gridOnly: Bool = false
+    /// Calendar page (Nov 12 layout): the month's done / missed /
+    /// planned counts and the weekly streak, in a card under the legend.
+    var showsMonthSummary: Bool = false
     /// Wide dropdown on the open Duo (Nov 12, "I want a full
     /// calendar"): the whole month on the left, the chosen day's detail
     /// beside it, so nothing has to scroll.
@@ -81,6 +84,7 @@ struct CalendarView: View {
                 weekdayHeader
                 monthGrid
                 legend
+                if showsMonthSummary { monthSummary }
             }
             .onAppear {
                 // Show the month of the chosen day.
@@ -330,7 +334,10 @@ struct CalendarView: View {
         for day in 1...days {
             cells.append(calendar.date(byAdding: .day, value: day - 1, to: startOfMonth))
         }
-        while cells.count < 42 { cells.append(nil) }
+        // The page's grid ends with the month (the legend sits right under
+        // it); the sheet and dropdown keep 6 rows so they never jump.
+        let target = gridOnly ? ((cells.count + 6) / 7) * 7 : 42
+        while cells.count < target { cells.append(nil) }
         return cells
     }
 
@@ -426,6 +433,49 @@ struct CalendarView: View {
         if missed { return "\(day), workout missed" }
         if planned { return "\(day), workout planned" }
         return "\(day), rest day"
+    }
+
+    /// The displayed month at a glance: workouts done, planned days
+    /// missed, planned days still ahead (from today), and the streak of
+    /// weeks with at least one workout.
+    private var monthSummary: some View {
+        let days = monthCells.compactMap { $0 }
+        let today = calendar.startOfDay(for: Date())
+        var done = 0, missed = 0, planned = 0
+        for day in days {
+            if session(for: day) != nil { done += 1; continue }
+            guard store.programDay(for: day) != nil else { continue }
+            if day < today { missed += 1 } else { planned += 1 }
+        }
+        let streak = store.weeklyStreak
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(displayedMonth, format: .dateTime.month(.wide))
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            HStack(spacing: 0) {
+                summaryStat("\(done)", "Done", Theme.vividGreen)
+                summaryStat("\(missed)", "Missed", Theme.vividOrange)
+                summaryStat("\(planned)", "Planned", Color.accentColor)
+                summaryStat("\(streak) wk", "Streak", Theme.text)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .themeCard(cornerRadius: 16)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func summaryStat(_ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var legend: some View {
