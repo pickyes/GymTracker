@@ -283,16 +283,64 @@ struct DuoPagePair<Pane: View, Main: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            DuoPairStage(progress: wide && swapped ? 1 : 0,
-                         wide: wide, size: geo.size,
-                         mainWidth: mainWidth, direction: direction,
-                         pane: pane, main: main)
+            if wide && geo.size.height > geo.size.width {
+                // Open and upright (DaRon: Nintendo DS style): one page
+                // on each half of the screen, top and bottom of the fold,
+                // instead of squeezing two pages side by side. The body /
+                // companion page is the top screen, the page you tap and
+                // type in is the bottom one; swap flips them.
+                DuoStackedPair(swapped: swapped, size: geo.size, direction: direction,
+                               pane: pane, main: main)
+            } else {
+                DuoPairStage(progress: wide && swapped ? 1 : 0,
+                             wide: wide, size: geo.size,
+                             mainWidth: mainWidth, direction: direction,
+                             pane: pane, main: main)
+            }
         }
         // The pages span the whole screen, edge to edge (their content
         // still gets the safe areas). Only the top used to be ignored, so
         // the cards were sized to the screen minus the home-indicator
         // strip: a hairline gap at the top, a wide one at the bottom.
         .ignoresSafeArea(.container)
+    }
+}
+
+/// The DS layout: two equal halves split at the hinge. The halves trade
+/// places with the same slide as the side-by-side swap, vertically.
+private struct DuoStackedPair<Pane: View, Main: View>: View {
+    var swapped: Bool
+    var size: CGSize
+    var direction: LayoutDirection
+    var pane: () -> Pane
+    var main: () -> Main
+
+    var body: some View {
+        let half = size.height / 2
+        VStack(spacing: 0) {
+            if swapped {
+                main().environment(\.layoutDirection, direction)
+                    .frame(width: size.width, height: half, alignment: .top)
+                    .clipped()
+                    .transition(.move(edge: .top))
+                Rectangle().fill(Theme.border).frame(height: 0.5)
+                pane().environment(\.layoutDirection, direction)
+                    .frame(width: size.width, height: half, alignment: .top)
+                    .clipped()
+                    .transition(.move(edge: .bottom))
+            } else {
+                pane().environment(\.layoutDirection, direction)
+                    .frame(width: size.width, height: half, alignment: .top)
+                    .clipped()
+                    .transition(.move(edge: .top))
+                Rectangle().fill(Theme.border).frame(height: 0.5)
+                main().environment(\.layoutDirection, direction)
+                    .frame(width: size.width, height: half, alignment: .top)
+                    .clipped()
+                    .transition(.move(edge: .bottom))
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
     }
 }
 
