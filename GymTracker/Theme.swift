@@ -213,9 +213,10 @@ private struct PageContainerSizeKey: EnvironmentKey {
 /// page on the left instead of the right.
 private struct DuoWideKey: EnvironmentKey { static let defaultValue = false }
 private struct DuoSwappedKey: EnvironmentKey { static let defaultValue = false }
-/// True for the moment the two pages are lifted into cards while they
-/// trade sides (the swap button), like swapping two apps on iPhone Duo.
-private struct DuoSwapLiftedKey: EnvironmentKey { static let defaultValue = false }
+/// How far the open Duo's pages are through a swap, 0 (pane on the
+/// left) to 1 (pane on the right), moving smoothly while they slide.
+/// Side-dependent details read it so they glide with the pages.
+private struct DuoSwapProgressKey: EnvironmentKey { static let defaultValue: Double = 0 }
 
 extension EnvironmentValues {
     var fabBottomOffset: CGFloat {
@@ -234,9 +235,9 @@ extension EnvironmentValues {
         get { self[DuoSwappedKey.self] }
         set { self[DuoSwappedKey.self] = newValue }
     }
-    var duoSwapLifted: Bool {
-        get { self[DuoSwapLiftedKey.self] }
-        set { self[DuoSwapLiftedKey.self] = newValue }
+    var duoSwapProgress: Double {
+        get { self[DuoSwapProgressKey.self] }
+        set { self[DuoSwapProgressKey.self] = newValue }
     }
 }
 
@@ -264,11 +265,12 @@ func withDuoSwapAnimation(_ animation: Animation, _ body: () -> Void) {
 /// The open Duo's two pages: the waiting `pane` and the front screen's
 /// `main` page. Unswapped the pane is on the left; swapped, the right.
 ///
-/// Swapping works like trading two apps' sides on iPhone Duo: both pages
-/// lift into rounded cards over grey, slide past each other to the other
-/// side, then settle back to full screen. Both pages keep their identity
-/// the whole time (only their x offsets change), so they really move —
-/// scroll positions, text and state come along.
+/// Swapping is ONE motion, like trading two apps' sides on iPhone Duo:
+/// a single animated value carries both pages across, and the slight
+/// lift (cards a hair smaller, rounded, shadowed) is part of that same
+/// curve: it rises and falls with the slide, full size at both ends.
+/// Nothing re-lays out: both pages keep their size and identity the
+/// whole way; only their positions move.
 struct DuoPagePair<Pane: View, Main: View>: View {
     var wide: Bool
     var swapped: Bool
@@ -278,60 +280,96 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     @ViewBuilder var main: () -> Main
 
     @Environment(\.layoutDirection) private var direction
-    @Environment(\.duoSwapLifted) private var lifted
 
     var body: some View {
         GeometryReader { geo in
-            let total = geo.size.width
-            let mainW = wide ? min(mainWidth ?? total / 2, total) : total
-            let paneW = max(total - mainW, 0)
-            // Pane on the left unless swapped (mirrored for right-to-left
-            // languages). Plain x offsets, so a swap is a real slide: each
-            // page glides across to the other side instead of jumping.
-            let paneOnLeft = (direction == .leftToRight) != (wide && swapped)
-            ZStack(alignment: .topLeading) {
-                if wide {
-                    pane()
-                        .environment(\.layoutDirection, direction)
-                        .frame(width: paneW, height: geo.size.height, alignment: .top)
-                        .modifier(DuoSwapCard(lifted: lifted))
-                        .offset(x: paneOnLeft ? 0 : mainW)
-                }
-                main()
-                    .environment(\.layoutDirection, direction)
-                    .frame(width: mainW, height: geo.size.height, alignment: .top)
-                    .modifier(DuoSwapCard(lifted: lifted && wide))
-                    .offset(x: wide && paneOnLeft ? paneW : 0)
-                    // The front screen's page passes over the other one.
-                    .zIndex(1)
-            }
-            .frame(width: total, height: geo.size.height, alignment: .topLeading)
-            // Positions are worked out above for either direction, so the
-            // container itself lays out left to right (each page keeps the
-            // user's direction inside).
-            .environment(\.layoutDirection, .leftToRight)
+            DuoPairStage(progress: wide && swapped ? 1 : 0,
+                         wide: wide, size: geo.size,
+                         mainWidth: mainWidth, direction: direction,
+                         pane: pane, main: main)
         }
-        // A grey backdrop behind the cards, like the Duo's multitasking.
-        .background(Color(.systemGray3).opacity(lifted && wide ? 1 : 0).ignoresSafeArea())
+        // The pages reach the top edge themselves (their content still
+        // gets the status bar's safe area). Otherwise the card effects
+        // stopped pages that run under the status bar (Today) from doing
+        // so, and the page dropped by the status bar's height mid-swap.
+        .ignoresSafeArea(edges: .top)
     }
 }
 
-/// One page lifted into a card mid-swap: smaller, rounded, shadowed.
-/// At rest it's the page as normal (the mask sits well outside it).
-struct DuoSwapCard: ViewModifier {
-    var lifted: Bool
-    func body(content: Content) -> some View {
-        content
-            // Each card carries the page colour so it reads as a card
-            // against the backdrop (pages are otherwise see-through).
-            .background(Theme.background.opacity(lifted ? 1 : 0))
-            .mask {
-                RoundedRectangle(cornerRadius: lifted ? 30 : 0, style: .continuous)
-                    .padding(lifted ? 0 : -80)
+/// Lays the two pages out at a point in the swap. Animatable, so SwiftUI
+/// hands it every in-between value of `progress` during the slide.
+private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
+    var progress: Double
+    var wide: Bool
+    var size: CGSize
+    var mainWidth: CGFloat?
+    var direction: LayoutDirection
+    var pane: () -> Pane
+    var main: () -> Main
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        let total = size.width
+        let mainW = wide ? min(mainWidth ?? total / 2, total) : total
+        let paneW = max(total - mainW, 0)
+        let p = min(max(progress, 0), 1)
+        // Left-to-right x of each page, then mirrored for RTL languages.
+        var paneX = p * mainW
+        var mainX = (1 - p) * paneW
+        if direction == .rightToLeft {
+            paneX = total - paneX - paneW
+            mainX = total - mainX - mainW
+        }
+        // 0 at rest, 1 mid-slide: the lift rides the same curve.
+        let lift = wide ? sin(.pi * p) : 0
+        return ZStack(alignment: .topLeading) {
+            // A grey backdrop behind the cards, like Duo multitasking.
+            Color(.systemGray3)
+                .opacity(min(1, lift * 3))
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            if wide {
+                pane()
+                    .environment(\.layoutDirection, direction)
+                    .frame(width: paneW, height: size.height, alignment: .top)
+                    .modifier(DuoSwapCard(lift: lift))
+                    .offset(x: paneX)
             }
-            .shadow(color: .black.opacity(lifted ? 0.4 : 0), radius: lifted ? 16 : 0, y: lifted ? 8 : 0)
-            // Bigger cards (DaRon): just lifted off the page, not shrunk away.
-            .scaleEffect(lifted ? 0.95 : 1)
+            main()
+                .environment(\.layoutDirection, direction)
+                .frame(width: mainW, height: size.height, alignment: .top)
+                .modifier(DuoSwapCard(lift: lift))
+                .offset(x: wide ? mainX : 0)
+                // The front screen's page passes over the other one.
+                .zIndex(1)
+        }
+        .frame(width: total, height: size.height, alignment: .topLeading)
+        .environment(\.layoutDirection, .leftToRight)
+        .environment(\.duoSwapProgress, wide ? p : 0)
+    }
+}
+
+/// A page mid-swap: nearly full size (97% at the very middle), rounded
+/// and shadowed in proportion to `lift`; exactly the page at rest.
+struct DuoSwapCard: ViewModifier {
+    var lift: Double
+    func body(content: Content) -> some View {
+        // Always the same modifiers (only their amounts change), so the
+        // page is never rebuilt when a swap starts or ends. At rest the
+        // mask sits far outside the page and nothing is clipped.
+        let edge = min(1, lift * 4)
+        content
+            .background(Theme.background.opacity(edge))
+            .mask {
+                RoundedRectangle(cornerRadius: 26 * lift, style: .continuous)
+                    .padding(-200 * (1 - edge))
+            }
+            .shadow(color: .black.opacity(0.35 * lift), radius: 14 * lift, y: 6 * lift)
+            .scaleEffect(1 - 0.03 * lift)
     }
 }
 

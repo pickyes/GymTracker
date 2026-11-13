@@ -46,8 +46,6 @@ struct ContentView: View {
     /// area shrinks, which flipped the open Duo to the folded layout
     /// mid-typing (and closed the note being written).
     @State private var steadySize: CGSize = .zero
-    /// The two pages are lifted into cards mid-swap (see swapSidesButton).
-    @State private var swapLifted = false
     @State private var swapInFlight = false
     private var showSwapButton: Bool { duo.showSwapButton }
     /// The day chosen on the Calendar page (also shown on the open
@@ -257,7 +255,6 @@ struct ContentView: View {
             }
             .environment(\.duoWide, wide)
             .environment(\.duoSwapped, wide && swapSides)
-            .environment(\.duoSwapLifted, swapLifted)
         }
     }
 
@@ -313,18 +310,14 @@ struct ContentView: View {
         }
         swapInFlight = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        // One continuous motion (DaRon: "needs to be fluid"): the lift,
-        // the slide and the settle overlap instead of running in steps,
-        // each a critically damped spring that picks up the one before
-        // it mid-flight, so nothing stops between phases.
-        withDuoSwapAnimation(.spring(response: 0.32, dampingFraction: 1)) { swapLifted = true }
+        // One motion (DaRon): a single curve slides the pages across and
+        // the lift rides it. Eases in and lands cleanly at a fixed time
+        // (a spring's long tail kept the cards creeping into place).
+        withDuoSwapAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: 0.55)) { duo.swapSides.toggle() }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(60))
-            withDuoSwapAnimation(.spring(response: 0.55, dampingFraction: 0.92)) { duo.swapSides.toggle() }
-            try? await Task.sleep(for: .milliseconds(330))
-            withDuoSwapAnimation(.spring(response: 0.45, dampingFraction: 1)) { swapLifted = false }
+            try? await Task.sleep(for: .milliseconds(500))
             UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.6)
-            try? await Task.sleep(for: .milliseconds(350))
+            try? await Task.sleep(for: .milliseconds(250))
             swapInFlight = false
         }
     }

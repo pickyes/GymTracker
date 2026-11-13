@@ -6,6 +6,7 @@ struct TodayView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.pageContainerSize) private var pageContainerSize
     @Environment(\.duoSwapped) private var duoSwapped
+    @Environment(\.duoSwapProgress) private var duoSwapProgress
     @Environment(\.duoWide) private var duoWide
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject var store: WorkoutStore
@@ -1898,7 +1899,8 @@ struct TodayView: View {
         // Open Duo with the workout on the clock's side: the + sits on the
         // same center line as the swap/menu buttons, under the Wi-Fi icon
         // (47pt from the edge; the column's own 16pt inset + 3 + 28).
-        .padding(.trailing, duoWide && !duoSwapped ? 3 : 16)
+        // Glides with the pages during a swap (no snap afterwards).
+        .padding(.trailing, duoWide ? 3 + 13 * duoSwapProgress : 16)
     }
 
     /// The vivid circular action button (56pt, accent fill, glow):
