@@ -2405,11 +2405,14 @@ final class WorkoutStore: ObservableObject {
     /// must not read 0 on Monday morning before the week's workout.
     var weeklyStreak: Int {
         var streak = 0
+        // One pass over the sessions, then set lookups (it rescanned every
+        // session for every week of the streak, several times a render).
+        let weeks = Set(sessions.map { weekStartDate(for: $0.date) })
         var weekStart = weekStartDate(for: Date())
-        if !sessions.contains(where: { weekStartDate(for: $0.date) == weekStart }) {
+        if !weeks.contains(weekStart) {
             weekStart = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: weekStart) ?? weekStart
         }
-        while sessions.contains(where: { weekStartDate(for: $0.date) == weekStart }) {
+        while weeks.contains(weekStart) {
             streak += 1
             weekStart = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: weekStart) ?? weekStart
         }

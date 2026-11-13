@@ -93,6 +93,15 @@ struct CalendarView: View {
                 // Show the month of the chosen day.
                 displayedMonth = selectedDate
             }
+            // A day picked elsewhere (the heatmap, a note's linked
+            // workout) brings its month onto the grid. The page stays
+            // mounted, so onAppear alone never saw these (red team #1).
+            .onChange(of: selectedDate) { _, day in
+                guard !calendar.isDate(day, equalTo: displayedMonth, toGranularity: .month) else { return }
+                withAnimation(AppAnimation.snappy) {
+                    displayedMonth = max(day, earliestMonth)
+                }
+            }
         } else if embeddedInNavigation {
             calendarContent
                 .background(Theme.background)
@@ -444,11 +453,14 @@ struct CalendarView: View {
     private var monthSummary: some View {
         let days = monthCells.compactMap { $0 }
         let today = calendar.startOfDay(for: Date())
+        // Days before you set the app up can't be missed (red team #3).
+        let start = calendar.startOfDay(for: store.setupDate ?? .distantPast)
+        let sessionDays = Set(store.sessions.map { calendar.startOfDay(for: $0.date) })
         var done = 0, missed = 0, planned = 0
         for day in days {
-            if session(for: day) != nil { done += 1; continue }
+            if sessionDays.contains(calendar.startOfDay(for: day)) { done += 1; continue }
             guard store.programDay(for: day) != nil else { continue }
-            if day < today { missed += 1 } else { planned += 1 }
+            if day >= today { planned += 1 } else if day >= start { missed += 1 }
         }
         let streak = store.weeklyStreak
         return VStack(alignment: .leading, spacing: 8) {

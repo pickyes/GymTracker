@@ -335,7 +335,11 @@ struct HistoryView: View {
         let planned = store.plannedSetsByMuscle()
         let totalSets = done.values.reduce(0, +)
         let targetSets = planned.values.reduce(0, +)
-        let workouts = workoutsThisWeek
+        // Days trained, not sessions: two sessions on one day are one
+        // workout day against the planned days (red team #5).
+        let start = weekStartDate(for: Date())
+        let workouts = Set(store.sessions.filter { $0.date >= start }
+            .map { Calendar.current.startOfDay(for: $0.date) }).count
         let plannedWorkouts = max(store.plannedWorkoutsThisWeek(), workouts)
         let volume = weeklyVolume
         let lastWeek = lastWeekVolume
@@ -444,7 +448,7 @@ struct HistoryView: View {
                             .frame(height: 8)
                         }
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(muscle.label): \(d) of \(t) sets")
+                        .accessibilityLabel(t > 0 ? "\(muscle.label): \(d) of \(t) sets" : "\(muscle.label): \(d) sets")
                     }
                 }
             }
@@ -546,10 +550,6 @@ struct HistoryView: View {
         let template = ExerciseTemplate(id: "", name: best.name, sets: 1, repRange: "", topReps: 1,
                                         defaultWeightLb: nil, isPair: best.isPair, weightNote: nil, cues: nil)
         return "\(best.name): \(store.displayWeightLabel(best.oneRM, isPair: best.isPair, for: template))"
-    }
-
-    private var workoutsThisWeek: Int {
-        store.sessions.filter { $0.date >= weekStartDate(for: Date()) }.count
     }
 
     /// Best lift per muscle group, from logged sessions (real data only).
@@ -951,8 +951,12 @@ struct TrainingHeatmap: View {
         var result: [Date: Int] = [:]
         for session in store.sessions where session.date >= firstDay {
             let day = calendar.startOfDay(for: session.date)
-            let sets = session.exercises.reduce(0) { $0 + $1.sets.count }
-            result[day, default: 0] += max(sets, 1)
+            // Done working sets only, the same count as This week's bars
+            // (unfinished and warm-up sets used to light a full square).
+            let sets = session.exercises.reduce(0) { total, exercise in
+                total + exercise.sets.filter { $0.done && $0.kind != .warmup }.count
+            }
+            if sets > 0 { result[day, default: 0] += sets }
         }
         return result
     }
