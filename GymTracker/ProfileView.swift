@@ -15,8 +15,8 @@ enum ProfileSection: String, CaseIterable, Identifiable, Hashable {
         case .program: return "Your Program"
         case .bodyweight: return "Bodyweight"
         case .gyms: return "Gym Profiles"
-        case .exercises: return "Custom Exercises"
-        case .injuries: return "Body & Injuries"
+        case .exercises: return "Exercises"
+        case .injuries: return "Body"
         case .weights: return "Working Weights"
         case .limits: return "Limits & Swaps"
         case .muse: return "Muse Access"
@@ -63,13 +63,13 @@ enum ProfileSection: String, CaseIterable, Identifiable, Hashable {
         case .program: return "The plan you're following, every program you've made, and setup."
         case .bodyweight: return "Your current weight, used for bodyweight exercises and progress."
         case .gyms: return "The equipment at each place you train — home, gym, travel."
-        case .exercises: return "Exercises you've added that aren't in the built-in library."
-        case .injuries: return "Mark a sore spot and the program swaps exercises around it."
+        case .exercises: return "The weight you're working with on each exercise, and exercises you've added."
+        case .injuries: return "Your weight, sore spots to train around, and what they swap out."
         case .weights: return "The weight you're working with on each exercise in your program."
         case .limits: return "What your injuries rule out, and what replaced it."
         case .muse: return "Let Muse on your Mac read your workouts over your own Wi-Fi."
         case .pro: return "Your subscription, purchases, and restore."
-        case .settings: return "Units, appearance, rest timer, calendar, and more."
+        case .settings: return "Units, appearance, rest timer, calendar, privacy, and more."
         case .legal: return "Privacy policy, terms of use, and how your data is kept."
         }
     }
@@ -129,14 +129,12 @@ struct ProfileView: View {
     /// Settings-app groups (DaRon picked layout A): Your Program on its
     /// own, then Training, Body and App.
     private var groups: [(title: String, sections: [ProfileSection])] {
-        var training: [ProfileSection] = [.gyms, .exercises, .weights]
-        if !(store.profile?.limits.isEmpty ?? true) || store.activeProgram?.isPreset == true {
-            training.append(.limits)
-        }
-        return [
-            ("Training", training),
-            ("Body", [.bodyweight, .injuries]),
-            ("App", [.muse, .pro, .settings, .legal]),
+        // Combined pages (DaRon): Body = bodyweight + injuries + limits,
+        // Exercises = working weights + custom exercises, Settings =
+        // settings + privacy & about.
+        [
+            ("Training", [.gyms, .exercises, .injuries]),
+            ("App", [.muse, .pro, .settings]),
         ]
     }
 
@@ -346,9 +344,34 @@ struct ProfileView: View {
     private func sectionPage(_ section: ProfileSection) -> some View {
         switch section {
         case .gyms: GymProfilesView()
-        case .exercises: CustomExercisesView()
-        case .injuries: InjuryEditorView()
-        case .settings: SettingsView()
+        case .exercises, .weights:
+            CustomExercisesView(leadingSections: AnyView(Group {
+                Section { headerCard(.exercises) }
+                weightsContent
+            }))
+            .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
+        case .settings, .legal:
+            SettingsView(trailingSections: AnyView(legalContent))
+        case .injuries, .bodyweight, .limits:
+            List {
+                Section { headerCard(.injuries) }
+                bodyweightContent
+                Section("Sore spots") {
+                    InjuryEditorView(embedded: true)
+                        .padding(.vertical, 6)
+                }
+                if !(store.profile?.limits.isEmpty ?? true) || store.activeProgram?.isPreset == true {
+                    limitsContent
+                }
+                clearanceRow
+            }
+            .listStyle(.insetGrouped)
+            .oledList()
+            .navigationTitle("Body")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
+            .withKeyboardDoneToolbar()
+            .scrollDismissesKeyboard(.interactively)
         default:
             List {
                 Section { headerCard(section) }
@@ -762,9 +785,31 @@ struct InjuryEditorView: View {
     @State private var parts: Set<BodyPart> = []
     @State private var otherText: String = ""
     @State private var didSetup = false
+    /// Inside the combined Body page's list: just the editor (no scroll
+    /// view or toolbar of its own); it still saves when it goes away.
+    var embedded = false
 
     var body: some View {
-        ScrollView {
+        if embedded {
+            editor
+                .buttonStyle(.borderless)
+                .onAppear(perform: setup)
+                .onDisappear { save() }
+                .onChange(of: parts) { _, _ in save() }
+        } else {
+            standalone
+        }
+    }
+
+    private func setup() {
+        if !didSetup {
+            didSetup = true
+            parts = store.profile?.injuredParts ?? []
+            otherText = store.profile?.otherLimitText ?? ""
+        }
+    }
+
+    private var editor: some View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Tap the body to mark a spot as injured or limited. The program swaps exercises for that spot — tap again to unmark.")
                     .font(.subheadline)
@@ -791,6 +836,11 @@ struct InjuryEditorView: View {
                     }
                 }
             }
+    }
+
+    private var standalone: some View {
+        ScrollView {
+            editor
             // Same 16pt sides/top as before; the bottom is the shared
             // LayoutClearance rule (Debug Pass 2) so the last hint line
             // scrolls clear of the floating menu button — and of the

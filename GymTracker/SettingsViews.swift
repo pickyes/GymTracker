@@ -18,6 +18,8 @@ struct SettingsView: View {
     /// Show the swap-sides button on the open Duo (Nov 12). Saved with the
     /// swap itself, straight to disk, so it survives updates and power-off.
     @ObservedObject private var duo = DuoSettings.shared
+    /// Extra sections at the end (Profile puts Privacy & About here).
+    var trailingSections: AnyView? = nil
 
     var body: some View {
         Form {
@@ -181,6 +183,7 @@ struct SettingsView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
+            if let trailingSections { trailingSections }
         }
         .oledList()
         .navigationTitle("Settings")
@@ -613,10 +616,14 @@ struct CustomExercisesView: View {
     @State private var showEditor = false
     @State private var editingExercise: CustomExercise?
     @State private var showPaywall = false
+    /// Sections shown above the custom exercises (Profile puts Working
+    /// Weights here, so it's one Exercises page).
+    var leadingSections: AnyView? = nil
 
     var body: some View {
         List {
-            Section {
+            if let leadingSections { leadingSections }
+            Section("Custom exercises") {
                 ForEach(store.customExercises) { exercise in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
