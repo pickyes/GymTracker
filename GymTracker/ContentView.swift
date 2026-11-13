@@ -48,7 +48,7 @@ struct ContentView: View {
     @State private var steadySize: CGSize = .zero
     @State private var swapInFlight = false
     /// The Calendar companion page's width (narrow when upright).
-    @State private var companionWidth: CGFloat = 0
+    @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
@@ -255,9 +255,7 @@ struct ContentView: View {
                     .opacity(selectedPage == .today ? 1 : 0)
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)
-                // Calendar stays side by side upright too (DaRon), like Profile.
-                // Exactly half and half (DaRon).
-                unfoldPage(.history, wide: wide, stacksWhenTall: false, halves: true) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
+                unfoldPage(.history, wide: wide) { HistoryView(selectedDay: $calendarDay) } companion: { historyCompanion }
                 // Notes and Profile split themselves when wide, like
                 // Apple's Notes and Settings: list on one page, the
                 // open note / section on the other.
@@ -380,14 +378,31 @@ struct ContentView: View {
     /// Calendar's companion (open Duo): the chosen day, with the
     /// training heatmap pinned under it (Nov 12 layout DaRon picked).
     private var historyCompanion: some View {
-        // On the clock's side the page sits under the corner buttons, and
-        // when it's the narrow upright column its top sits under the clock.
+        // DS layout (the Duo open and upright): the Calendar's half is wide
+        // and short, so the day's workout and the heatmap sit side by side
+        // (DaRon). Landscape keeps the heatmap under the workout.
         let clockSide = swapSides
-        let narrow = companionWidth > 0 && companionWidth < 320
-        return historyCompanionDay
-            .padding(.top, clockSide && narrow ? 44 : 0)
+        let dsHalf = companionSize.width > companionSize.height * 1.2
+        return Group {
+            if dsHalf {
+                HStack(alignment: .top, spacing: 0) {
+                    historyCompanionDay
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    TrainingHeatmap(selectedDay: $calendarDay)
+                        .frame(width: 200, alignment: .leading)
+                        .padding(.top, 96)
+                        .padding(.trailing, 16)
+                }
+            } else {
+                historyCompanionWithHeatmapBelow(clockSide: clockSide)
+            }
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { companionSize = $0 }
+    }
+
+    private func historyCompanionWithHeatmapBelow(clockSide: Bool) -> some View {
+        historyCompanionDay
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { companionWidth = $0 }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 TrainingHeatmap(selectedDay: $calendarDay)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -426,6 +441,23 @@ struct ContentView: View {
                     // No bar background or hairline: the share/trash
                     // buttons float like the rest of the page.
                     .toolbarBackground(.hidden, for: .navigationBar)
+                    // No frosted band with a hard edge when scrolled: the
+                    // same eased fade as the top of the screen instead, so
+                    // sets fade out under the title.
+                    .infinityTopEdge()
+                    .overlay(alignment: .top) {
+                        LinearGradient(stops: [
+                            .init(color: Theme.background, location: 0),
+                            .init(color: Theme.background, location: 0.55),
+                            .init(color: Theme.background.opacity(0.6), location: 0.75),
+                            .init(color: Theme.background.opacity(0.2), location: 0.9),
+                            .init(color: Theme.background.opacity(0), location: 1),
+                        ], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 150)
+                        .ignoresSafeArea(edges: .top)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
             }
                 .id(session.id)
                 // On the left page (no clock there) it starts at the very
