@@ -255,7 +255,11 @@ extension EnvironmentValues {
     }
     /// The corner buttons live in the side rail (Settings → Status bar on
     /// the side), so pages no longer need to keep clear of them.
-    var cornerButtonsInRail: Bool { railEdge != nil }
+    /// The corner buttons stay on the pages beside the rail (DaRon: keep
+    /// the side strip clear), so pages keep their usual gaps for them.
+    var cornerButtonsInRail: Bool { false }
+    /// Side status bar on: Today's + joins the corner column.
+    var todayPlusInColumn: Bool { railEdge != nil }
     /// The edge of the side rail, when it's shown.
     var railEdge: HorizontalEdge? {
         get { self[RailEdgeKey.self] }

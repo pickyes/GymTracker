@@ -8,7 +8,7 @@ struct TodayView: View {
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoSwapProgress) private var duoSwapProgress
     @Environment(\.appDrawsKeyboardDone) private var appDrawsKeyboardDone
-    @Environment(\.cornerButtonsInRail) private var inRail
+    @Environment(\.todayPlusInColumn) private var inRail
     @AppStorage("duoSideShift") private var sideShift: Double = 0
     @Environment(\.duoWide) private var duoWide
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

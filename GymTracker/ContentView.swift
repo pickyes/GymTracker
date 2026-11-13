@@ -60,6 +60,8 @@ struct ContentView: View {
     private var rail: HorizontalEdge? { duo.sideStatusBar ? verticalBarEdge : nil }
     private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
     static let railWidth: CGFloat = 84
+    /// Side status bar on: the buttons' own column beside the strip.
+    static let buttonColumn: CGFloat = 76
     /// The Calendar companion page's width (narrow when upright).
     @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
@@ -103,7 +105,9 @@ struct ContentView: View {
                         // safe area's edge spreads into it — so they stop 1pt
                         // short of the rail (the rail covers that point).
                         pageStack
-                            .frame(width: rail == nil ? proxy.size.width : proxy.size.width - extraRail - 1)
+                            // Plus a clear column for the buttons beside the
+                            // strip, so nothing runs under them (DaRon).
+                            .frame(width: rail == nil ? proxy.size.width : proxy.size.width - extraRail - 1 - Self.buttonColumn)
                             .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
                             .environment(\.railEdge, rail)
                             .environment(\.appDrawsKeyboardDone, true)
@@ -191,11 +195,11 @@ struct ContentView: View {
                             // fabBottomPadding). The rest-timer panel
                             // shares the same right edge, stacked above
                             // the button.
-                            // In the rail: centered on the strip, measured from
-                            // the screen's own edge (DaRon: they sat in the
-                            // page, short of the rail, on the phone).
+                            // Side status bar: the column sits on the page just
+                            // beside the strip, which stays clear (DaRon).
+                            // Measured from the screen's own edge.
                             .padding(rail == .leading ? .leading : .trailing,
-                                     rail != nil ? (railTotal - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
+                                     rail != nil ? railTotal + (Self.buttonColumn - 56) / 2 : fabTrailingPadding(screenWidth: proxy.size.width))
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.
