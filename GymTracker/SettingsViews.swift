@@ -22,6 +22,8 @@ struct SettingsView: View {
     /// Show the swap-sides button on the open Duo (Nov 12). Saved with the
     /// swap itself, straight to disk, so it survives updates and power-off.
     @ObservedObject private var duo = DuoSettings.shared
+    /// The Duo-only settings show only on a phone that folds.
+    @ObservedObject private var hinge = HingeState.shared
     @ObservedObject private var identity = ProfileIdentity.shared
     @State private var photoItem: PhotosPickerItem?
     @State private var pendingSample: SampleProfile?
@@ -104,6 +106,7 @@ struct SettingsView: View {
                 Toggle("Keep screen awake during workouts", isOn: keepAwakeBinding)
             }
 
+            if hinge.hasHinge {
             Section {
                 Toggle("Swap button", isOn: $duo.showSwapButton)
                 Toggle("Status bar on the side", isOn: $duo.sideStatusBar)
@@ -117,6 +120,7 @@ struct SettingsView: View {
                 Text("Open display")
             } footer: {
                 Text("Swap button: switches which side each page is on when the phone is open. Turning it off keeps the sides the way you left them. Status bar on the side: the time and icons run down the edge.")
+            }
             }
 
             Section("Appearance") {

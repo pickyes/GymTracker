@@ -85,7 +85,9 @@ struct ContentView: View {
     /// upright (DS), where iOS keeps it on top, the bar still shows on the
     /// right (DaRon picked this).
     private var rail: HorizontalEdge? {
-        guard duo.sideStatusBar else { return nil }
+        // The side bar is the Duo's (DaRon): a slab iPhone never gets it,
+        // in any orientation.
+        guard duo.sideStatusBar, hinge.hasHinge else { return nil }
         if let verticalBarEdge { return verticalBarEdge }
         let dsMode = Self.isWide(steadySize) && steadySize.height > steadySize.width
         return dsMode ? .trailing : nil
@@ -1213,9 +1215,11 @@ struct DisableVerticalBar: ViewModifier {
     /// Settings → Status bar on the side turns the system's vertical bar
     /// back on (DaRon, like Reddit on the Duo).
     @ObservedObject private var duo = DuoSettings.shared
+    /// Only on a phone that folds: a slab iPhone keeps its status bar on top.
+    @ObservedObject private var hinge = HingeState.shared
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
-            content.toolbarVerticalBehavior(duo.sideStatusBar ? .automatic : .disabled)
+            content.toolbarVerticalBehavior(duo.sideStatusBar && hinge.hasHinge ? .automatic : .disabled)
         } else {
             content
         }
