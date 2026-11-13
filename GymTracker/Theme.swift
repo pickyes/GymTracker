@@ -29,6 +29,12 @@ enum Theme {
         tc.userInterfaceStyle == .dark ? .black : .systemBackground
     })
 
+    /// The side rail (status bar on the side): a dark grey strip in dark
+    /// mode, like Reddit's on the Duo; light grey in light mode.
+    static let railBackground = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark ? UIColor(red: 0.11, green: 0.12, blue: 0.13, alpha: 1) : .secondarySystemBackground
+    })
+
     /// Card surface: near-black in dark mode (reads as black, separates
     /// from the true-black base), secondary system background in light.
     static let card = Color(UIColor { tc in
@@ -247,6 +253,19 @@ extension EnvironmentValues {
         get { self[DuoSwapProgressKey.self] }
         set { self[DuoSwapProgressKey.self] = newValue }
     }
+    /// The corner buttons live in the side rail (Settings → Status bar on
+    /// the side), so pages no longer need to keep clear of them.
+    var cornerButtonsInRail: Bool { railEdge != nil }
+    /// The edge of the side rail, when it's shown.
+    var railEdge: HorizontalEdge? {
+        get { self[RailEdgeKey.self] }
+        set { self[RailEdgeKey.self] = newValue }
+    }
+    /// This page is the one on screen (hidden pages stay mounted).
+    var pageVisible: Bool {
+        get { self[PageVisibleKey.self] }
+        set { self[PageVisibleKey.self] = newValue }
+    }
     /// The pair is in the DS layout (halves stacked at the fold).
     var duoStacked: Bool {
         get { self[DuoStackedKey.self] }
@@ -255,6 +274,8 @@ extension EnvironmentValues {
 }
 
 private struct DuoStackedKey: EnvironmentKey { static let defaultValue = false }
+private struct RailEdgeKey: EnvironmentKey { static let defaultValue: HorizontalEdge? = nil }
+private struct PageVisibleKey: EnvironmentKey { static let defaultValue = true }
 
 // MARK: - Duo page pair (swap like two apps, Nov 12)
 
@@ -402,6 +423,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         set { progress = newValue }
     }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cornerButtonsInRail) private var inRail
 
     var body: some View {
         let total = size.width
@@ -469,8 +491,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .environment(\.layoutDirection, direction)
                     // DS: the bottom half keeps clear of the corner buttons.
                     // Follows the slide, so nothing jumps mid-swap (red team).
-                    .safeAreaPadding(.trailing, stacked && paneClearsCorner ? 76 * slide : 0)
-                    .environment(\.duoCornerInset, stacked && paneClearsCorner ? 76 * slide : 0)
+                    .safeAreaPadding(.trailing, stacked && paneClearsCorner && !inRail ? 76 * slide : 0)
+                    .environment(\.duoCornerInset, stacked && paneClearsCorner && !inRail ? 76 * slide : 0)
                     .frame(width: paneW, height: paneH, alignment: .top)
                     .clipped()
                     .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: paneH),
@@ -482,8 +504,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
             }
             main()
                 .environment(\.layoutDirection, direction)
-                .safeAreaPadding(.trailing, stacked && mainClearsCorner ? 76 * (1 - slide) : 0)
-                .environment(\.duoCornerInset, stacked && mainClearsCorner ? 76 * (1 - slide) : 0)
+                .safeAreaPadding(.trailing, stacked && mainClearsCorner && !inRail ? 76 * (1 - slide) : 0)
+                .environment(\.duoCornerInset, stacked && mainClearsCorner && !inRail ? 76 * (1 - slide) : 0)
                 .frame(width: mainW, height: mainH, alignment: .top)
                 .clipped(antialiased: stacked)
                 .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: mainH),

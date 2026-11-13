@@ -24,6 +24,7 @@ struct HistoryView: View {
     @Environment(\.duoWide) private var duoWide
     @Environment(\.duoSwapped) private var duoSwapped
     @Environment(\.duoStacked) private var duoStacked
+    @Environment(\.cornerButtonsInRail) private var inRail
     @Environment(\.duoCornerInset) private var duoCornerInset
     /// On the open Duo's right page the swap and menu buttons sit in the
     /// bottom-right corner; the summary and tiles stop short of them.
@@ -31,7 +32,8 @@ struct HistoryView: View {
     /// following the swap (the List ignores the pair's safe-area padding,
     /// so the month's Saturday column sat under the buttons).
     private var cornerButtonsInset: CGFloat {
-        duoStacked ? duoCornerInset : (duoWide && !duoSwapped ? 76 : 0)
+        if inRail { return 0 }
+        return duoStacked ? duoCornerInset : (duoWide && !duoSwapped ? 76 : 0)
     }
 
     /// Sidebar visibility, persisted in the shared App Group suite (the

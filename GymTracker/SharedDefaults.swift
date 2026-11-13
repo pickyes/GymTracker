@@ -31,10 +31,15 @@ final class DuoSettings: ObservableObject {
 
     @Published var swapSides: Bool { didSet { if swapSides != oldValue { save() } } }
     @Published var showSwapButton: Bool { didSet { if showSwapButton != oldValue { save() } } }
+    /// Status bar down the side of the screen (the system's vertical bar),
+    /// with the corner buttons in that rail, instead of across the top.
+    @Published var sideStatusBar: Bool { didSet { if sideStatusBar != oldValue { save() } } }
 
     private struct Values: Codable {
         var swapSides = false
         var showSwapButton = true
+        /// Optional: files saved before this setting existed lack it.
+        var sideStatusBar: Bool? = nil
     }
 
     private static var fileURL: URL {
@@ -59,11 +64,12 @@ final class DuoSettings: ObservableObject {
         }
         swapSides = values.swapSides
         showSwapButton = values.showSwapButton
+        sideStatusBar = values.sideStatusBar ?? false
         save()
     }
 
     private func save() {
-        let values = Values(swapSides: swapSides, showSwapButton: showSwapButton)
+        let values = Values(swapSides: swapSides, showSwapButton: showSwapButton, sideStatusBar: sideStatusBar)
         guard let data = try? JSONEncoder().encode(values) else { return }
         let url = Self.fileURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

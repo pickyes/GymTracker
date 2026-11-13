@@ -49,6 +49,13 @@ struct ContentView: View {
     @State private var swapInFlight = false
     /// The software keyboard is on screen.
     @State private var keyboardShown = false
+    /// Where the system puts the vertical status bar (nil: nowhere).
+    @State private var verticalBarEdge: HorizontalEdge?
+    /// Settings → Status bar on the side, on a screen that has one: the
+    /// buttons move into a rail along that edge (DaRon, like Reddit).
+    private var rail: HorizontalEdge? { duo.sideStatusBar ? verticalBarEdge : nil }
+    private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
+    static let railWidth: CGFloat = 84
     /// The Calendar companion page's width (narrow when upright).
     @State private var companionSize: CGSize = .zero
     private var showSwapButton: Bool { duo.showSwapButton }
@@ -80,8 +87,21 @@ struct ContentView: View {
         Group {
             if store.hasCompletedOnboarding {
                 GeometryReader { proxy in
-                    ZStack(alignment: .bottomTrailing) {
+                    ZStack(alignment: rail == .leading ? .bottomLeading : .bottomTrailing) {
+                        // The rail: the system's vertical bar strip (its safe
+                        // area), topped up to the full width if it gives less.
+                        let systemRail = rail == .leading ? proxy.safeAreaInsets.leading
+                            : rail == .trailing ? proxy.safeAreaInsets.trailing : 0
+                        let extraRail = rail == nil ? 0 : max(0, Self.railWidth - systemRail)
+                        let railTotal = systemRail + extraRail
+                        // The pages stop at the rail. They're drawn edge to edge
+                        // (ignoring safe areas), and a view that touches the
+                        // safe area's edge spreads into it — so they stop 1pt
+                        // short of the rail (the rail covers that point).
                         pageStack
+                            .frame(width: rail == nil ? proxy.size.width : proxy.size.width - extraRail - 1)
+                            .frame(maxWidth: .infinity, alignment: rail == .leading ? .trailing : .leading)
+                            .environment(\.railEdge, rail)
                             .environment(\.fabBottomOffset,
                                          fabBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom,
                                                           size: proxy.size))
@@ -98,6 +118,19 @@ struct ContentView: View {
                             .blur(radius: navExpanded ? 10 : 0)
                             .saturation(navExpanded ? 0 : 1)
                             .animation(AppAnimation.snappy, value: navExpanded)
+                        // Over the pages (their backgrounds bleed to the edge).
+                        if let rail {
+                            GeometryReader { full in
+                                Rectangle()
+                                    .fill(Theme.railBackground)
+                                    .frame(width: railTotal + 1, height: full.size.height)
+                                    .position(x: rail == .leading ? (railTotal + 1) / 2 : full.size.width - (railTotal + 1) / 2,
+                                              y: full.size.height / 2)
+                            }
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                        }
                         // Content scrolling up under the status bar blurs
                         // and greys out, ombre-style (Nov 12).
                         // Smaller strip on Today and Profile (DaRon): a hard
@@ -148,7 +181,12 @@ struct ContentView: View {
                             // fabBottomPadding). The rest-timer panel
                             // shares the same right edge, stacked above
                             // the button.
-                            .padding(.trailing, fabTrailingPadding(screenWidth: proxy.size.width))
+                            .padding(rail == .leading ? .leading : .trailing,
+                                     rail != nil ? 0 : fabTrailingPadding(screenWidth: proxy.size.width))
+                            // In the rail: centered on its strip, out in the
+                            // safe area beside the pages.
+                            .offset(x: rail == nil ? 0
+                                    : (rail == .leading ? -1 : 1) * (systemRail - railTotal / 2 + 28))
                             // When the keyboard is up the safe area IS the
                             // keyboard, so the padding grows to keep the
                             // button just above it.
@@ -187,6 +225,12 @@ struct ContentView: View {
                     // Dynamic Type sizes) grew the ZStack with it, and the
                     // bottom-trailing menu button rode off the bottom edge.
                     .frame(width: proxy.size.width, height: proxy.size.height)
+                    .background {
+                        VerticalBarEdgeReader(edge: $verticalBarEdge)
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                     .background {
                         GeometryReader { steady in
                             Color.clear
@@ -428,7 +472,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 24)
                     // Clear of the swap and menu buttons on their side.
-                    .padding(.trailing, clockSide ? 56 : 0)
+                    .padding(.trailing, clockSide && rail == nil ? 56 : 0)
                     .padding(.top, 12)
                     .padding(.bottom, 20)
                     .background(Theme.background)
@@ -545,7 +589,7 @@ struct ContentView: View {
     /// layout box toward the lowest pill, so without the extra padding
     /// the blue Profile pill nearly touches the blue X.
     private var bottomStack: some View {
-        VStack(alignment: .trailing, spacing: 16) {
+        VStack(alignment: rail == .leading ? .leading : .trailing, spacing: 16) {
             if navExpanded {
                 navPills
                     .padding(.bottom, 12)
@@ -789,9 +833,12 @@ struct PageTitle: View {
 /// and open — this is the API for it (Apple Tech Talks 111462/111466,
 /// UIKit `preferredVerticalBarBehavior = .disabled`).
 struct DisableVerticalBar: ViewModifier {
+    /// Settings → Status bar on the side turns the system's vertical bar
+    /// back on (DaRon, like Reddit on the Duo).
+    @ObservedObject private var duo = DuoSettings.shared
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
-            content.toolbarVerticalBehavior(.disabled)
+            content.toolbarVerticalBehavior(duo.sideStatusBar ? .automatic : .disabled)
         } else {
             content
         }
@@ -810,7 +857,9 @@ extension View {
 private struct StillWhenHidden: ViewModifier {
     let hidden: Bool
     func body(content: Content) -> some View {
-        content.transaction { if hidden { $0.animation = nil } }
+        content
+            .transaction { if hidden { $0.animation = nil } }
+            .environment(\.pageVisible, !hidden)
     }
 }
 
@@ -823,5 +872,50 @@ private struct CompactWhen: ViewModifier {
         // One branch: an if/else rebuilt the whole page (scroll, open
         // day, open tool) every time the Duo opened or closed (red team).
         content.transformEnvironment(\.horizontalSizeClass) { if on { $0 = .compact } }
+    }
+}
+
+
+/// Reports the edge where the system puts the vertical status bar
+/// (UITraitCollection.verticalBarEdge, iOS 27.1), or nil where there is none.
+struct VerticalBarEdgeReader: UIViewRepresentable {
+    @Binding var edge: HorizontalEdge?
+
+    func makeUIView(context: Context) -> EdgeView {
+        let view = EdgeView()
+        view.onChange = { new in if edge != new { edge = new } }
+        return view
+    }
+
+    func updateUIView(_ view: EdgeView, context: Context) {
+        view.onChange = { new in if edge != new { edge = new } }
+    }
+
+    final class EdgeView: UIView {
+        var onChange: ((HorizontalEdge?) -> Void)?
+        private var last: HorizontalEdge?? = .none
+
+        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func layoutSubviews() { super.layoutSubviews(); report() }
+        override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+            super.traitCollectionDidChange(previous); report()
+        }
+
+        private func report() {
+            var value: HorizontalEdge?
+            if #available(iOS 27.1, *) {
+                switch traitCollection.verticalBarEdge {
+                case .leading: value = .leading
+                case .trailing: value = .trailing
+                default: value = nil
+                }
+            }
+            if case .some(let old) = last, old == value { return }
+            last = .some(value)
+            let send = value
+            DispatchQueue.main.async { [weak self] in
+                self?.onChange?(send)
+            }
+        }
     }
 }

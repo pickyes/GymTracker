@@ -22,6 +22,7 @@ struct NotesView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
+    @Environment(\.cornerButtonsInRail) private var inRail
     /// How far the list is scrolled, kept here so folding or unfolding
     /// (which rebuilds the list in its other container) lands on the
     /// same spot instead of the top (red team).
@@ -196,7 +197,7 @@ struct NotesView: View {
                             paneClearsCorner: false, mainClearsCorner: false) {
                     detailPane
                         // Clear of the corner buttons when on the right.
-                        .contentMargins(.trailing, swapped ? 92 : 0, for: .scrollContent)
+                        .contentMargins(.trailing, swapped && !inRail ? 92 : 0, for: .scrollContent)
                 } main: {
                     // Same black as the note page beside it.
                     listPane
@@ -791,6 +792,7 @@ private struct NoteDetailView: View {
     @State private var addingCategory = false
     @State private var newCategoryName = ""
     @FocusState private var focus: Field?
+    @Environment(\.pageVisible) private var pageVisible
     /// Pending autosave: typing saves after a short pause, not on every
     /// keystroke (each save re-sorts and writes every note).
     @State private var saveTask: Task<Void, Never>?
@@ -857,8 +859,10 @@ private struct NoteDetailView: View {
             loaded = true
             title = note.title
             bodyText = note.body
-            // A brand-new note starts with the cursor in the title.
-            if note.title.isEmpty && note.body.isEmpty {
+            // A brand-new note starts with the cursor in the title — only
+            // on screen: the hidden Notes page kept a blank note selected
+            // after a relaunch and opened the keyboard over Today.
+            if note.title.isEmpty && note.body.isEmpty && pageVisible {
                 // After the push/selection settles, or focus is dropped.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { focus = .title }
             }

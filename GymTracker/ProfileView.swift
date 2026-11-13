@@ -102,6 +102,7 @@ struct ProfileView: View {
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
+    @Environment(\.cornerButtonsInRail) private var inRail
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @EnvironmentObject var mcpServer: MCPServer
@@ -148,7 +149,7 @@ struct ProfileView: View {
                     detailPane
                         // On the right page the swap and menu buttons sit
                         // over its right edge: keep the values clear.
-                        .contentMargins(.trailing, swapped ? 92 : 0, for: .scrollContent)
+                        .contentMargins(.trailing, swapped && !inRail ? 92 : 0, for: .scrollContent)
                 } main: {
                     sidebar
                         .background(Theme.card.opacity(0.45))
