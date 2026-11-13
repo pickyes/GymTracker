@@ -35,7 +35,7 @@ struct ContentView: View {
     /// The -sampleHistory launch argument loads once, not on every appear.
     private static var sampleArgLoaded = false
     #endif
-    @ObservedObject private var hinge = HingeState.shared
+    @ObservedObject private var hinge = HingePresence.shared
     @State private var selectedPage: Page = .today
     @State private var navExpanded = false
     @State private var showCalendar = false
@@ -1305,7 +1305,7 @@ struct DisableVerticalBar: ViewModifier {
     /// back on (DaRon, like Reddit on the Duo).
     @ObservedObject private var duo = DuoSettings.shared
     /// Only on a phone that folds: a slab iPhone keeps its status bar on top.
-    @ObservedObject private var hinge = HingeState.shared
+    @ObservedObject private var hinge = HingePresence.shared
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
             content.toolbarVerticalBehavior(duo.sideStatusBar && hinge.hasHinge ? .automatic : .disabled)

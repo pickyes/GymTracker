@@ -1006,6 +1006,15 @@ extension View {
 /// the hinge at 0° when opening and stay on the whole time"). One shared
 /// value, fed from the app's root, so a pane that appears mid-opening
 /// already knows the angle instead of popping in at full brightness.
+/// Whether this phone folds, on its own (Nov 13). Pages and the root read
+/// only this; the live angle (HingeState) changes many times a second while
+/// the hinge moves, and the whole app was re-rendering on every sample —
+/// Apple: hinge data is for effects, layout follows size changes only.
+final class HingePresence: ObservableObject {
+    static let shared = HingePresence()
+    @Published fileprivate(set) var hasHinge = UserDefaults.standard.bool(forKey: "deviceHasHinge")
+}
+
 final class HingeState: ObservableObject {
     static let shared = HingeState()
     /// 0° = closed, 180° = flat. Devices without a hinge stay at 180.
@@ -1017,7 +1026,7 @@ final class HingeState: ObservableObject {
     @Published private(set) var openness: Double = 1
     /// This phone folds (it has reported a hinge), remembered across
     /// launches. Slab iPhones never set it.
-    @Published private(set) var hasHinge = UserDefaults.standard.bool(forKey: "deviceHasHinge")
+    var hasHinge: Bool { HingePresence.shared.hasHinge }
 
     /// Widest angle seen at `.fullyOpen`, remembered across launches.
     private var fullOpenDegrees: Double = {
@@ -1029,8 +1038,8 @@ final class HingeState: ObservableObject {
 
     func update(degrees deg: Double, pose: Pose) {
         degrees = deg
-        if pose != .none, !hasHinge {
-            hasHinge = true
+        if pose != .none, !HingePresence.shared.hasHinge {
+            HingePresence.shared.hasHinge = true
             UserDefaults.standard.set(true, forKey: "deviceHasHinge")
         }
         switch pose {
@@ -1069,11 +1078,9 @@ struct HingeReader: ViewModifier {
                     // No hinge in this hierarchy: show everything as open.
                     deg = 180; pose = .none
                 }
-                // Update rate is system policy, so a short critically
-                // damped spring glides between samples instead of stepping.
-                withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 1)) {
-                    HingeState.shared.update(degrees: deg, pose: pose)
-                }
+                // No animation: a sample isn't a layout change (an animated
+                // transaction per sample re-animated everything watching).
+                HingeState.shared.update(degrees: deg, pose: pose)
             }
         } else {
             content

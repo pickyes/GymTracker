@@ -23,7 +23,7 @@ struct SettingsView: View {
     /// swap itself, straight to disk, so it survives updates and power-off.
     @ObservedObject private var duo = DuoSettings.shared
     /// The Duo-only settings show only on a phone that folds.
-    @ObservedObject private var hinge = HingeState.shared
+    @ObservedObject private var hinge = HingePresence.shared
     @ObservedObject private var identity = ProfileIdentity.shared
     @State private var photoItem: PhotosPickerItem?
     @State private var pendingSample: SampleProfile?
