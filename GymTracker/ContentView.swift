@@ -144,7 +144,14 @@ struct ContentView: View {
 
     /// Labels unless a running rest pill needs the room.
     private var railLabeled: Bool {
-        let free = steadySize.height - railTop - railListHeight(labeled: true) - railButtonsHeight - railBottom
+        // Folded and open sideways decide together, from the tighter of the
+        // two (the open screen is a touch shorter and has the swap button),
+        // so every icon sits at the same height when the phone opens. Only
+        // the tall upright open screen has room for labels.
+        let upright = Self.isWide(steadySize) && steadySize.height > steadySize.width
+        let height = upright ? steadySize.height : min(steadySize.height, 669)
+        let buttons = upright ? railButtonsHeight : 56 + 16 + (showSwapButton ? 56 + 16 : 0)
+        let free = height - railTop - railListHeight(labeled: true) - buttons - railBottom
         // Same on every page (icons only whenever the tallest case needs
         // it), so switching pages never re-lays out the list.
         return free - 72 >= (restActive && !navExpanded ? 56 : 0)
@@ -165,17 +172,12 @@ struct ContentView: View {
         if store.canGoBack.contains(selectedPage.rawValue) {
             Button { store.requestBack(selectedPage.rawValue) } label: {
                 Image(systemName: "chevron.left")
-                    .font(cameraAtTop ? .subheadline.weight(.bold) : .title3.weight(.bold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
-                    // Folded, the camera pushes the status icons down into
-                    // the top of this slot: a smaller button at the slot's
-                    // bottom stays clear of them.
-                    .frame(width: cameraAtTop ? 30 : 52, height: cameraAtTop ? 30 : 52)
+                    .frame(width: 52, height: 52)
                     .liquidGlass(Circle())
             }
             .buttonStyle(PressSqueeze())
-            .frame(width: 52, height: 52, alignment: .bottom)
-            .contentShape(Rectangle())
             .accessibilityLabel("Back")
             .transition(.scale.combined(with: .opacity))
         }
@@ -399,9 +401,16 @@ struct ContentView: View {
                                 VStack(spacing: railLabeled ? 6 : 4) {
                                     // A real 52pt slot whether Back shows or not (an
                                     // empty `if` collapsed it, so the icons moved).
-                                    ZStack { Color.clear; railBackButton }
-                                        .frame(width: 52, height: 52)
+                                    // The same empty space above the pages in every
+                                    // pose, so the page icons sit level folded and
+                                    // open (the camera pushes the status icons into
+                                    // it when folded).
+                                    Color.clear.frame(width: 52, height: 52)
                                     ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled, width: railItemWidth) }
+                                    // Back sits under Profile (DaRon), full size,
+                                    // clear of the status icons. It's the last item,
+                                    // so showing it never moves the page icons.
+                                    railBackButton
                                 }
                                     .frame(width: iconCenter * 2)
                                     // One spot in every pose, below the status icons
