@@ -158,7 +158,11 @@ struct TodayView: View {
                 let padsPair = systemSideBar && screenIsOpen
                 todayContent(kind: rawKind)
                     .environment(\.sideBarInset, !padsPair)
-                    .padding(sideBarEdge == .leading ? .leading : .trailing, padsPair ? ContentView.railWidth : 0)
+                    // iOS already insets the open pages for its bar (measured:
+                    // 84pt). The pages only honor that once they stop touching
+                    // the edge, so a hairline is enough; a full inset of our
+                    // own doubled the gap beside the right page.
+                    .padding(sideBarEdge == .leading ? .leading : .trailing, padsPair ? 1 : 0)
                     // Pin to the real page height (see PageContainerSizeKey):
                     // on the outer screen held sideways the stack measures
                     // taller than the display, which pushed the bottom of
