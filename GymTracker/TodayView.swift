@@ -145,8 +145,12 @@ struct TodayView: View {
                     // (contentBottomPadding), so the body pane and the
                     // fixed layouts stay put.
                     .ignoresSafeArea(.keyboard)
-                    // No animation here, except the swap-sides slide.
-                    .transaction { if !$0.duoSwap { $0.animation = nil } }
+                    // No animation when the fold or the size changes (no
+                    // morph). Only then: blocking every change here also
+                    // snapped the keyboard padding, scrolls and the body
+                    // pane's front/back turn (red team, animations).
+                    .transaction(value: rawKind) { $0.animation = nil }
+                    .transaction(value: proxy.size) { $0.animation = nil }
                     // Calendar open: the page behind blurs and goes black
                     // and white, like behind the open menu (DaRon, Nov 12).
                     .blur(radius: showCalendarDropdown ? 3 : 0)  // light: the page stays readable behind it

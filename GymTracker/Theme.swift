@@ -247,7 +247,14 @@ extension EnvironmentValues {
         get { self[DuoSwapProgressKey.self] }
         set { self[DuoSwapProgressKey.self] = newValue }
     }
+    /// The pair is in the DS layout (halves stacked at the fold).
+    var duoStacked: Bool {
+        get { self[DuoStackedKey.self] }
+        set { self[DuoStackedKey.self] = newValue }
+    }
 }
+
+private struct DuoStackedKey: EnvironmentKey { static let defaultValue = false }
 
 // MARK: - Duo page pair (swap like two apps, Nov 12)
 
@@ -305,7 +312,9 @@ struct DuoPagePair<Pane: View, Main: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            let s = steady.width > 0 ? steady : geo.size
+            // A width change (unfold, rotate) is never the keyboard: use the
+            // live size at once, or one frame drew the old layout (red team).
+            let s = steady.width > 0 && abs(steady.width - geo.size.width) < 1 ? steady : geo.size
             let stacked = wide && stacksWhenTall && s.height > s.width
             // Open and upright (DaRon: Nintendo DS style): one page on
             // each half, top and bottom of the fold; the companion page is
@@ -420,8 +429,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 pane()
                     .environment(\.layoutDirection, direction)
                     // DS: the bottom half keeps clear of the corner buttons.
-                    .safeAreaPadding(.trailing, stacked && slide >= 0.5 && paneClearsCorner ? 76 : 0)
-                    .environment(\.duoCornerInset, stacked && slide >= 0.5 && paneClearsCorner ? 76 : 0)
+                    // Follows the slide, so nothing jumps mid-swap (red team).
+                    .safeAreaPadding(.trailing, stacked && paneClearsCorner ? 76 * slide : 0)
+                    .environment(\.duoCornerInset, stacked && paneClearsCorner ? 76 * slide : 0)
                     .frame(width: paneW, height: pageH, alignment: .top)
                     .clipped()
                     .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: pageH),
@@ -433,8 +443,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
             }
             main()
                 .environment(\.layoutDirection, direction)
-                .safeAreaPadding(.trailing, stacked && slide < 0.5 && mainClearsCorner ? 76 : 0)
-                .environment(\.duoCornerInset, stacked && slide < 0.5 && mainClearsCorner ? 76 : 0)
+                .safeAreaPadding(.trailing, stacked && mainClearsCorner ? 76 * (1 - slide) : 0)
+                .environment(\.duoCornerInset, stacked && mainClearsCorner ? 76 * (1 - slide) : 0)
                 .frame(width: mainW, height: pageH, alignment: .top)
                 .clipped(antialiased: stacked)
                 .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: pageH),
@@ -459,17 +469,26 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // color and fades into the page as it nears the hinge.
                 FoldFade(width: total)
                     .offset(y: halfH - FoldFade.reach)
-                    .opacity(1 - min(1, lift * 3))
+                    // Off for the whole swap, never half faded: a blend
+                    // under a partial opacity draws a grey band (red team).
+                    .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                     .zIndex(2)
             }
         }
         .frame(width: total, height: size.height, alignment: .topLeading)
+        // One solid layer: the fold's black-and-white strip blends with the
+        // pages under it. Without a solid backdrop, a page fading in (page
+        // switch) left it blending with nothing, so it showed as a grey
+        // band and then popped back (red team, animations).
+        .background(stacked ? Theme.background : Color.clear)
+        .compositingGroup()
         .opacity(calm && wide ? abs(1 - 2 * p) * 0.85 + 0.15 : 1)
         .environment(\.layoutDirection, .leftToRight)
         // -1 = not in a pair (the + button falls back to duoSwapped).
         .environment(\.duoSwapProgress, wide ? slide : -1)
+        .environment(\.duoStacked, stacked)
     }
 }
 

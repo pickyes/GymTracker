@@ -23,9 +23,16 @@ struct HistoryView: View {
     /// doesn't repeat it.
     @Environment(\.duoWide) private var duoWide
     @Environment(\.duoSwapped) private var duoSwapped
+    @Environment(\.duoStacked) private var duoStacked
+    @Environment(\.duoCornerInset) private var duoCornerInset
     /// On the open Duo's right page the swap and menu buttons sit in the
     /// bottom-right corner; the summary and tiles stop short of them.
-    private var cornerButtonsInset: CGFloat { duoWide && !duoSwapped ? 76 : 0 }
+    /// Clear of the swap and menu buttons. DS: only on the bottom half,
+    /// following the swap (the List ignores the pair's safe-area padding,
+    /// so the month's Saturday column sat under the buttons).
+    private var cornerButtonsInset: CGFloat {
+        duoStacked ? duoCornerInset : (duoWide && !duoSwapped ? 76 : 0)
+    }
 
     /// Sidebar visibility, persisted in the shared App Group suite (the
     /// migration in WorkoutStore.init moves this key there with the rest).
@@ -82,7 +89,9 @@ struct HistoryView: View {
                 // Calendar, legend, and the month at a glance (Nov 12
                 // layout DaRon picked: calendar with the stuff below it).
                 CalendarView(externalSelection: $selectedDay, gridOnly: true, showsMonthSummary: true,
-                             summaryTrailingInset: cornerButtonsInset)
+                             summaryTrailingInset: duoStacked ? 0 : cornerButtonsInset)
+                    // DS bottom half: the whole month steps clear.
+                    .padding(.trailing, duoStacked ? cornerButtonsInset : 0)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)

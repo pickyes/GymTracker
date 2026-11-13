@@ -119,7 +119,9 @@ struct ContentView: View {
                             StatusBarOmbre(height: 22)  // a soft fade along the top edge only
                         }
                         .opacity(swapInFlight ? 0 : 1)
-                        .animation(.easeInOut(duration: 0.12), value: swapInFlight)
+                        // On or off, never half faded: a blend under a
+                        // partial opacity draws a grey band (red team).
+                        .transaction { $0.animation = nil }
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)
@@ -243,7 +245,9 @@ struct ContentView: View {
             // The keyboard-free size, unless it's not measured yet or came
             // back degenerate (a zero height blanked the whole Today page).
             let steadyOK = steadySize.width > 200 && steadySize.height > 200
-            let size = steadyOK ? steadySize : geo.size
+            // A width change (unfold, rotate) is never the keyboard: take
+            // the live size at once instead of a frame late (red team).
+            let size = steadyOK && abs(steadySize.width - geo.size.width) < 1 ? steadySize : geo.size
             let wide = Self.isWide(size)
             ZStack {
                 TodayView()
@@ -252,6 +256,7 @@ struct ContentView: View {
                     // scrolls clear of it); the page as a whole doesn't get
                     // squeezed or lifted, so the body pane stays in place.
                     .ignoresSafeArea(.keyboard)
+                    .modifier(StillWhenHidden(hidden: selectedPage != .today))
                     .opacity(selectedPage == .today ? 1 : 0)
                     .allowsHitTesting(selectedPage == .today)
                     .accessibilityHidden(selectedPage != .today)
@@ -341,6 +346,7 @@ struct ContentView: View {
     @ViewBuilder
     private func fullPage<Main: View>(_ page: Page, @ViewBuilder main: () -> Main) -> some View {
         main()
+            .modifier(StillWhenHidden(hidden: selectedPage != page))
             .opacity(selectedPage == page ? 1 : 0)
             .allowsHitTesting(selectedPage == page)
             .accessibilityHidden(selectedPage != page)
@@ -370,6 +376,7 @@ struct ContentView: View {
             mainPage
                 .modifier(CompactWhen(wide))
         }
+        .modifier(StillWhenHidden(hidden: selectedPage != page))
         .opacity(selectedPage == page ? 1 : 0)
         .allowsHitTesting(selectedPage == page)
         .accessibilityHidden(selectedPage != page)
@@ -791,12 +798,23 @@ extension View {
 }
 
 
+/// Hidden pages take every change at once: a swap used to run the slide
+/// on all the pages, visible or not, and dropped frames (red team).
+private struct StillWhenHidden: ViewModifier {
+    let hidden: Bool
+    func body(content: Content) -> some View {
+        content.transaction { if hidden { $0.animation = nil } }
+    }
+}
+
 /// Forces the compact size class only when `on`, so a page kept at the
 /// folded width on the open Duo lays out exactly as it does folded.
 private struct CompactWhen: ViewModifier {
     let on: Bool
     init(_ on: Bool) { self.on = on }
     func body(content: Content) -> some View {
-        if on { content.environment(\.horizontalSizeClass, .compact) } else { content }
+        // One branch: an if/else rebuilt the whole page (scroll, open
+        // day, open tool) every time the Duo opened or closed (red team).
+        content.transformEnvironment(\.horizontalSizeClass) { if on { $0 = .compact } }
     }
 }
