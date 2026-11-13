@@ -505,6 +505,14 @@ struct ContentView: View {
             }
         }
         .disableVerticalBar()
+        #if DEBUG
+        // Testing: launch with -sampleHistory veteran|regular|newLifter.
+        .onAppear {
+            let args = CommandLine.arguments
+            if let i = args.firstIndex(of: "-sampleHistory"), i + 1 < args.count,
+               let p = SampleProfile(rawValue: args[i + 1]) { store.loadSampleHistory(p) }
+        }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
             let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
             withAnimation(AppAnimation.snappy) { keyboardShown = true; keyboardHeight = frame.height }

@@ -26,6 +26,7 @@ struct StrengthGraphView: View {
     @State private var selection: LiftSelection = .overall
     @State private var scrubDate: Date?
     @State private var exportRequest: ExportRequest?
+    @State private var pointsCache = PointsCache()
 
     enum TimeRange: String, CaseIterable {
         case oneWeek = "1W"
@@ -331,9 +332,15 @@ struct StrengthGraphView: View {
             .chartXSelection(value: $scrubDate)
             .chartYScale(domain: yDomain)
             .chartXAxis {
-                AxisMarks(values: .stride(by: .month, count: 1)) { value in
+                // Fewer labels the longer the span (3 years of months ran
+                // together into an unreadable smear).
+                AxisMarks(values: .stride(by: .month, count: axisMonthStep)) { value in
                     AxisGridLine().foregroundStyle(Theme.border)
-                    AxisValueLabel(format: .dateTime.month(.abbreviated))
+                    if axisMonthStep >= 6 {
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits))
+                    } else {
+                        AxisValueLabel(format: .dateTime.month(.abbreviated))
+                    }
                 }
             }
             .chartYAxis {
@@ -479,14 +486,24 @@ struct StrengthGraphView: View {
     /// One point per day (best that day). Explicit loops — the chained
     /// flatMap/filter/map forms time out the Swift 6 type checker.
     private var actualPoints: [GraphPoint] {
+        // Worked out once per (history, lift, range), not on every read:
+        // body reads this ~15 times a frame, which froze the app with
+        // years of data (3-year test profile).
+        let key = PointsCache.Key(count: store.sessions.count, newest: store.sessions.first?.id,
+                                  oldest: store.sessions.last?.id, selection: "\(selection)",
+                                  range: "\(range)", unit: "\(store.settings.weightUnit)")
+        if let hit = pointsCache.get(key) { return hit }
         let cutoff = rangeCutoff
         let sessions = store.sessions.sorted { $0.date < $1.date }
+        let points: [GraphPoint]
         switch selection {
         case .overall:
-            return overallPoints(sessions: sessions, cutoff: cutoff)
+            points = overallPoints(sessions: sessions, cutoff: cutoff)
         case .exercise(let id, _):
-            return exercisePoints(sessions: sessions, cutoff: cutoff, exerciseId: id)
+            points = exercisePoints(sessions: sessions, cutoff: cutoff, exerciseId: id)
         }
+        pointsCache.set(key, points)
+        return points
     }
 
     private func exercisePoints(sessions: [SessionLog], cutoff: Date?, exerciseId: String) -> [GraphPoint] {
@@ -509,12 +526,39 @@ struct StrengthGraphView: View {
         return points
     }
 
+    /// Months between x-axis labels, from the span shown.
+    private var axisMonthStep: Int {
+        guard let first = actualPoints.first?.date else { return 1 }
+        let months = Calendar.current.dateComponents([.month], from: first, to: Date()).month ?? 0
+        switch months {
+        case ..<7: return 1
+        case ..<13: return 2
+        case ..<25: return 4
+        default: return 6
+        }
+    }
+
     private func overallPoints(sessions: [SessionLog], cutoff: Date?) -> [GraphPoint] {
+        // Only plot once every group this history ever trains has a value:
+        // the first sessions counted one group, so the line (and the "+%")
+        // started far too low.
+        var everGroups = Set<MuscleGroup>()
+        for session in sessions {
+            for (muscle, ids) in Self.overallGroups where !everGroups.contains(muscle) {
+                if ids.contains(where: { id in session.exercises.contains { $0.exerciseId == id } }),
+                   ids.contains(where: { sessionOneRM(session: session, exerciseId: $0) != nil }) {
+                    everGroups.insert(muscle)
+                }
+            }
+        }
         var carry: [MuscleGroup: Double] = [:]
         var byDay: [Date: Double] = [:]
         let calendar = Calendar.current
         for session in sessions {
-            if let cutoff, session.date < cutoff { continue }
+            // Sessions before the range still set each group's carried
+            // value (only their points are skipped): starting from zero
+            // made a short range open with a false climb (3-year test).
+            let beforeRange = cutoff.map { session.date < $0 } ?? false
             for (muscle, ids) in Self.overallGroups {
                 var best: Double = 0
                 for id in ids {
@@ -524,6 +568,8 @@ struct StrengthGraphView: View {
                 }
                 if best > 0 { carry[muscle] = best }
             }
+            if beforeRange { continue }
+            guard Set(carry.keys).isSuperset(of: everGroups) else { continue }
             var total: Double = 0
             for (_, v) in carry { total += v }
             guard total > 0 else { continue }
@@ -599,4 +645,18 @@ struct StrengthGraphView: View {
         }
         return projected
     }
+}
+
+
+/// Holds the last computed graph points (a reference, so filling it
+/// while body runs never triggers another update).
+final class PointsCache {
+    struct Key: Equatable {
+        var count: Int; var newest: UUID?; var oldest: UUID?
+        var selection: String; var range: String; var unit: String
+    }
+    private var key: Key?
+    private var value: [GraphPoint] = []
+    func get(_ k: Key) -> [GraphPoint]? { key == k ? value : nil }
+    func set(_ k: Key, _ v: [GraphPoint]) { key = k; value = v }
 }

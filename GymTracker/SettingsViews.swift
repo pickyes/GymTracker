@@ -21,6 +21,7 @@ struct SettingsView: View {
     @ObservedObject private var duo = DuoSettings.shared
     @ObservedObject private var identity = ProfileIdentity.shared
     @State private var photoItem: PhotosPickerItem?
+    @State private var pendingSample: SampleProfile?
     /// Extra sections at the end (Profile puts Privacy & About here).
     var trailingSections: AnyView? = nil
     /// Sections at the top (Profile puts its header card here).
@@ -29,6 +30,27 @@ struct SettingsView: View {
     var body: some View {
         Form {
             if let leadingSections { leadingSections }
+            Section {
+                ForEach(SampleProfile.allCases) { profile in
+                    Button("Load \(profile.label)") { pendingSample = profile }
+                }
+                if store.hasSampleBackup {
+                    Button("Restore my real data") { store.restoreRealHistory() }
+                }
+            } header: {
+                Text("Test data")
+            } footer: {
+                Text("Fills the app with a simulated training history to try it with lots of data. Your real workouts are kept safe and come back with Restore.")
+            }
+            .confirmationDialog("Replace the history with \(pendingSample?.label ?? "")?",
+                                isPresented: Binding(get: { pendingSample != nil }, set: { if !$0 { pendingSample = nil } }),
+                                titleVisibility: .visible) {
+                Button("Load sample data") {
+                    if let p = pendingSample { store.loadSampleHistory(p) }
+                    pendingSample = nil
+                }
+                Button("Cancel", role: .cancel) { pendingSample = nil }
+            }
             Section("Rest timer") {
                 HStack {
                     Text("Default rest")

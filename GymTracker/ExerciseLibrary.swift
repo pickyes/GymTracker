@@ -238,13 +238,18 @@ struct LibraryExercise: Identifiable, Codable, Equatable {
 // MARK: - The library (1635 exercises)
 
 enum ExerciseLibrary {
+    /// Id → exercise, built once: a linear scan of 1,635 entries per
+    /// lookup froze the Strength graph with years of history.
+    private static let index: [String: LibraryExercise] =
+        Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
     static func byId(_ id: String) -> LibraryExercise? {
-        all.first { $0.id == id }
+        index[id]
     }
 
     /// Look up an exercise including user-created customs.
     static func byId(_ id: String, plus customs: [CustomExercise]) -> LibraryExercise? {
-        if let lib = all.first(where: { $0.id == id }) { return lib }
+        if let lib = index[id] { return lib }
         return customs.first(where: { $0.id == id }).map { LibraryExercise(from: $0) }
     }
 

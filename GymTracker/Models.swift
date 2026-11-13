@@ -2154,7 +2154,9 @@ final class WorkoutStore: ObservableObject {
     /// as `oneRepMax(for:)`, so the strength graph and History can
     /// never disagree about what a session's max was.
     func sessionOneRepMax(session: SessionLog, exerciseId: String) -> Double? {
-        guard ExerciseLibrary.byId(exerciseId, plus: customExercises)?.isCompound == true else { return nil }
+        // Cheap check first: most sessions don't have this exercise.
+        guard session.exercises.contains(where: { $0.exerciseId == exerciseId }),
+              ExerciseLibrary.byId(exerciseId, plus: customExercises)?.isCompound == true else { return nil }
         var best: Double = 0
         for exercise in session.exercises where exercise.exerciseId == exerciseId {
             if let oneRM = bestValidOneRepMax(in: exercise.sets, isCompound: true), oneRM > best {
@@ -3603,6 +3605,12 @@ final class WorkoutStore: ObservableObject {
             .deliverImmediately)
     }
 
+    /// For the sample-history loader (persists sessions and setup date).
+    func persistSessionsForSample() {
+        persistSessions()
+        persistSetupDate()
+    }
+
     private func persistSessions() {
         if let data = try? JSONEncoder().encode(sessions) {
             SharedDefaults.store.set(data, forKey: sessionsKey)
@@ -3690,4 +3698,94 @@ func weightLabel(_ weightLb: Double?, isPair: Bool, unit: WeightUnit) -> String 
         return isPair ? "\(Int(display))s" : "\(Int(display)) \(unit.label)"
     }
     return isPair ? "\(roundedWeightText(display))s" : "\(roundedWeightText(display)) \(unit.label)"
+}
+
+// MARK: - Sample history (Settings → Test data)
+
+/// Simulated training histories for testing the app with lots of data.
+/// Your real sessions are backed up first and can be restored.
+enum SampleProfile: String, CaseIterable, Identifiable {
+    case newLifter, regular, veteran
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .newLifter: return "New lifter · 3 months"
+        case .regular: return "Regular · 1 year"
+        case .veteran: return "Veteran · 3 years"
+        }
+    }
+    var days: Int { switch self { case .newLifter: 90; case .regular: 365; case .veteran: 1095 } }
+    /// Chance of training on a planned day.
+    var consistency: Double { switch self { case .newLifter: 0.7; case .regular: 0.82; case .veteran: 0.9 } }
+}
+
+extension WorkoutStore {
+    private static let sampleBackupKey = "gymtracker.sampleBackup.sessions.v1"
+    private static let sampleBackupSetupKey = "gymtracker.sampleBackup.setup.v1"
+
+    /// A backup of your own data exists (a sample is loaded).
+    var hasSampleBackup: Bool { SharedDefaults.store.data(forKey: Self.sampleBackupKey) != nil }
+
+    /// Replaces the history with a simulated one for `profile`.
+    func loadSampleHistory(_ profile: SampleProfile) {
+        if !hasSampleBackup, let data = try? JSONEncoder().encode(sessions) {
+            SharedDefaults.store.set(data, forKey: Self.sampleBackupKey)
+            SharedDefaults.store.set(setupDate?.timeIntervalSince1970 ?? 0, forKey: Self.sampleBackupSetupKey)
+        }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var rng = SystemRandomNumberGenerator()
+        var out: [SessionLog] = []
+        // Per exercise: current working weight, grows slowly.
+        var weights: [String: Double] = [:]
+        // A couple of week-long breaks a year (holidays, sickness).
+        var breakUntil: Date?
+        for back in stride(from: profile.days, through: 1, by: -1) {
+            guard let day = cal.date(byAdding: .day, value: -back, to: today),
+                  let plan = programDay(for: day) else { continue }
+            if let b = breakUntil, day < b { continue }
+            if Double.random(in: 0...1, using: &rng) < 0.012 {
+                breakUntil = cal.date(byAdding: .day, value: Int.random(in: 5...12, using: &rng), to: day)
+                continue
+            }
+            guard Double.random(in: 0...1, using: &rng) < profile.consistency else { continue }
+            let week = (profile.days - back) / 7
+            let deload = week > 0 && week % 8 == 7
+            var exercises: [ExerciseLog] = []
+            for t in plan.exercises {
+                let start = t.defaultWeightLb ?? (t.isPair ? 25 : 45)
+                var w = weights[t.id] ?? max(5, (start * 0.6 / 5).rounded() * 5)
+                // Small, steady gains that slow over time.
+                if Double.random(in: 0...1, using: &rng) < 0.18 / (1 + Double(week) / 52) {
+                    w += t.isPair ? 2.5 : 5
+                }
+                weights[t.id] = w
+                let load = deload ? (w * 0.8 / 2.5).rounded() * 2.5 : w
+                let lowReps = Int(t.repRange.split(separator: "–").first.map(String.init) ?? "") ?? max(1, t.topReps - 4)
+                let sets = (0..<t.sets).map { i -> SetLog in
+                    let reps = max(1, min(t.topReps, Int.random(in: lowReps...max(lowReps, t.topReps), using: &rng) - i / 2))
+                    return SetLog(weightLb: t.isBodyweight ? nil : load, reps: reps, done: true)
+                }
+                exercises.append(ExerciseLog(exerciseId: t.id, name: t.name, isPair: t.isPair, sets: sets))
+            }
+            let time = cal.date(bySettingHour: Int.random(in: 6...19, using: &rng), minute: Int.random(in: 0...59, using: &rng), second: 0, of: day) ?? day
+            out.append(SessionLog(id: UUID(), date: time, dayKey: plan.key, dayTitle: plan.title,
+                                  exercises: exercises, finisherDone: Bool.random(using: &rng), finisherNotes: ""))
+        }
+        sessions = out.sorted { $0.date > $1.date }
+        setupDate = cal.date(byAdding: .day, value: -profile.days, to: today)
+        persistSessionsForSample()
+    }
+
+    /// Puts your own history back.
+    func restoreRealHistory() {
+        guard let data = SharedDefaults.store.data(forKey: Self.sampleBackupKey),
+              let saved = try? JSONDecoder().decode([SessionLog].self, from: data) else { return }
+        sessions = saved
+        let t = SharedDefaults.store.double(forKey: Self.sampleBackupSetupKey)
+        setupDate = t > 0 ? Date(timeIntervalSince1970: t) : nil
+        SharedDefaults.store.removeObject(forKey: Self.sampleBackupKey)
+        SharedDefaults.store.removeObject(forKey: Self.sampleBackupSetupKey)
+        persistSessionsForSample()
+    }
 }
