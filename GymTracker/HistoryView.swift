@@ -19,6 +19,14 @@ struct HistoryView: View {
     /// D6 (2026-11-10): the session awaiting delete confirmation —
     /// set by the row swipe action or the detail trash button.
     @State private var sessionToDelete: SessionLog?
+    /// All sessions: folded away or open, and how it's sorted and
+    /// filtered. Remembered between launches.
+    @AppStorage("gymtracker.sessionsCollapsed.v1", store: SharedDefaults.shared) private var sessionsCollapsed = false
+    @AppStorage("gymtracker.sessionsSort.v1", store: SharedDefaults.shared) private var sessionsSortRaw = SessionSort.newest.rawValue
+    @AppStorage("gymtracker.sessionsRange.v1", store: SharedDefaults.shared) private var sessionsRangeRaw = SessionRange.all.rawValue
+    /// The workout shown ("" = every workout). Not saved: a filter left on
+    /// from last week would hide sessions with no clue why.
+    @State private var sessionsWorkout = ""
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     /// Open Duo: the chosen day lives on the other page, so this page
     /// doesn't repeat it.
@@ -133,14 +141,20 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
-                listHeading(Text("All sessions"))
-                Group {
+                let shown = shownSessions
+                sessionsHeader(shown: shown.count)
+                if !sessionsCollapsed {
                     if store.sessions.isEmpty {
                         Text("No sessions yet — finish a workout from Today and it will show up here.")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
+                    } else if shown.isEmpty {
+                        Text("No sessions match these filters.")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                            .listRowSeparator(.hidden)
                     }
-                    ForEach(store.sessions) { session in
+                    ForEach(shown) { session in
                         SessionRowView(session: session)
                             .tag(session.id)
                             // D6: swipe to delete — the only way to remove
@@ -313,6 +327,113 @@ struct HistoryView: View {
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 4, trailing: 16))
             .listRowBackground(Color.clear)
+    }
+
+    // MARK: - All sessions: collapse, sort, filter
+
+    private var sessionsSort: SessionSort { SessionSort(rawValue: sessionsSortRaw) ?? .newest }
+    private var sessionsRange: SessionRange { SessionRange(rawValue: sessionsRangeRaw) ?? .all }
+    private var sessionsFiltered: Bool { sessionsRange != .all || !sessionsWorkout.isEmpty }
+
+    /// Workout names that have sessions, most trained first.
+    private var workoutNames: [String] {
+        var counts: [String: Int] = [:]
+        for session in store.sessions { counts[session.dayTitle, default: 0] += 1 }
+        return counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
+    }
+
+    /// The sessions to list, filtered then sorted. `store.sessions` is
+    /// already newest first, so the default costs nothing.
+    private var shownSessions: [SessionLog] {
+        var list = store.sessions
+        if let cutoff = sessionsRange.cutoff() { list = list.filter { $0.date >= cutoff } }
+        if !sessionsWorkout.isEmpty { list = list.filter { $0.dayTitle == sessionsWorkout } }
+        switch sessionsSort {
+        case .newest:
+            return list
+        case .oldest:
+            return list.reversed()
+        case .volume:
+            // Each volume worked out once, not once per comparison.
+            return list.map { ($0, volumeLb(for: $0.exercises)) }
+                .sorted { $0.1 > $1.1 }.map(\.0)
+        case .sets:
+            return list.map { ($0, $0.exercises.reduce(0) { $0 + $1.sets.filter(\.done).count }) }
+                .sorted { $0.1 > $1.1 }.map(\.0)
+        }
+    }
+
+    /// "All sessions" as a row: tap to fold the list away or open it; the
+    /// menu on the right sorts and filters it.
+    private func sessionsHeader(shown: Int) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(AppAnimation.snappy) { sessionsCollapsed.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.bold))
+                        .rotationEffect(.degrees(sessionsCollapsed ? 0 : 90))
+                    Text("All sessions")
+                        .font(.headline)
+                    Text(sessionsFiltered ? "\(shown) of \(store.sessions.count)" : "\(store.sessions.count)")
+                        .font(.subheadline)
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(Theme.secondaryText)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("All sessions, \(shown) shown")
+            .accessibilityValue(sessionsCollapsed ? "Collapsed" : "Expanded")
+            .accessibilityHint(sessionsCollapsed ? "Shows the list" : "Hides the list")
+            .accessibilityAddTraits(.isHeader)
+
+            Menu {
+                Picker("Sort by", selection: $sessionsSortRaw) {
+                    ForEach(SessionSort.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                Picker("When", selection: $sessionsRangeRaw) {
+                    ForEach(SessionRange.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                Picker("Workout", selection: $sessionsWorkout) {
+                    Text("Every workout").tag("")
+                    ForEach(workoutNames, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.menu)
+                if sessionsFiltered {
+                    Button("Clear filters", role: .destructive) {
+                        sessionsRangeRaw = SessionRange.all.rawValue
+                        sessionsWorkout = ""
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: sessionsFiltered
+                          ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    Text(sessionsSort.short)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(Color.accentColor)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Sort and filter sessions")
+            .accessibilityValue(sessionsFiltered ? "\(sessionsSort.label), filtered" : sessionsSort.label)
+        }
+        // Clear of the corner buttons on the open Duo's right page.
+        .padding(.trailing, cornerButtonsInset)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 16))
+        .listRowBackground(Color.clear)
+        // The filtered-away workout no longer exists (deleted, renamed).
+        .onChange(of: store.sessions.count) { _, _ in
+            if !sessionsWorkout.isEmpty, !store.sessions.contains(where: { $0.dayTitle == sessionsWorkout }) {
+                sessionsWorkout = ""
+            }
+        }
     }
 
     private func toolTile(_ title: String, systemImage: String) -> some View {
@@ -1275,3 +1396,52 @@ func liftWeightText(_ lb: Double, isPair: Bool, unit: WeightUnit) -> String {
 
 /// The Calendar page's tool tiles that open a page.
 enum HistoryTool: Hashable { case strength, body }
+
+
+// MARK: - All sessions: sort and filter choices
+
+enum SessionSort: String, CaseIterable, Identifiable {
+    case newest, oldest, volume, sets
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .newest: return "Newest first"
+        case .oldest: return "Oldest first"
+        case .volume: return "Most weight lifted"
+        case .sets: return "Most sets"
+        }
+    }
+    /// Beside the filter icon.
+    var short: String {
+        switch self {
+        case .newest: return "Newest"
+        case .oldest: return "Oldest"
+        case .volume: return "Weight"
+        case .sets: return "Sets"
+        }
+    }
+}
+
+enum SessionRange: String, CaseIterable, Identifiable {
+    case all, month, quarter, year
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: return "All time"
+        case .month: return "Last 30 days"
+        case .quarter: return "Last 3 months"
+        case .year: return "Last 12 months"
+        }
+    }
+    /// Sessions on or after this date count; nil = no limit.
+    func cutoff(now: Date = Date()) -> Date? {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: now)
+        switch self {
+        case .all: return nil
+        case .month: return cal.date(byAdding: .day, value: -30, to: start)
+        case .quarter: return cal.date(byAdding: .month, value: -3, to: start)
+        case .year: return cal.date(byAdding: .year, value: -1, to: start)
+        }
+    }
+}
