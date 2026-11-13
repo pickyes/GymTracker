@@ -667,11 +667,10 @@ enum AppAnimation {
     static let quick = Animation.easeOut(duration: 0.2)
     /// For page/step transitions (quiz, FAB menu, sheet content).
     static let page = Animation.spring(response: 0.3, dampingFraction: 0.85)
-    /// Fold/unfold morph: a touch longer than snappy so the body and the
-    /// current card have time to glide into their new panes instead of
-    /// snapping. (DaRon 21:53: the app must take full use of the
-    /// open/close animation.)
-    static let fold = Animation.spring(response: 0.45, dampingFraction: 0.85)
+    /// Press feedback: a quick squeeze that springs back (side bar
+    /// buttons, the selected page icon).
+    static let press = Animation.spring(response: 0.25, dampingFraction: 0.6)
+    // Folding and unfolding: FoldAnimation.morph (Theme.swift).
 }
 
 struct UserProfile: Codable, Equatable {

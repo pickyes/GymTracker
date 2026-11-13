@@ -1202,8 +1202,8 @@ struct TodayView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(16)
-        .themeCard(cornerRadius: 20)
-        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .themeCard()
+        .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
             withAnimation(AppAnimation.snappy) { progressShowsExercises.toggle() }
         }
@@ -2600,9 +2600,9 @@ struct RestTimerCard: View {
                 .padding(.vertical, large ? 16 : 8)
                 // Pill mode, opened: a fixed-width panel above the button.
                 .frame(width: pill ? 340 : nil, alignment: .leading)
-                .background(Theme.card)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+                // Opened from the pill: real Liquid Glass, like the pill and
+                // the buttons around it (DaRon), not a flat card.
+                .liquidGlass(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
             // D33: collapsed state is per-rest — a new rest re-expands
@@ -2615,8 +2615,11 @@ struct RestTimerCard: View {
                 // cancels this task — it restarts on resume.
                 guard playsFeedback, let endsAt = store.restEndsAt else { return }
                 let untilEnd = endsAt.timeIntervalSinceNow
+                // A cancelled wait must stop here (opening or folding the
+                // Duo rebuilds this view and cancels the task): carrying
+                // on chimed and ended the rest early (DaRon).
                 if untilEnd > 0 {
-                    try? await Task.sleep(for: .seconds(untilEnd))
+                    do { try await Task.sleep(for: .seconds(untilEnd)) } catch { return }
                     await MainActor.run {
                         // Late wake-up (the app was in the background when
                         // it ended): the notification already alerted —
@@ -2626,7 +2629,7 @@ struct RestTimerCard: View {
                         }
                     }
                 }
-                try? await Task.sleep(for: .seconds(5))
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
                 await MainActor.run {
                     if store.restEndsAt == endsAt {
                         store.restEndsAt = nil
@@ -3575,6 +3578,7 @@ struct AddExerciseSheet: View {
                 .listRowBackground(Theme.card)
             }
             .searchable(text: $search, prompt: "Search exercises")
+            .pageListMargins()
             .oledList()
             .navigationTitle("Add exercise")
             .toolbar {
@@ -3770,6 +3774,7 @@ struct SwapExerciseSheet: View {
                 .listRowBackground(Theme.card)
             }
             .searchable(text: $search, prompt: "Search replacements")
+            .pageListMargins()
             .oledList()
             .navigationTitle("Swap exercise")
             .toolbar {
@@ -3848,6 +3853,7 @@ struct ExerciseHistorySheet: View {
                 // Rows take the app's card color (set on the List itself it does nothing).
                 .listRowBackground(Theme.card)
             }
+            .pageListMargins()
             .oledList()
             .navigationTitle(template.name)
             .toolbar {
@@ -3919,6 +3925,7 @@ struct PlateCalculatorSheet: View {
                 // Rows take the app's card color (set on the List itself it does nothing).
                 .listRowBackground(Theme.card)
             }
+            .pageListMargins()
             .oledList()
             .navigationTitle("Plates — \(template.name)")
             .toolbar {
@@ -3991,6 +3998,7 @@ struct SessionModSheet: View {
                 // Rows take the app's card color (set on the List itself it does nothing).
                 .listRowBackground(Theme.card)
             }
+            .pageListMargins()
             .oledList()
             .navigationTitle("Modify this workout")
             .toolbar {

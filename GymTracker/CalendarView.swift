@@ -522,7 +522,7 @@ struct CalendarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .themeCard(cornerRadius: 16)
+        .themeCard()
         .accessibilityElement(children: .combine)
     }
 

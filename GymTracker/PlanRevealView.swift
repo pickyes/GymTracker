@@ -239,6 +239,7 @@ struct PlanRevealView: View {
                 // Rows take the app's card color (set on the List itself it does nothing).
                 .listRowBackground(Theme.card)
             }
+            .pageListMargins()
             .oledList()
             .navigationTitle("Swap exercise")
             .toolbar {

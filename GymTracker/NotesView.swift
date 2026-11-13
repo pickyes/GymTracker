@@ -24,6 +24,7 @@ struct NotesView: View {
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
     @Environment(\.cornerButtonsInRail) private var inRail
+    @Environment(\.systemSideBar) private var systemSideBar
     /// The grey side bar shows the back button instead.
     @Environment(\.cornerButtonsInRail) private var inSideBar
     /// How far the list is scrolled, kept here so folding or unfolding
@@ -212,11 +213,16 @@ struct NotesView: View {
                             paneClearsCorner: false, mainClearsCorner: false) {
                     detailPane
                         // Clear of the corner buttons when on the right.
-                        .contentMargins(.trailing, swapped && !inRail ? 92 : 0, for: .scrollContent)
+                        // (Not where iOS draws the side bar: the buttons are
+                        // in the bar then.)
+                        .contentMargins(.trailing, swapped && !inRail && !systemSideBar ? 92 : 0, for: .scrollContent)
                 } main: {
                     // Same black as the note page beside it.
                     listPane
                 }
+                // The page's own bar, so where iOS runs bars down the side
+                // the side bar gets New note and Swap sides here too.
+                .pageSideBarStack(.notes)
             } else {
                 NavigationStack(path: $path) {
                     listPane
@@ -640,7 +646,7 @@ struct NotesView: View {
                 .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
-        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .pageListMargins()
         .scrollContentBackground(.hidden)
         .infinityTopEdge()
     }
@@ -1048,7 +1054,7 @@ private struct NoteDetailView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .themeCard(cornerRadius: 14)
+                .themeCard()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Linked to \(title) on \(day.formatted(.dateTime.weekday(.wide).month().day())). Open in Calendar")

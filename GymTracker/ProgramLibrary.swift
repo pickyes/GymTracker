@@ -14606,3 +14606,8 @@ enum ProgramLibrary {
                               split: spec.split, focus: spec.focus)
     }
 }
+
+/// Hashable by its id, so a row can push it by state (navigationDestination).
+extension CatalogProgram: Hashable {
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}

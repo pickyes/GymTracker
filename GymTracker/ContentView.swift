@@ -104,6 +104,10 @@ struct ContentView: View {
     /// The side bar is showing where iOS's status bar is horizontal.
     private var drawsOwnStatusBar: Bool { rail != nil && verticalBarEdge == nil }
     static let railWidth: CGFloat = 84
+    /// The app's own side bar (open, upright): button width and how far in
+    /// from the screen edge, both measured from iOS's own side bar.
+    static let appBarButtonWidth: CGFloat = 47
+    static let appBarInset: CGFloat = 24
     /// Side status bar on: the buttons' own column beside the strip.
     static let buttonColumn: CGFloat = 76
     /// Side bar: where Today's + sits, below the status icons.
@@ -175,6 +179,103 @@ struct ContentView: View {
     /// The grey side bar is showing (Settings → Side bar strip).
     private var sideBar: Bool { rail != nil }
 
+    /// The app draws the side bar itself (open and upright, where iOS keeps
+    /// its bars across the top). It copies iOS's own side bar (DaRon): the
+    /// page's buttons grouped in a glass capsule under the clock, the rest
+    /// pill below them, and the page icons in a glass capsule at the bottom.
+    private var appBar: Bool { rail != nil && !nativeBar }
+
+    @ViewBuilder private var appSideBar: some View {
+        VStack(spacing: 12) {
+            railBackButton
+            appBarActions
+            if restActive && !isTentPose && !navExpanded {
+                // Same width as iOS's own bar buttons (47pt).
+                RestTimerCard(pill: true, pillHeight: 176, pillWidth: 47)
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 12)
+            VStack(spacing: 4) {
+                ForEach(Page.allCases, id: \.self) { appBarNavItem($0) }
+            }
+            .padding(.vertical, 4)
+            .background {
+                Color.clear.liquidGlass(Capsule())
+            }
+        }
+        .animation(AppAnimation.page, value: restActive)
+        .animation(AppAnimation.snappy, value: selectedPage)
+    }
+
+    /// The current page's buttons, one glass capsule (iOS's toolbar group).
+    @ViewBuilder private var appBarActions: some View {
+        let today = selectedPage == .today && !softKeyboardUp
+        let notes = selectedPage == .notes && !softKeyboardUp
+        let swap = showSwapButton && Self.isWide(steadySize)
+        if today || notes || swap {
+            VStack(spacing: 0) {
+                if today {
+                    if store.todayEditing {
+                        Button { store.todayEditing = false } label: { appBarIcon("checkmark") }
+                            .accessibilityLabel("Done editing")
+                    } else {
+                        Menu {
+                            Button("Edit", systemImage: "pencil") { store.todayEditing = true }
+                            Button("Add exercise", systemImage: "plus") { store.todayAddExercise = true }
+                            Button("Modify today", systemImage: "slider.horizontal.3") { store.todaySessionMod = true }
+                        } label: { appBarIcon("plus") }
+                            .accessibilityLabel("Workout actions")
+                    }
+                }
+                if notes {
+                    Button { store.composeNoteRequest += 1 } label: { appBarIcon("square.and.pencil") }
+                        .accessibilityLabel("New note")
+                }
+                if swap {
+                    Button { store.swapSidesRequest += 1 } label: { appBarIcon("arrow.left.arrow.right") }
+                        .accessibilityLabel("Swap sides")
+                }
+            }
+            .buttonStyle(PressSqueeze())
+            .padding(.vertical, 4)
+            .liquidGlass(Capsule())
+        }
+    }
+
+    /// A page in the bottom capsule, like iOS's tab bar down the side:
+    /// icon only; the current one in the accent on a dark circle.
+    private func appBarNavItem(_ page: Page) -> some View {
+        let active = page == selectedPage
+        return Button {
+            dismissKeyboard()
+            withAnimation(AppAnimation.snappy) { selectedPage = page }
+        } label: {
+            Image(systemName: page == .profile ? "person.fill" : page.systemImage)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(active ? effectiveAccent : Theme.text)
+                .frame(width: 47, height: 47)
+                .background {
+                    if active {
+                        Circle()
+                            .fill(Color.black.opacity(0.55))
+                            .matchedGeometryEffect(id: "appBarHighlight", in: railNS)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressSqueeze())
+        .accessibilityLabel(page.title)
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    private func appBarIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(effectiveAccent)
+            .frame(width: 47, height: 44)
+            .contentShape(Rectangle())
+    }
+
     /// One page in the side bar: icon over a short label, lit when current.
     /// Back, in the side bar, when the page has somewhere to go back to
     /// (DaRon: not top left).
@@ -217,7 +318,7 @@ struct ContentView: View {
                 }
                 // The current page's icon grows a little (DaRon).
                 .scaleEffect(active ? 1.22 : 1)
-                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: active)
+                .animation(AppAnimation.press, value: active)
                 // Icons-only bar: the selected page still shows its name.
                 if labeled || active {
                     Text(page == .profile && !identity.name.trimmingCharacters(in: .whitespaces).isEmpty
@@ -292,14 +393,17 @@ struct ContentView: View {
                         // The app's own grey bar: only where iOS isn't drawing
                         // the side bar itself.
                         let strip = rail != nil && !nativeBar
-                        let extraRail = strip ? max(0, Self.railWidth - systemRail) : 0
+                        // Only as wide as the bar's buttons reach (iOS's layout: 47pt
+                        // wide, 24pt in), so each page sits its usual 16pt
+                        // from them (DaRon: the gap was twice that).
+                        let extraRail = strip ? max(0, Self.appBarInset + Self.appBarButtonWidth - systemRail) : 0
                         let railTotal = strip ? systemRail + extraRail : 0
                         // The status icons sit centered in the system's own
                         // strip at the edge; everything in the bar lines up
                         // on that same center (DaRon: with the WiFi icon).
                         // The camera and status icons sit a touch in from the
                         // strip's middle (toward the page): line up with them.
-                        let iconCenter = systemRail > 0 ? systemRail / 2 + 5 : railTotal / 2
+                        let iconCenter = strip ? Self.appBarInset + Self.appBarButtonWidth / 2 : systemRail > 0 ? systemRail / 2 + 5 : railTotal / 2
                         // Highlight fits inside the bar on both sides with an
                         // even 6pt margin (it ran into the bar's edge).
                         let railItemWidth = max(44, min(70, 2 * min(iconCenter, railTotal - iconCenter) - 12))
@@ -382,11 +486,12 @@ struct ContentView: View {
                         // Over the pages (their backgrounds bleed to the edge).
                         if let rail, strip {
                             GeometryReader { full in
+                                // On the page's own black, like iOS's side bar
+                                // (DaRon: the grey strip wasn't the side bar he
+                                // wanted).
                                 Rectangle()
-                                    .fill(Theme.railBackground)
+                                    .fill(Theme.background)
                                     .frame(width: railTotal + 1, height: full.size.height)
-                                    // A light wash of the accent color (Settings).
-                                    .overlay(effectiveAccent.opacity(duo.sideTint ? 0.12 : 0))
                                     .position(x: rail == .leading ? (railTotal + 1) / 2 : full.size.width - (railTotal + 1) / 2,
                                               y: full.size.height / 2)
                             }
@@ -407,50 +512,13 @@ struct ContentView: View {
                             // The pages, listed like Claude's side bar (DaRon):
                             // tap to go, the current one lit up.
                             if !store.calendarDropdownOpen {
-                                // Short bar (folded): icons only, so the list
-                                // never runs into the buttons below it.
-                                // Sized up front (not measured against the buttons,
-                                // which made the two fight): labels when there's
-                                // room, icons only when a rest pill needs it.
-                                // Fixed slots: Back has its own space above the
-                                // pages whether shown or not, so the page icons
-                                // never move (DaRon).
-                                VStack(spacing: railLabeled ? 6 : 4) {
-                                    // A real 52pt slot whether Back shows or not (an
-                                    // empty `if` collapsed it, so the icons moved).
-                                    // The same empty space above the pages in every
-                                    // pose, so the page icons sit level folded and
-                                    // open (the camera pushes the status icons into
-                                    // it when folded).
-                                    Color.clear.frame(width: 52, height: 52)
-                                    // The pages share one Liquid Glass capsule, like
-                                    // the grouped buttons in the system's own side
-                                    // bar (DaRon's reference). Drawn behind them, so
-                                    // the icons stay exactly where they were.
-                                    VStack(spacing: railLabeled ? 6 : 4) {
-                                        ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled, width: railItemWidth) }
-                                    }
-                                    .background {
-                                        Color.clear
-                                            .liquidGlass(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                                            .padding(.horizontal, -3)
-                                            .padding(.vertical, -4)
-                                    }
-                                    // Back sits under Profile (DaRon), full size,
-                                    // clear of the status icons. It's the last item,
-                                    // so showing it never moves the page icons.
-                                    railBackButton
-                                }
+                                appSideBar
                                     .frame(width: iconCenter * 2)
-                                    // One spot in every pose, below the status icons
-                                    // even with the camera above them, so nothing
-                                    // moves when the phone opens (DaRon).
-                                    // Below the status icons, which the camera
-                                    // pushes down when it's at the top (DaRon).
                                     .padding(.top, railTop)
+                                    .padding(.bottom, railBottom)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity,
-                                           alignment: rail == .leading ? .topLeading : .topTrailing)
-                                    .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
+                                           alignment: rail == .leading ? .leading : .trailing)
+                                    .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top, .bottom] : [.trailing, .top, .bottom])
                                     .transition(.opacity)
                             }
                         }
@@ -784,7 +852,7 @@ struct ContentView: View {
     private func swapPages() {
         guard !swapInFlight else { return }
         if reduceMotion {
-            withDuoSwapAnimation(.easeInOut(duration: 0.3)) { duo.swapSides.toggle() }
+            withDuoSwapAnimation(AppAnimation.quick) { duo.swapSides.toggle() }
             return
         }
         swapInFlight = true
@@ -941,7 +1009,7 @@ struct ContentView: View {
                                 .foregroundStyle(Theme.secondaryText)
                         }
                         .padding(14)
-                        .themeCard(cornerRadius: 14)
+                        .themeCard()
                     }
                 }
                 .padding(24)
@@ -1008,7 +1076,7 @@ struct ContentView: View {
             // Rest timer (Nov 12, DaRon): an upright pill at the top of the
             // button column (above swap), growing out of the corner. Tap
             // it for the full controls. Tent pose has its own tile.
-            if restActive && !nativeBar && !isTentPose && !navExpanded && !store.calendarDropdownOpen {
+            if restActive && !nativeBar && !appBar && !isTentPose && !navExpanded && !store.calendarDropdownOpen {
                 RestTimerCard(pill: true, pillHeight: sideBar ? sideBarPillHeight : 200)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.2, anchor: .bottomTrailing).combined(with: .opacity))
             }
@@ -1018,7 +1086,7 @@ struct ContentView: View {
             // Hidden while typing: you're already writing one, and with
             // the keyboard up a third button pushed the column into the
             // clock (landscape).
-            if selectedPage == .notes && !nativeBar && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
+            if selectedPage == .notes && !nativeBar && !appBar && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
                 Button { store.composeNoteRequest += 1 } label: {
                     Image(systemName: "square.and.pencil")
                         .scaledFont(size: 22, weight: .semibold, maxScale: 1.3)
@@ -1038,24 +1106,24 @@ struct ContentView: View {
             // (With the grey strip on, it sits in the strip instead.)
             // Hidden only behind a real on-screen keyboard (a stale flag
             // from a hardware keyboard hid it on the phone).
-            if rail != nil && !nativeBar && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
+            if rail != nil && !nativeBar && !appBar && selectedPage == .today && !navExpanded && !store.calendarDropdownOpen && !softKeyboardUp {
                 railTodayActions
                     .transition(.scale.combined(with: .opacity))
             }
-            if showSwapButton && !nativeBar && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
+            if showSwapButton && !nativeBar && !appBar && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
                 swapSidesButton
                     // Always fully there and tappable while the Duo is
                     // open, at any hinge angle (it used to fade and blur
                     // with the hinge and looked disabled mid-close). It
                     // still fades in when it first appears.
                     .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
-                        removal: .opacity.animation(.easeIn(duration: 0.15))))
+                        insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(AppAnimation.page),
+                        removal: .opacity.animation(AppAnimation.quick)))
             }
             // Side bar: the pages are listed in the bar, so no menu button.
             if !sideBar { fabButton }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: restActive)
+        .animation(AppAnimation.page, value: restActive)
         .animation(AppAnimation.snappy, value: selectedPage)
     }
 

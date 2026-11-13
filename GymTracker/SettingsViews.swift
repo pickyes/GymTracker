@@ -61,9 +61,7 @@ struct SettingsView: View {
             }
             #endif
             Section("Rest timer") {
-                HStack {
-                    Text("Default rest")
-                    Spacer()
+                StepperRow("Default rest") {
                     // Bounded stepper (DaRon 2026-11-10 08:54: the native
                     // stepper's + side ran off the right edge, with a
                     // heavy black divider and flat muddy gray). Same
@@ -265,6 +263,7 @@ struct SettingsView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle("Settings")
         .onChange(of: scenePhase) { _, phase in
@@ -540,10 +539,13 @@ struct GymProfilesView: View {
     @State private var showPaywall = false
     /// The active profile awaiting delete confirmation.
     @State private var pendingDeleteProfile: GymProfile?
+    /// Profile's header card, so this page looks like the other sections.
+    var leadingSections: AnyView? = nil
 
     var body: some View {
         List {
             Group {
+            if let leadingSections { leadingSections }
             Section {
                 ForEach(store.gymProfiles) { profile in
                     let isActive = store.activeGymProfileID == profile.id
@@ -624,6 +626,7 @@ struct GymProfilesView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle("Gym Profiles")
         .confirmationDialog("Delete \(pendingDeleteProfile?.name ?? "this profile")?",
@@ -732,6 +735,7 @@ struct GymProfileEditorView: View {
                 .listRowBackground(Theme.card)
             }
             .searchable(text: $search, prompt: "Search equipment")
+            .pageListMargins()
             .oledList()
             .navigationTitle("Gym profile")
             // Keyboard Done (Debug Pass 2): the Name
@@ -824,6 +828,7 @@ struct CustomExercisesView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle(leadingSections == nil ? "Custom exercises" : "Exercises")
         .confirmationDialog("Delete \(pendingDelete?.name ?? "this exercise")?",
@@ -911,9 +916,7 @@ struct CustomExerciseEditorView: View {
                     }
                 }
                 Section("Defaults") {
-                    HStack {
-                        Text("Sets")
-                        Spacer()
+                    StepperRow("Sets") {
                         // Bounded stepper — same fix as the rest steppers:
                         // the native stepper's gray pill could run off the
                         // row's right edge. Same 1...6 range, same binding.
@@ -939,6 +942,7 @@ struct CustomExerciseEditorView: View {
                 // Rows take the app's card color (set on the List itself it does nothing).
                 .listRowBackground(Theme.card)
             }
+            .pageListMargins()
             .oledList()
             .navigationTitle("Custom exercise")
             // Keyboard Done (Debug Pass 2): the Name /
@@ -975,9 +979,9 @@ struct ProgramsView: View {
         List {
             Group {
             Section {
-                NavigationLink {
-                    ProgramLibraryView()
-                } label: {
+                // Value links: Profile's stacks run on a route list, and links that
+                // build their page inline never opened there (Nov 13).
+                NavigationLink(value: ProfileRoute.library) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Browse the program library")
@@ -989,9 +993,7 @@ struct ProgramsView: View {
                         Spacer()
                     }
                 }
-                NavigationLink {
-                    CustomProgramBuilderView()
-                } label: {
+                NavigationLink(value: ProfileRoute.builder) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Create your own program")
@@ -1135,6 +1137,7 @@ struct ProgramsView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle("Programs")
         .alert("Rename program", isPresented: Binding(
@@ -1243,9 +1246,7 @@ struct CustomProgramBuilderView: View {
             Group {
             Section("Details") {
                 TextField("Program name", text: $name)
-                HStack {
-                    Text("Days / week")
-                    Spacer()
+                StepperRow("Days / week") {
                     RowStepper(value: $daysPerWeek, range: 1...7, step: 1) { "\($0)" }
                 }
                 Text("Lowering the days removes the last days' exercises.")
@@ -1347,6 +1348,7 @@ struct CustomProgramBuilderView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle(editing == nil ? "Create program" : "Edit program")
         .navigationBarTitleDisplayMode(.inline)
@@ -1741,6 +1743,7 @@ struct ProgramLibraryView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                .listRowSeparator(.hidden)
                 pillRowLayout {
                     filterMenu(title: "Days / week", allLabel: "Any days",
                                options: [1, 2, 3, 4, 5, 6, 7].map { ("\($0) day\($0 == 1 ? "" : "s")", $0) },
@@ -1751,6 +1754,7 @@ struct ProgramLibraryView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowSeparator(.hidden)
                 // Sort + favorites-only: the same single-pill row as the
                 // filters above — no card behind the pills.
                 pillRowLayout {
@@ -1759,15 +1763,14 @@ struct ProgramLibraryView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                .listRowSeparator(.hidden)
             }
             Section {
                 Text("\(sorted.count) program\(sorted.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
                 ForEach(sorted) { catalog in
-                    NavigationLink {
-                        CatalogProgramDetailView(catalog: catalog)
-                    } label: {
+                    NavigationLink(value: ProfileRoute.catalog(catalog)) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(catalog.program.name)
@@ -1821,6 +1824,7 @@ struct ProgramLibraryView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle("Program library")
     }
@@ -1848,7 +1852,9 @@ struct ProgramLibraryView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        // Each pill starts at its column's left edge (centered, every row
+        // began somewhere else).
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Sort control: the same single clean pill as the filters.
@@ -1865,7 +1871,9 @@ struct ProgramLibraryView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        // Each pill starts at its column's left edge (centered, every row
+        // began somewhere else).
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Favorites-only switch: the same single clean pill shape, with a
@@ -1889,14 +1897,15 @@ struct ProgramLibraryView: View {
                 .foregroundStyle(favoritesOnly ? Color.accentColor : Theme.text)
                 .frame(minHeight: 44)
                 .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity)
                 .background(favoritesOnly ? Color.accentColor.opacity(0.15) : Theme.card)
                 .clipShape(Capsule())
                 .overlay(Capsule().stroke(favoritesOnly ? Color.accentColor.opacity(0.4) : Theme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
         }
-        .frame(maxWidth: .infinity)
+        // Each pill starts at its column's left edge (centered, every row
+        // began somewhere else).
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Heart on every program row: taps favorite it (persists on-device

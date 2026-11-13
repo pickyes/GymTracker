@@ -448,14 +448,18 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          dragShift: Binding(get: { liveShift ?? sideShift }, set: { liveShift = $0 }),
                          hingeX: hingeX,
                          commit: {
-                             withAnimation(.smooth(duration: 0.3)) {
+                             withAnimation(AppAnimation.page) {
                                  if let v = liveSplit { split = v }
                                  if let v = liveShift { sideShift = v }
                              }
                              liveSplit = nil; liveShift = nil
                          },
                          mainMinWidth: mainMinWidth,
-                         mainWidth: mainWidth, direction: direction,
+                         // Side by side on the tall upright screen (Profile):
+                         // half each. At the folded width the section page
+                         // got only ~216pt and every page in it wrapped.
+                         mainWidth: wide && !stacked && s.height > s.width ? nil : mainWidth,
+                         direction: direction,
                          pane: pane, main: main)
         }
         // The pages span the whole screen, edge to edge (their content
@@ -513,7 +517,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // from its default and kept between a third and two thirds.
         // Its usual spot is the real hinge (DaRon), on every page.
         let maxPane = DuoPagePair<Pane, Main>.maxPaneShare(total: total, mainMinWidth: mainMinWidth)
-        let sideDefault = hingeX > 0 && total > 0
+        // Upright the hinge runs across, not down the middle: there the
+        // pages share the width equally (at "the hinge" the side bar's
+        // width all came out of the right page, which got ~216pt).
+        let sideDefault = hingeX > 0 && total > 0 && size.width >= size.height
             ? Double(min(max(hingeX / total, 0), 1))
             : DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
         // The left page's share of the width: the line stays where it is
@@ -731,8 +738,8 @@ struct DuoSwapCard: ViewModifier {
 ///   move the enum) so fold morphs and in-flight snappy animations
 ///   finish together, but near-critically damped (0.9 vs snappy's 0.8)
 ///   so the morph never overshoots and pops back — overshoot on a
-///   frame interpolation reads as a jump. The old `AppAnimation.fold`
-///   (0.45/0.85) settled in ~0.8s, longer than the physical fold, so
+///   frame interpolation reads as a jump. The old fold spring
+///   (0.45/0.85, since removed) settled in ~0.8s, longer than the physical fold, so
 ///   the UI was still settling after the hinge stopped — that lag IS
 ///   the glitch. This settles in ~0.45s, inside the fold.
 /// - `settle`: the 150–200ms ease-out for fades that ride the fold
@@ -746,6 +753,8 @@ extension View {
     /// OLED card: near-black surface + a visible border so the card reads
     /// on the true-black background. Use for the top-level cards (exercise
     /// cards, timer card, stat cards, day cards).
+    /// Every page-level card uses the default 12pt corners (one radius
+    /// app-wide); controls nested inside a card use 10.
     func themeCard(cornerRadius: CGFloat = 12) -> some View {
         background(Theme.card)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
@@ -863,6 +872,33 @@ struct MenuPill<Content: View>: View {
 /// can never run off the screen edge in any pose. Value changes go
 /// through the same binding the native Stepper used (same floor, same
 /// step, clamped to the range), so saving is unchanged.
+/// A label with its stepper: side by side when the row has room, the
+/// stepper under the label when it doesn't (a narrow pane on the open Duo
+/// broke "Default rest" into "De-fault rest" beside the stepper).
+struct StepperRow<Stepper: View>: View {
+    let title: String
+    @ViewBuilder var stepper: Stepper
+
+    init(_ title: String, @ViewBuilder stepper: () -> Stepper) {
+        self.title = title
+        self.stepper = stepper()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(title).lineLimit(1).fixedSize()
+                Spacer(minLength: 12)
+                stepper
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                stepper
+            }
+        }
+    }
+}
+
 struct RowStepper<Value: Strideable>: View where Value.Stride: Comparable {
     var value: Binding<Value>
     var range: ClosedRange<Value>
@@ -1478,13 +1514,13 @@ struct DuoSplitHandle: View {
                 Rectangle()
                     .fill(Color.accentColor.opacity(dragging ? 0.8 : 0))
                     .frame(width: horizontal ? span : 2, height: horizontal ? 2 : span)
-                    .animation(.easeOut(duration: 0.15), value: dragging)
+                    .animation(AppAnimation.quick, value: dragging)
                 Capsule()
                     // Accent while held (DaRon).
                     .fill(dragging ? Color.accentColor : Theme.secondaryText.opacity(0.45))
                     .frame(width: horizontal ? (dragging ? 56 : 40) : 5,
                            height: horizontal ? 5 : (dragging ? 56 : 40))
-                    .animation(.snappy(duration: 0.2), value: dragging)
+                    .animation(AppAnimation.snappy, value: dragging)
             }
             .gesture(
                 // Measured on the screen, not on the handle: the handle
@@ -1516,7 +1552,7 @@ struct DuoSplitHandle: View {
                     .onEnded { _ in start = nil; dragging = false; onCommit() }
             )
             .onTapGesture(count: 2) {
-                withAnimation(.snappy) { share = rest }
+                withAnimation(AppAnimation.snappy) { share = rest }
                 onCommit()
             }
             .onChange(of: pressing) { _, down in
@@ -1527,7 +1563,7 @@ struct DuoSplitHandle: View {
             .accessibilityLabel("Divider")
             .accessibilityValue("\(Int((Self.clamp(share) * 100).rounded())) percent")
             .accessibilityAdjustableAction { dir in
-                withAnimation(.snappy) {
+                withAnimation(AppAnimation.snappy) {
                     share = Self.clamp(share + (dir == .increment ? 0.05 : -0.05))
                 }
                 onCommit()
@@ -1804,7 +1840,7 @@ struct PressSqueeze: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.88 : 1)
             .opacity(configuration.isPressed ? 0.85 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+            .animation(AppAnimation.press, value: configuration.isPressed)
     }
 }
 
@@ -1854,12 +1890,17 @@ struct SideBarItems: ViewModifier {
     @EnvironmentObject private var store: WorkoutStore
     @ObservedObject private var duo = DuoSettings.shared
 
+    private var barEdge: Edge.Set { edge == .leading ? .leading : .trailing }
+
     func body(content: Content) -> some View {
         content
             // Clear of the side bar (iOS floats it over the page). Inside
             // the page, not around it: iOS only runs the toolbar down the
             // side when the page itself reaches that edge.
-            .padding(edge == .leading ? .leading : .trailing, on && inset ? ContentView.railWidth : 0)
+            .padding(barEdge, on && inset && page == .today ? ContentView.railWidth : 0)
+            // The list pages get no inset here: iOS already keeps a list's
+            // rows clear of its side bar (ours on top left the list a
+            // narrow strip).
             .toolbar(on ? .visible : .hidden, for: .navigationBar)
             // Only the buttons: no bar background or hairline across the top.
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -1903,6 +1944,79 @@ struct SideBarItems: ViewModifier {
     }
 }
 
+/// A list's side margins, the same on every page and sheet: 16pt from
+/// the edge of what you can see. Content margins are measured from the
+/// list's own edge, which runs under the Duo's side bar, so each side adds
+/// that side's safe area (the bar's width beside it, nothing in a sheet).
+/// Without it the cards ran under the bar and were cut off flat.
+struct PageListMargins: ViewModifier {
+    /// Extra room on the trailing side (the open Duo's corner buttons).
+    @Environment(\.pageListExtraTrailing) private var extraTrailing
+    @State private var insets = EdgeInsets()
+
+    static let margin: CGFloat = 16
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(.leading, Self.margin + insets.leading, for: .scrollContent)
+            .contentMargins(.trailing, Self.margin + insets.trailing + extraTrailing, for: .scrollContent)
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets = $0 }
+    }
+}
+
+private struct PageListExtraTrailingKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+
+extension EnvironmentValues {
+    var pageListExtraTrailing: CGFloat {
+        get { self[PageListExtraTrailingKey.self] }
+        set { self[PageListExtraTrailingKey.self] = newValue }
+    }
+}
+
+/// Open Duo pages built from two panes (Profile, Notes): a page-level
+/// navigation stack that only carries the side bar's buttons. Only where
+/// iOS draws the side bar; elsewhere the page is left exactly as it was.
+/// The panes keep their own stacks for pushing pages inside them.
+struct PageSideBarStack: ViewModifier {
+    let page: ContentView.Page
+    @Environment(\.systemSideBar) private var on
+    @Environment(\.railEdge) private var edge
+
+    func body(content: Content) -> some View {
+        if on {
+            NavigationStack {
+                content
+                    // Like Today's open pages: iOS insets the pages for its
+                    // bar only once they stop touching that edge, so a
+                    // hairline keeps both panes clear of it, either way
+                    // round (the list ran under the bar after a swap).
+                    .padding(edge == .leading ? .leading : .trailing, 1)
+                    .sideBarItems(page)
+                    // The panes' own titles rose into this bar and sat
+                    // over the page's big title ("Your Program" on
+                    // "Profile"): this bar shows buttons only.
+                    .modifier(NoBarTitle())
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Keeps a page's title (Back labels, VoiceOver) but doesn't draw it in
+/// the bar, for pages whose header card is the title.
+struct NoBarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
+    func pageSideBarStack(_ page: ContentView.Page) -> some View { modifier(PageSideBarStack(page: page)) }
+    func pageListMargins() -> some View { modifier(PageListMargins()) }
     func sideBarItems(_ page: ContentView.Page) -> some View { modifier(SideBarItems(page: page)) }
 }

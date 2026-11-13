@@ -152,10 +152,12 @@ struct HistoryView: View {
                         Text("No sessions yet — finish a workout from Today and it will show up here.")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     } else if shown.isEmpty {
                         Text("No sessions match these filters.")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .listRowSeparator(.hidden)
                     }
                     // Grouped (by month unless changed): each group folds
@@ -347,6 +349,7 @@ struct HistoryView: View {
     private func sessionRow(_ session: SessionLog) -> some View {
         SessionRowView(session: session)
             .tag(session.id)
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) { sessionToDelete = session } label: {
                     Label("Delete", systemImage: "trash")
@@ -554,7 +557,7 @@ struct HistoryView: View {
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .themeCard(cornerRadius: 16)
+        .themeCard()
         .contentShape(Rectangle())
     }
 
@@ -572,6 +575,7 @@ struct HistoryView: View {
             ForEach(daySessions) { session in
                 SessionRowView(session: session)
                     .tag(session.id)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { sessionToDelete = session } label: {
                             Label("Delete", systemImage: "trash")
@@ -596,11 +600,15 @@ struct HistoryView: View {
                 }
             }
             .padding(.vertical, 4)
+            // The page's 16pt margins (the default sat 4pt further in, and
+            // ran to the side bar's edge on the Duo).
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
         } else {
             Text(status == .beforeStart ? "Before you started tracking."
                  : (selectedDay < index.today ? "Nothing logged that day." : "Rest day."))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
         }
     }
 
@@ -648,7 +656,7 @@ struct HistoryView: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
-            .themeCard(cornerRadius: 16)
+            .themeCard()
 
             muscleBars(done: done, planned: planned)
 
@@ -666,7 +674,7 @@ struct HistoryView: View {
                 }
             }
             .padding(14)
-            .themeCard(cornerRadius: 16)
+            .themeCard()
         }
     }
 
@@ -738,7 +746,7 @@ struct HistoryView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .themeCard(cornerRadius: 16)
+        .themeCard()
     }
 
     /// The user-chosen leading stat (one row). Extracted so the stats
@@ -921,6 +929,8 @@ struct HistoryView: View {
                 }
             }
         }
+        // The page's 16pt margins, like the rows around them.
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
     }
 
     /// Weekly set targets (Fitbod pattern): a progress ring + per-group
@@ -1224,6 +1234,7 @@ struct SessionDetailView: View {
             // Rows take the app's card color (set on the List itself it does nothing).
             .listRowBackground(Theme.card)
         }
+        .pageListMargins()
         .oledList()
         .navigationTitle("\(session.dayKey) · \(session.dayTitle)")
         // D6: delete confirmation (same wording as the list swipe path).

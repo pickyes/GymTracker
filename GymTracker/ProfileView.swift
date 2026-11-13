@@ -99,12 +99,30 @@ struct SectionIconTile: View {
     }
 }
 
+/// Every page Profile can push, folded and open. One route list per stack:
+/// links that built their page inline never opened in a stack driven by a
+/// path (Nov 13: All programs did nothing folded).
+enum ProfileRoute: Hashable {
+    case section(ProfileSection)
+    case programs
+    case library
+    case builder
+    case catalog(CatalogProgram)
+
+    var section: ProfileSection? {
+        if case .section(let s) = self { return s }
+        return nil
+    }
+}
+
 struct ProfileView: View {
     @Environment(\.pageTitleTop) private var pageTitleTop
     @Environment(\.fabBottomOffset) private var fabBottomOffset
     @Environment(\.duoWide) private var wide
     @Environment(\.duoSwapped) private var swapped
     @Environment(\.cornerButtonsInRail) private var inRail
+    @Environment(\.systemSideBar) private var systemSideBar
+    @Environment(\.railEdge) private var railEdge
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @EnvironmentObject var mcpServer: MCPServer
@@ -122,7 +140,10 @@ struct ProfileView: View {
     @State private var isApproving = false
     @State private var grantMessage: String?
     /// Folded: the pushed section.
-    @State private var path: [ProfileSection] = []
+    @State private var path: [ProfileRoute] = []
+    /// Open Duo where iOS draws the side bar: the pages opened inside the
+    /// section in the right pane.
+    @State private var wideRoutes: [ProfileRoute] = []
     /// Open Duo: the section shown beside the list (first one by
     /// default, like Settings opening on General).
     @State private var selected: ProfileSection = .program
@@ -145,28 +166,27 @@ struct ProfileView: View {
 
     var body: some View {
         Group {
-            if wide {
-                // The list keeps the front screen's exact width and side
-                // (right, like Today) for a seamless unfold; the section
-                // waits on the other page. Swap mirrors it.
-                DuoPagePair(wide: true, swapped: swapped, stacksWhenTall: false) {
-                    detailPane
-                        // On the right page the swap and menu buttons sit
-                        // over its right edge: keep the values clear.
-                        // Inside the page's margins on both sides, so the cards end
-                        // short of the middle line instead of running into it.
-                        .contentMargins(.leading, 16, for: .scrollContent)
-                        .contentMargins(.trailing, swapped && !inRail ? 92 : 16, for: .scrollContent)
-                } main: {
-                    sidebar
-                        .background(Theme.card.opacity(0.45))
+            if wide && systemSideBar {
+                // iOS draws the side bar: the page needs a stack of its own
+                // for the bar's buttons (Swap sides), and a stack inside it
+                // would hand its pages up to this one (they covered both
+                // panes). So this stack's pages are the whole pair, each
+                // with the next page in the right pane (DaRon: pages stay
+                // in the right pane).
+                NavigationStack(path: $wideRoutes) {
+                    pair { sectionPage(selected).modifier(NoBarTitle()) }
+                        .navigationDestination(for: ProfileRoute.self) { route in
+                            pair { routePage(route) }
+                        }
                 }
+            } else if wide {
+                pair { detailPane }
             } else {
                 NavigationStack(path: $path) {
                     rootList
                         .sideBarItems(.profile)
-                        .navigationDestination(for: ProfileSection.self) { section in
-                            sectionPage(section)
+                        .navigationDestination(for: ProfileRoute.self) { route in
+                            routePage(route)
                                 .navigationBarBackButtonHidden(inRail)
                         }
                 }
@@ -174,6 +194,9 @@ struct ProfileView: View {
         }
         .disableVerticalBar()
         .onChange(of: path.isEmpty, initial: true) { _, top in store.setCanGoBack("profile", !top) }
+        // Open and upright the right pane has its own stack: the pages from
+        // the sideways layout don't carry over.
+        .onChange(of: systemSideBar) { _, _ in wideRoutes = [] }
         .onChange(of: store.backRequest.n) { _, _ in
             guard store.backRequest.page == "profile", !path.isEmpty else { return }
             path.removeLast()
@@ -181,11 +204,16 @@ struct ProfileView: View {
         .onChange(of: wide) { _, isWide in
             // Unfold keeps the open section open; fold pushes the one
             // that was showing beside the list.
+            // The pages opened inside it go along too.
             if isWide {
-                if let open = path.last { selected = open; userPicked = true }
+                if let i = path.lastIndex(where: { $0.section != nil }), let open = path[i].section {
+                    selected = open; userPicked = true
+                    wideRoutes = Array(path[(i + 1)...])
+                }
                 path = []
             } else {
-                path = userPicked ? [selected] : []
+                path = userPicked ? [.section(selected)] + wideRoutes : []
+                wideRoutes = []
             }
         }
         .onAppear {
@@ -240,12 +268,12 @@ struct ProfileView: View {
                     .buttonStyle(.plain)
             }
             Section {
-                NavigationLink(value: ProfileSection.program) { sectionRow(.program) }
+                NavigationLink(value: ProfileRoute.section(.program)) { sectionRow(.program) }
             }
             ForEach(groups, id: \.title) { group in
                 Section(group.title) {
                     ForEach(group.sections) { section in
-                        NavigationLink(value: section) { sectionRow(section) }
+                        NavigationLink(value: ProfileRoute.section(section)) { sectionRow(section) }
                     }
                 }
             }
@@ -257,7 +285,7 @@ struct ProfileView: View {
         .listStyle(.insetGrouped)
         // Same margins and title row as the open sidebar and the other
         // pages (the title sat lower and further in when folded).
-        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .pageListMargins()
         .contentMargins(.top, 0, for: .scrollContent)
         .oledList()
         .ignoresSafeArea(edges: .top)
@@ -300,7 +328,7 @@ struct ProfileView: View {
         // Grouped rounded sections inside the page margins, like the
         // Settings app (the plain list ran the icons off the edge).
         .listStyle(.insetGrouped)
-        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .pageListMargins()
         // The title sits in the clock's row, like the other pages.
         .contentMargins(.top, 0, for: .scrollContent)
         .oledList()
@@ -310,7 +338,7 @@ struct ProfileView: View {
 
     /// A sidebar row: opens its page beside the list; the open one is lit.
     private func sidebarButton<Label: View>(_ section: ProfileSection, @ViewBuilder label: () -> Label) -> some View {
-        Button { selected = section; userPicked = true } label: {
+        Button { selected = section; userPicked = true; wideRoutes = [] } label: {
             label()
         }
         .buttonStyle(.plain)
@@ -378,12 +406,59 @@ struct ProfileView: View {
             .listRowBackground(Color.clear)
     }
 
+    // MARK: Open Duo pair
+
+    /// The open Duo: the list on the front screen's side, `detail` on the
+    /// other page. Swap mirrors it.
+    @ViewBuilder
+    private func pair<Detail: View>(@ViewBuilder detail: () -> Detail) -> some View {
+        let detailPage = detail()
+        DuoPagePair(wide: true, swapped: swapped, stacksWhenTall: false) {
+            detailPage
+                // Inside the page's margins on both sides, so the cards end
+                // short of the middle line instead of running into it.
+                .contentMargins(.leading, 16, for: .scrollContent)
+                // On the right page the corner buttons sit over its right
+                // edge (not where iOS draws the side bar: they're in it).
+                .contentMargins(.trailing, swapped && !inRail && !systemSideBar ? 92 : 16, for: .scrollContent)
+                // Lists inside set their own margins: same room.
+                .environment(\.pageListExtraTrailing, swapped && !inRail && !systemSideBar ? 76 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } main: {
+            sidebar
+                .background(Theme.card.opacity(0.45))
+        }
+        // Where iOS draws the side bar: a hairline keeps both panes clear of
+        // it (iOS insets a page only once it stops touching that edge), and
+        // the bar gets this page's buttons, with no title.
+        .padding(railEdge == .leading ? .leading : .trailing, systemSideBar ? 1 : 0)
+        .sideBarItems(.profile)
+        .modifier(NoBarTitle())
+    }
+
     // MARK: Section pages
+
+    /// Any page Profile pushes: a section, or a page inside one.
+    @ViewBuilder
+    private func routePage(_ route: ProfileRoute) -> some View {
+        switch route {
+        case .section(let section):
+            sectionPage(section)
+                // The header card is the title: the bar's small title said
+                // the same thing again above it.
+                .modifier(NoBarTitle())
+        case .programs: ProgramsView()
+        case .library: ProgramLibraryView()
+        case .builder: CustomProgramBuilderView()
+        case .catalog(let catalog): CatalogProgramDetailView(catalog: catalog)
+        }
+    }
 
     @ViewBuilder
     private var detailPane: some View {
         NavigationStack {
             sectionPage(selected)
+                .navigationDestination(for: ProfileRoute.self) { routePage($0) }
         }
         .id(selected)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -392,7 +467,11 @@ struct ProfileView: View {
     @ViewBuilder
     private func sectionPage(_ section: ProfileSection) -> some View {
         switch section {
-        case .gyms: GymProfilesView()
+        case .gyms:
+            // Same look as the other sections: a header card, and no bar
+            // on the open Duo (it showed an empty bar with a hairline).
+            GymProfilesView(leadingSections: AnyView(Section { headerCard(.gyms) }))
+                .toolbar(wide ? .hidden : .automatic, for: .navigationBar)
         case .exercises, .weights:
             CustomExercisesView(leadingSections: AnyView(Group {
                 Section { headerCard(.exercises) }
@@ -422,6 +501,7 @@ struct ProfileView: View {
                 .listRowBackground(Theme.card)
             }
             .listStyle(.insetGrouped)
+            .pageListMargins()
             .oledList()
             .navigationTitle("Body")
             .navigationBarTitleDisplayMode(.inline)
@@ -439,6 +519,7 @@ struct ProfileView: View {
                 .listRowBackground(Theme.card)
             }
             .listStyle(.insetGrouped)
+            .pageListMargins()
             .oledList()
             .navigationTitle(section.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -505,7 +586,9 @@ struct ProfileView: View {
                     }
                 }
             }
-            NavigationLink("All programs") { ProgramsView() }
+            // A value link: Profile's stacks run on a route list, and links
+            // that build their page inline never opened there (Nov 13).
+            NavigationLink("All programs", value: ProfileRoute.programs)
             // Switch back to the generated program, if it isn't active.
             if let generated = store.generatedProgram, generated.id != store.activeProgram?.id {
                 Button {
@@ -1073,6 +1156,7 @@ struct ProfileIdentityEditor: View {
                     Text("Shown in the side bar and in Today's greeting.")
                 }
             }
+            .pageListMargins()
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1196,7 +1280,7 @@ struct PhotoCropView: View {
                                             height: baseOffset.height + v.translation.height)
                         }
                         .onEnded { _ in
-                            withAnimation(.snappy) { offset = clamp(offset, side: side, shown: shown) }
+                            withAnimation(AppAnimation.snappy) { offset = clamp(offset, side: side, shown: shown) }
                             baseOffset = offset
                         }
                 )
@@ -1315,3 +1399,4 @@ struct GeneratedAvatar: View {
         return r.uiImage
     }
 }
+

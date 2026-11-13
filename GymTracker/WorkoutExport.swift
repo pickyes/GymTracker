@@ -898,6 +898,7 @@ struct ExportSheet: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
             }
+            .pageListMargins()
             .navigationTitle("Export workouts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
