@@ -498,6 +498,16 @@ struct TodayView: View {
 
     /// The real page height (keyboard ignored), capped by what was measured
     /// only when there's no container size to go on.
+    /// The window's height down to the home indicator (from the screen's
+    /// top edge). The open Duo's body pane is capped to it so the progress
+    /// card always ends right above the home indicator — on the phone the
+    /// pane measured taller than the screen and the card ran off the edge.
+    static var windowUsableHeight: CGFloat? {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return nil }
+        return window.bounds.height - window.safeAreaInsets.bottom
+    }
+
     private func visibleHeight(_ measured: CGFloat) -> CGFloat {
         pageContainerSize == .zero ? measured : min(measured, pageContainerSize.height)
     }
@@ -1021,8 +1031,10 @@ struct TodayView: View {
                     sideBinding: $liveBodySide,
                     userFlippedBinding: $liveBodyUserFlipped
                 )
+                // The figure takes all the room down to the progress card
+                // (DaRon: "enlarge") — no spacer competing for it.
+                .frame(maxHeight: .infinity)
                 if pageContainerSize.width > pageContainerSize.height {
-                    Spacer(minLength: 0)
                     sessionProgressCard
                         .padding(.bottom, 16)
                         // Full width on either page (DaRon: it looked cut
@@ -1040,7 +1052,7 @@ struct TodayView: View {
             // Only the body pane is capped to the real page height (so its
             // progress card is never cut off at the bottom edge); the
             // workout column still runs to the bottom of the screen.
-            .frame(maxHeight: pageContainerSize.height > 0 ? pageContainerSize.height : .infinity, alignment: .top)
+            .frame(maxHeight: Self.windowUsableHeight ?? .infinity, alignment: .top)
             .ignoresSafeArea(edges: anchor == .trailing ? .top : [])
             // Follows the real hinge: the waiting pane comes up to full
             // brightness exactly as the phone opens flat.
