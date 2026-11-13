@@ -457,9 +457,11 @@ struct ContentView: View {
                         // iOS's side bar: the rest pill sits in the bar's free
                         // gap, between the buttons at the top and the tabs.
                         if nativeBar && restActive && !isTentPose && !store.calendarDropdownOpen {
-                            RestTimerCard(pill: true, pillHeight: 176)
+                            // Same width and center line as the system's own
+                            // buttons in the bar (measured: 47pt wide, 24pt in).
+                            RestTimerCard(pill: true, pillHeight: 176, pillWidth: 47)
                                 .padding(.top, 236)
-                                .padding(verticalBarEdge == .leading ? .leading : .trailing, 20)
+                                .padding(verticalBarEdge == .leading ? .leading : .trailing, 24)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity,
                                        alignment: verticalBarEdge == .leading ? .topLeading : .topTrailing)
                                 .ignoresSafeArea()

@@ -2408,6 +2408,8 @@ struct RestTimerCard: View {
     var pill: Bool = false
     /// The pill's height (the side bar fits it to the room it has).
     var pillHeight: CGFloat = 200
+    /// The pill's width (the system side bar's buttons are narrower).
+    var pillWidth: CGFloat = 56
 
     /// D33 (2026-11-10): collapsed to the compact countdown chip.
     /// Per-rest — resets whenever a new rest starts.
@@ -2472,7 +2474,7 @@ struct RestTimerCard: View {
                             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                             // As tall as three buttons in the column below,
                             // gaps included (3 × 56 + 2 × 16), DaRon Nov 12.
-                            .frame(width: 56, height: pillHeight)
+                            .frame(width: pillWidth, height: pillHeight)
                             // Same material as the swap and menu buttons:
                             // frosted, plain border, soft shadow — no gloss.
                             // The liquid sits inside real Liquid Glass, like
