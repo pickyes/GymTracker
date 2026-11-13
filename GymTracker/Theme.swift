@@ -434,12 +434,14 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .zIndex(2)
             }
             if stacked {
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(width: total, height: 0.5)
-                    .offset(y: halfH)
+                // The fold gets the same treatment as the top of the screen
+                // (DaRon), on both sides of the line: content loses its
+                // color and fades into the page as it nears the hinge.
+                FoldFade(width: total)
+                    .offset(y: halfH - FoldFade.reach)
                     .opacity(1 - min(1, lift * 3))
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                     .zIndex(2)
             }
         }
@@ -1124,6 +1126,51 @@ private struct ControlBorder<S: Shape>: ViewModifier {
 /// brightness of what's underneath and takes away its color; the blend
 /// mode is the LAST modifier so it mixes with the page below instead of
 /// inside its own layer.
+/// The DS fold: a hairline with, on each side, the top bar's two
+/// effects mirrored toward the line: a black-and-white strip (keeps
+/// brightness, drops color) and an eased fade into the page color.
+struct FoldFade: View {
+    var width: CGFloat
+    /// How far each effect reaches from the line.
+    static let reach: CGFloat = 26
+
+    var body: some View {
+        let r = Self.reach
+        // Eased stops, like StatusBarOmbre (no visible start or end).
+        let ease: [Gradient.Stop] = [
+            .init(color: Theme.background.opacity(0), location: 0),
+            .init(color: Theme.background.opacity(0.1), location: 0.2),
+            .init(color: Theme.background.opacity(0.26), location: 0.4),
+            .init(color: Theme.background.opacity(0.48), location: 0.6),
+            .init(color: Theme.background.opacity(0.72), location: 0.8),
+            .init(color: Theme.background.opacity(0.9), location: 1),
+        ]
+        ZStack(alignment: .top) {
+            // Black and white toward the line, from both sides.
+            Rectangle()
+                .fill(Color(white: 0.5))
+                .mask(LinearGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.5),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .top, endPoint: .bottom))
+                .frame(width: width, height: r * 2)
+                .blendMode(.saturation)
+            VStack(spacing: 0) {
+                LinearGradient(stops: ease, startPoint: .top, endPoint: .bottom)
+                    .frame(width: width, height: r)
+                LinearGradient(stops: ease, startPoint: .bottom, endPoint: .top)
+                    .frame(width: width, height: r)
+            }
+            Rectangle()
+                .fill(Theme.border)
+                .frame(width: width, height: 0.5)
+                .offset(y: r - 0.25)
+        }
+        .frame(width: width, height: r * 2, alignment: .top)
+    }
+}
+
 struct StatusBarFade: View {
     /// The thin full-width strip along the top edge.
     var height: CGFloat = 30
