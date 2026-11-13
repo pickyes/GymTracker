@@ -137,7 +137,7 @@ struct TodayView: View {
                     // measured taller than the screen and pushed the body
                     // pane's progress card off the bottom edge. Only ever
                     // shrinks to the real page height, never grows.
-                    .frame(height: (rawKind == .tent || rawKind == .propped || rawKind == .split) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
+                    .frame(height: (rawKind == .tent || rawKind == .propped) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
                     // The keyboard doesn't squeeze the page: the workout
                     // column already scrolls clear of it on its own
@@ -499,7 +499,7 @@ struct TodayView: View {
     /// The real page height (keyboard ignored), capped by what was measured
     /// only when there's no container size to go on.
     private func visibleHeight(_ measured: CGFloat) -> CGFloat {
-        pageContainerSize == .zero ? measured : pageContainerSize.height
+        pageContainerSize == .zero ? measured : min(measured, pageContainerSize.height)
     }
 
     private func layoutKind(for measured: CGSize) -> TodayLayoutKind {
@@ -1037,6 +1037,10 @@ struct TodayView: View {
             // it starts below the status bar there instead.
             .padding(.top, anchor == .trailing ? 34 : 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // Only the body pane is capped to the real page height (so its
+            // progress card is never cut off at the bottom edge); the
+            // workout column still runs to the bottom of the screen.
+            .frame(maxHeight: pageContainerSize.height > 0 ? pageContainerSize.height : .infinity, alignment: .top)
             .ignoresSafeArea(edges: anchor == .trailing ? .top : [])
             // Follows the real hinge: the waiting pane comes up to full
             // brightness exactly as the phone opens flat.
@@ -1510,10 +1514,12 @@ struct TodayView: View {
         .padding(.top, 6)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, keyboardHeight)
+        // No keyboard lift: this view has no text fields, and a keyboard
+        // left over from the list (or a hardware keyboard bar) left a dark
+        // band under the tiles.
         .toolbar(.hidden, for: .navigationBar)
-        .toolbar { keyboardDoneToolbar }
         .background(Color.black)
+        .onAppear { hideKeyboard() }
     }
 
     /// StandBy left tile: the current exercise and its sets.
