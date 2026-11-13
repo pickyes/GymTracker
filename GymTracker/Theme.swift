@@ -408,12 +408,21 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          // halves stay on the hinge; pages still get the
                          // keyboard's safe area and scroll above it.
                          size: stacked ? CGSize(width: geo.size.width, height: s.height) : geo.size,
-                         split: Binding(get: { liveSplit ?? split }, set: { liveSplit = $0 }),
-                         sideShift: Binding(get: { liveShift ?? sideShift }, set: { liveShift = $0 }),
+                         // Pages lay out at the saved split only; while a line
+                         // is dragged just the line moves (no re-layout every
+                         // frame, which made the pages flicker), and the pages
+                         // slide over once on release (DaRon).
+                         split: .constant(split),
+                         sideShift: .constant(sideShift),
+                         dragSplit: Binding(get: { liveSplit ?? split }, set: { liveSplit = $0 }),
+                         dragShift: Binding(get: { liveShift ?? sideShift }, set: { liveShift = $0 }),
                          hingeX: hingeX,
                          commit: {
-                             if let v = liveSplit { split = v; liveSplit = nil }
-                             if let v = liveShift { sideShift = v; liveShift = nil }
+                             withAnimation(.smooth(duration: 0.3)) {
+                                 if let v = liveSplit { split = v }
+                                 if let v = liveShift { sideShift = v }
+                             }
+                             liveSplit = nil; liveShift = nil
                          },
                          mainMinWidth: mainMinWidth,
                          mainWidth: mainWidth, direction: direction,
@@ -449,6 +458,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var size: CGSize
     @Binding var split: Double
     @Binding var sideShift: Double
+    @Binding var dragSplit: Double
+    @Binding var dragShift: Double
     var hingeX: CGFloat = 0
     var commit: () -> Void
     var mainMinWidth: CGFloat?
@@ -587,9 +598,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .accessibilityHidden(true)
                     .zIndex(2)
                 // Drag the line to give either half more room (DaRon).
-                DuoSplitHandle(share: $split, length: size.height, span: total,
+                DuoSplitHandle(share: $dragSplit, length: size.height, span: total,
                                horizontal: true, rest: 0.5, onCommit: commit)
-                    .offset(y: topH - DuoSplitHandle.grab / 2)
+                    .offset(y: size.height * DuoSplitHandle.clamp(dragSplit) - DuoSplitHandle.grab / 2)
                     .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(lift == 0)
                     .zIndex(3)
@@ -598,18 +609,20 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // The line between side-by-side pages: dragging right gives
                 // the left page more room. Swapped, the main page is on the
                 // left, so the same drag shrinks the companion.
-                let lineX = slide < 0.5 ? paneW : mainW
+                // Follows the finger; the pages catch up on release.
+                let dragLeft = DuoSplitHandle.clamp(sideDefault + dragShift)
+                let lineX = total * (direction == .rightToLeft ? 1 - dragLeft : dragLeft)
                 let mirrored = direction == .rightToLeft
                 DuoSplitHandle(
                     share: Binding(
-                        get: { mirrored ? 1 - leftShare : leftShare },
-                        set: { sideShift = (mirrored ? 1 - $0 : $0) - sideDefault }
+                        get: { mirrored ? 1 - dragLeft : dragLeft },
+                        set: { dragShift = (mirrored ? 1 - $0 : $0) - sideDefault }
                     ),
                     length: total, span: size.height,
                     horizontal: false,
                     rest: mirrored ? 1 - sideDefault : sideDefault,
                     onCommit: commit)
-                    .offset(x: (direction == .rightToLeft ? total - lineX : lineX) - DuoSplitHandle.grab / 2)
+                    .offset(x: lineX - DuoSplitHandle.grab / 2)
                     .opacity(lift > 0 ? 0 : 1)
                     .allowsHitTesting(lift == 0)
                     .zIndex(3)
@@ -1366,6 +1379,12 @@ struct DuoSplitHandle: View {
             .frame(width: horizontal ? span : Self.grab, height: horizontal ? Self.grab : span)
             .contentShape(Rectangle())
             .overlay {
+                // While held: the whole line in the accent, where the split
+                // will land when you let go.
+                Rectangle()
+                    .fill(Color.accentColor.opacity(dragging ? 0.8 : 0))
+                    .frame(width: horizontal ? span : 2, height: horizontal ? 2 : span)
+                    .animation(.easeOut(duration: 0.15), value: dragging)
                 Capsule()
                     // Accent while held (DaRon).
                     .fill(dragging ? Color.accentColor : Theme.secondaryText.opacity(0.45))

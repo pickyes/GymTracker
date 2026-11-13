@@ -125,8 +125,8 @@ struct ContentView: View {
             .background {
                 // One highlight that slides to the page you pick.
                 if active {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(duo.sideTint ? effectiveAccent.opacity(0.18) : Theme.text.opacity(0.12))
+                    // Liquid Glass, tinted with the accent (DaRon).
+                    RailGlassHighlight(tint: duo.sideTint ? effectiveAccent : nil)
                         .matchedGeometryEffect(id: "railHighlight", in: railNS)
                 }
             }
@@ -1127,6 +1127,21 @@ struct VerticalBarEdgeReader: UIViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 self?.onChange?(send)
             }
+        }
+    }
+}
+
+
+/// The side bar's current-page highlight: a Liquid Glass pill, tinted.
+private struct RailGlassHighlight: View {
+    var tint: Color?
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        if #available(iOS 26.0, *) {
+            Color.clear
+                .glassEffect(tint.map { .regular.tint($0.opacity(0.45)) } ?? .regular, in: shape)
+        } else {
+            shape.fill((tint ?? Theme.text).opacity(tint == nil ? 0.12 : 0.18))
         }
     }
 }
