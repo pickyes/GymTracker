@@ -444,9 +444,10 @@ struct ContentView: View {
             // is open.
             if showSwapButton && Self.isWide(steadySize) && !navExpanded && !store.calendarDropdownOpen {
                 swapSidesButton
-                    // Out of the shadows: emerges with the hinge as the
-                    // Duo opens, and fades/blurs in when it appears.
-                    .hingeEmerge()
+                    // Always fully there and tappable while the Duo is
+                    // open, at any hinge angle (it used to fade and blur
+                    // with the hinge and looked disabled mid-close). It
+                    // still fades in when it first appears.
                     .transition(reduceMotion ? .opacity : .asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.6)).animation(.easeOut(duration: 0.6)),
                         removal: .opacity.animation(.easeIn(duration: 0.15))))

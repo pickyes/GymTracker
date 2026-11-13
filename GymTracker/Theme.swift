@@ -534,39 +534,35 @@ struct HingeReader: ViewModifier {
     }
 }
 
-/// Waiting pane revealed by the unfold: fully lit the whole time, from 0°
-/// to 180° — it only grows out from the hinge a touch as the phone opens.
+/// The waiting pane while the hinge moves (DaRon, Nov 12: closing the
+/// phone shrank the body and its buttons). Fully lit and full size the
+/// whole way from 0° to 180°: while the phone is part-way open the pane
+/// keeps the exact size it had fully open, top-aligned, so nothing in it
+/// shrinks or moves, whatever the system does to the layout mid-fold.
 struct HingeReveal: ViewModifier {
     @ObservedObject private var hinge = HingeState.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The edge toward the hinge (the pane grows out from it).
+    /// Kept for call sites; the pane no longer scales from the hinge.
     var anchor: UnitPoint = .trailing
+    @State private var openSize: CGSize = .zero
 
     func body(content: Content) -> some View {
-        let t = hinge.openness
+        let moving = hinge.openness > 0 && hinge.openness < 1 && openSize.width > 0
         content
-            .scaleEffect(reduceMotion ? 1 : 0.96 + 0.04 * t, anchor: anchor)
-    }
-}
-
-/// Rises out of the dark as the Duo opens (the swap button): invisible,
-/// blurred and small when closed, fully there at flat — whole 0–180°.
-struct HingeEmerge: ViewModifier {
-    @ObservedObject private var hinge = HingeState.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func body(content: Content) -> some View {
-        let t = hinge.openness
-        content
-            .opacity(t * t)
-            .blur(radius: reduceMotion ? 0 : 10 * (1 - t))
-            .scaleEffect(reduceMotion ? 1 : 0.8 + 0.2 * t)
+            .frame(width: moving ? openSize.width : nil,
+                   height: moving ? openSize.height : nil,
+                   alignment: .top)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                // Remember the size only while the phone is fully open
+                // (or has no hinge): that's the size to hold mid-fold.
+                if HingeState.shared.openness >= 1, size.width > 0, size.height > 0 {
+                    openSize = size
+                }
+            }
     }
 }
 
 extension View {
     func hingeReader() -> some View { modifier(HingeReader()) }
-    func hingeEmerge() -> some View { modifier(HingeEmerge()) }
     func hingeReveal(anchor: UnitPoint = .trailing) -> some View { modifier(HingeReveal(anchor: anchor)) }
 }
 
