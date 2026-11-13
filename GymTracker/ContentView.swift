@@ -105,7 +105,9 @@ struct ContentView: View {
                         // The icon zone only where the status bar really is:
                         // across the top, visible. Hidden or turned to run
                         // down the side → no grey spot (DaRon, Nov 12).
-                        StatusBarFade(height: stripHeight, statusBarHeight: Self.horizontalStatusBarHeight(proxy.size))
+                        StatusBarFade(height: stripHeight, statusBarHeight: Self.horizontalStatusBarHeight(proxy.size),
+                                      // Folded shows more icons (silent, location) than open.
+                                      clusterWidth: proxy.size.width < 600 ? 165 : 135)
                         StatusBarBlur(height: stripHeight)
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {

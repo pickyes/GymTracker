@@ -822,7 +822,7 @@ struct StatusBarFade: View {
     /// (DaRon, Nov 12: "anything that goes underneath the status bar").
     var statusBarHeight: CGFloat = 0
     /// How far in from the right edge the status icons reach.
-    var clusterWidth: CGFloat = 210
+    var clusterWidth: CGFloat = 140
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -832,21 +832,16 @@ struct StatusBarFade: View {
                 .frame(height: height)
                 .frame(maxWidth: .infinity, alignment: .top)
             if statusBarHeight > 0 {
-                // The status-icon block: solid where the icons are, soft
-                // fade on its left and bottom edges.
-                Rectangle()
+                // Only behind the status icons (DaRon, Nov 12): a capsule
+                // hugging the clock / signal / battery cluster, the status
+                // bar's own height, with a short soft edge — no spill to
+                // the left of the clock or below the icons.
+                Capsule()
                     .fill(Color(white: 0.5))
-                    .mask(LinearGradient(stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black, location: 0.25),
-                        .init(color: .black, location: 1),
-                    ], startPoint: .leading, endPoint: .trailing))
-                    .mask(LinearGradient(stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black, location: 0.75),
-                        .init(color: .clear, location: 1),
-                    ], startPoint: .top, endPoint: .bottom))
-                    .frame(width: clusterWidth, height: statusBarHeight + 14)
+                    .frame(width: clusterWidth, height: max(0, statusBarHeight - 12))
+                    .blur(radius: 3)
+                    .padding(.top, 6)
+                    .padding(.trailing, 6)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
