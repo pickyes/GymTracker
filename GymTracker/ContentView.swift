@@ -109,7 +109,7 @@ struct ContentView: View {
                         // The top bar: an ombré from the page color at the
                         // very top edge to transparent (DaRon, Nov 12) —
                         // replaces the blur bar, which showed as a band.
-                        StatusBarOmbre(height: 16)  // a thin fade along the top edge only
+                        StatusBarOmbre(height: 22)  // a soft fade along the top edge only
                         // Dim + tap-outside-to-collapse while expanded.
                         if navExpanded {
                             Color.black.opacity(0.25)

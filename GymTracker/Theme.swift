@@ -964,9 +964,14 @@ struct StatusBarOmbre: View {
     var height: CGFloat
 
     var body: some View {
+        // Eased (smooth-step) so there's no visible edge where it starts
+        // or ends (DaRon: "too harsh at the beginning").
         LinearGradient(stops: [
-            .init(color: Theme.background, location: 0),
-            .init(color: Theme.background.opacity(0.85), location: 0.4),
+            .init(color: Theme.background.opacity(0.9), location: 0),
+            .init(color: Theme.background.opacity(0.72), location: 0.2),
+            .init(color: Theme.background.opacity(0.48), location: 0.4),
+            .init(color: Theme.background.opacity(0.26), location: 0.6),
+            .init(color: Theme.background.opacity(0.1), location: 0.8),
             .init(color: Theme.background.opacity(0), location: 1),
         ], startPoint: .top, endPoint: .bottom)
         .frame(height: height)
