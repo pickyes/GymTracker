@@ -70,26 +70,62 @@ struct ContentView: View {
     }
     /// Settings → Status bar on the side, on a screen that has one: the
     /// buttons move into a rail along that edge (DaRon, like Reddit).
-    private var rail: HorizontalEdge? { duo.sideStatusBar ? verticalBarEdge : nil }
+    private var rail: HorizontalEdge? {
+        guard duo.sideStatusBar else { return nil }
+        // Where iOS keeps the status bar on top (open and upright), the
+        // grey side bar still shows on the right, with the pages and
+        // buttons in it (DaRon: portrait too).
+        return verticalBarEdge ?? (duo.sideStrip ? .trailing : nil)
+    }
     private var railWidth: CGFloat { rail == nil ? 0 : Self.railWidth }
     static let railWidth: CGFloat = 84
     /// Side status bar on: the buttons' own column beside the strip.
     static let buttonColumn: CGFloat = 76
     /// Side bar: where Today's + sits, below the status icons.
-    static let railButtonTop: CGFloat = 168
+    static let railButtonTop: CGFloat = 132
 
     /// Side bar: the rest pill fills the room between the page list and
     /// the buttons below it (DaRon: big, never overlapping).
+    /// Side bar: how tall the page list is, labeled or icons only.
+    private func railListHeight(labeled: Bool) -> CGFloat {
+        let back: CGFloat = 52 + (labeled ? 6 : 4)
+        return labeled ? back + 4 * 58 + 3 * 6 : back + 4 * 44 + 3 * 4
+    }
+
+    /// The buttons stacked at the bottom of the side bar, gaps included.
+    private var railButtonsHeight: CGFloat {
+        var b: CGFloat = 0
+        if selectedPage == .today || selectedPage == .notes { b += 56 + 16 }
+        if showSwapButton && Self.isWide(steadySize) { b += 56 + 16 }
+        return b
+    }
+
+    /// Where the side bar's list starts.
+    private var railTop: CGFloat { Self.railButtonTop + (cameraAtTop ? Self.cameraClearance : 0) }
+
+    private var railBottom: CGFloat { cameraAtBottom ? Self.cameraClearance : 16 }
+
+    /// Room between the list (plus a gap) and the buttons, for the pill.
+    private func railPillRoom(labeled: Bool) -> CGFloat {
+        steadySize.height - railTop - railListHeight(labeled: labeled) - 16
+            - railButtonsHeight - railBottom
+    }
+
+    /// Back button showing in the side bar: the rest pill shrinks to a
+    /// round button like the others (DaRon).
+    private var railPillAsButton: Bool { sideBar && store.canGoBack.contains(selectedPage.rawValue) }
+
+    /// Labels unless a running rest pill needs the room.
+    private var railLabeled: Bool {
+        let free = steadySize.height - railTop - railListHeight(labeled: true) - railButtonsHeight - railBottom
+        // Same on every page (icons only whenever the tallest case needs
+        // it), so switching pages never re-lays out the list.
+        return free - 72 >= (restActive && !navExpanded ? 56 : 0)
+    }
+
+    /// The pill fills exactly the room left, never overlapping (DaRon).
     private var sideBarPillHeight: CGFloat {
-        let h = steadySize.height
-        let folded = !Self.isWide(steadySize)
-        let list = Self.railButtonTop + 4 * 58 + 3 * 6
-        let bottom: CGFloat = cameraAtBottom ? Self.cameraClearance : 16 + 34
-        var buttons: CGFloat = 0
-        if selectedPage == .today { buttons += 56 + 16 }
-        if selectedPage == .notes { buttons += 56 + 16 }
-        if showSwapButton && Self.isWide(steadySize) { buttons += 56 + 16 }
-        return max(80, min(260, h - list - 16 - buttons - bottom))
+        railPillAsButton ? 56 : max(56, min(240, railPillRoom(labeled: railLabeled)))
     }
 
     /// The grey side bar is showing (Settings → Side bar strip).
@@ -104,8 +140,8 @@ struct ContentView: View {
                 Image(systemName: "chevron.left")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
-                    .frame(width: 56, height: 44)
-                    .liquidGlass(Capsule())
+                    .frame(width: 52, height: 52)
+                    .liquidGlass(Circle())
             }
             .buttonStyle(PressSqueeze())
             .accessibilityLabel("Back")
@@ -295,22 +331,24 @@ struct ContentView: View {
                             if !store.calendarDropdownOpen {
                                 // Short bar (folded): icons only, so the list
                                 // never runs into the buttons below it.
-                                ViewThatFits(in: .vertical) {
-                                    VStack(spacing: 6) {
-                                        railBackButton
-                                        ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: true) }
-                                    }
-                                    VStack(spacing: 4) {
-                                        railBackButton
-                                        ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: false) }
-                                    }
+                                // Sized up front (not measured against the buttons,
+                                // which made the two fight): labels when there's
+                                // room, icons only when a rest pill needs it.
+                                // Fixed slots: Back has its own space above the
+                                // pages whether shown or not, so the page icons
+                                // never move (DaRon).
+                                VStack(spacing: railLabeled ? 6 : 4) {
+                                    railBackButton
+                                        .frame(width: 52, height: 52)
+                                    ForEach(Page.allCases, id: \.self) { railNavItem($0, labeled: railLabeled) }
                                 }
-                                    .frame(maxHeight: max(0, cornerColumnTop - 12 - Self.railButtonTop), alignment: .top)
                                     .frame(width: iconCenter * 2)
                                     // One spot in every pose, below the status icons
                                     // even with the camera above them, so nothing
                                     // moves when the phone opens (DaRon).
-                                    .padding(.top, Self.railButtonTop)
+                                    // Below the status icons, which the camera
+                                    // pushes down when it's at the top (DaRon).
+                                    .padding(.top, railTop)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity,
                                            alignment: rail == .leading ? .topLeading : .topTrailing)
                                     .ignoresSafeArea(.container, edges: rail == .leading ? [.leading, .top] : [.trailing, .top])
@@ -638,7 +676,10 @@ struct ContentView: View {
         // and short, so the day's workout and the heatmap sit side by side
         // (DaRon). Landscape keeps the heatmap under the workout.
         let clockSide = swapSides
-        let dsHalf = companionSize.width > companionSize.height * 1.2
+        // DS mode (open and upright): always side by side, however the
+        // line is dragged (DaRon); the half's shape alone flipped it.
+        let dsHalf = Self.isWide(steadySize) && steadySize.height > steadySize.width
+            || companionSize.width > companionSize.height * 1.2
         return Group {
             if dsHalf {
                 HStack(alignment: .top, spacing: 0) {

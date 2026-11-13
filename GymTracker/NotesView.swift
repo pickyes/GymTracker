@@ -875,7 +875,9 @@ private struct NoteDetailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, 20)
-        .padding(.top, 8)
+        // Open Duo: clear of the top edge's fade, so the date reads crisp
+        // (DaRon).
+        .padding(.top, wide ? 24 : 8)
         // Top-aligned: the date and title always sit right under the
         // bar (centered, they slid up under it when the pane's stack
         // measured taller than the screen).

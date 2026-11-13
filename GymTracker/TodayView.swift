@@ -2248,17 +2248,24 @@ struct RestTimerCard: View {
                             // Lava-lamp pill (DaRon, Nov 12): glass filled
                             // with glowing accent liquid that drains to
                             // empty as the rest counts down to zero.
+                            // Button-sized (side bar with Back showing): just
+                            // the time, in a circle.
+                            let round = pillHeight <= 60
                             VStack(spacing: 8) {
-                                Image(systemName: paused ? "pause.fill" : "timer")
-                                    .scaledFont(size: 17, weight: .semibold, maxScale: 1.3)
+                                if !round {
+                                    Image(systemName: paused ? "pause.fill" : "timer")
+                                        .scaledFont(size: 17, weight: .semibold, maxScale: 1.3)
+                                }
                                 Text(formatted(max(0, remaining)))
                                     .scaledFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
                                     .monospacedDigit()
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.7)
-                                Image(systemName: "chevron.up")
-                                    .font(.caption2.weight(.bold))
-                                    .opacity(0.8)
+                                if !round {
+                                    Image(systemName: "chevron.up")
+                                        .font(.caption2.weight(.bold))
+                                        .opacity(0.8)
+                                }
                             }
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
