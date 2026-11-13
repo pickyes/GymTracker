@@ -2492,7 +2492,8 @@ final class WorkoutStore: ObservableObject {
         let unit = template.map { unit(for: $0) } ?? settings.weightUnit
         guard let display = unit.displayValue(for: weightLb), display > 0 else { return "Set weight" }
         if isPair {
-            return "\(formatNumber(display))s"
+            // Per dumbbell, spelled out ("40 lbs", not the old "40s").
+            return "\(formatNumber(display)) \(unit == .lb ? "lbs" : unit.label)"
         }
         return "\(formatNumber(display)) \(unit.label)"
     }
