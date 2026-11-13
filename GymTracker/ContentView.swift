@@ -121,7 +121,11 @@ struct ContentView: View {
     /// (never past the camera) when the screen is too short for the list
     /// and the buttons, so nothing overlaps.
     private var railTop: CGFloat {
-        let wanted = Self.railButtonTop + (cameraAtTop ? Self.cameraClearance : 0)
+        // The same spot folded and open (DaRon: the front display's icons
+        // sat lower, so they jumped when the phone opened). The camera only
+        // pushes the status icons down; the page icons start below them
+        // either way.
+        let wanted = Self.railButtonTop
         let fits = steadySize.height - railBottom - railButtonsHeight - 12 - railListHeight(labeled: false)
         return max(cameraAtTop ? 84 : 20, min(wanted, fits))
     }
@@ -161,12 +165,17 @@ struct ContentView: View {
         if store.canGoBack.contains(selectedPage.rawValue) {
             Button { store.requestBack(selectedPage.rawValue) } label: {
                 Image(systemName: "chevron.left")
-                    .font(.title3.weight(.bold))
+                    .font(cameraAtTop ? .subheadline.weight(.bold) : .title3.weight(.bold))
                     .foregroundStyle(Theme.text)
-                    .frame(width: 52, height: 52)
+                    // Folded, the camera pushes the status icons down into
+                    // the top of this slot: a smaller button at the slot's
+                    // bottom stays clear of them.
+                    .frame(width: cameraAtTop ? 30 : 52, height: cameraAtTop ? 30 : 52)
                     .liquidGlass(Circle())
             }
             .buttonStyle(PressSqueeze())
+            .frame(width: 52, height: 52, alignment: .bottom)
+            .contentShape(Rectangle())
             .accessibilityLabel("Back")
             .transition(.scale.combined(with: .opacity))
         }
