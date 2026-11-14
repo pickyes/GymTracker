@@ -485,7 +485,9 @@ struct BodyFigureView: View {
     /// What colours each muscle gets, in drawing order (later wins).
     private var palette: [MuscleID: BodyTint] {
         var p: [MuscleID: BodyTint] = [:]
-        for id in recoveryIDs(.fresh) { p[id] = BodyTint(color: Self.freshColor, strength: 1) }
+        // Fresh (recovered) is a quiet wash: the body isn't a pink suit on a
+        // rest day, and recovering / working muscles stand out against it.
+        for id in recoveryIDs(.fresh) { p[id] = BodyTint(color: Self.freshColor, strength: 0.32) }
         for id in recoveryIDs(.recovering) { p[id] = BodyTint(color: Self.recoveringColor, strength: 1) }
         for id in injuredOnly { p[id] = BodyTint(color: Self.litGlow, strength: 1) }
         let lit = litColor ?? Self.litGlow
@@ -1472,12 +1474,23 @@ final class BodyModel {
     texture2d<float> bodyShade;
     texture2d<float> bodyPalette;
     #pragma body
-    // The four area texels around this point, each looked up in the
-    // palette and blended like a linear filter: smooth edges on every lit
-    // muscle instead of texel steps (a plain nearest lookup was jagged).
     constexpr sampler gatherS(filter::nearest, address::clamp_to_edge);
     constexpr sampler linearS(filter::linear, mip_filter::linear, address::clamp_to_edge);
     float2 uv = _surface.diffuseTexcoord;
+    float shade = bodyShade.sample(linearS, uv).r;
+    // Relief: the fibre shading used as a height, bump-mapped through
+    // screen-space derivatives (no tangents needed). Muscles get grooves
+    // between fibres and catch the light like a sculpted figure.
+    float3 n = normalize(_surface.normal);
+    float3 dpdx = dfdx(_surface.position), dpdy = dfdy(_surface.position);
+    float dhdx = dfdx(shade), dhdy = dfdy(shade);
+    float3 r1 = cross(dpdy, n), r2 = cross(n, dpdx);
+    float det = dot(dpdx, r1);
+    float3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
+    float bump = 0.010;
+    _surface.normal = normalize(abs(det) * n - bump * grad);
+    // The four area texels around this point, each looked up in the
+    // palette and blended like a linear filter: smooth edges.
     float2 size = float2(bodyIDs.get_width(), bodyIDs.get_height());
     float2 f = fract(uv * size - 0.5);
     float4 ids = bodyIDs.gather(gatherS, uv) * 255.0;
@@ -1491,14 +1504,13 @@ final class BodyModel {
         a += t.a * w[k];
     }
     if (a > 0.002) {
-        float3 tint = rgb / a;
-        float shade = bodyShade.sample(linearS, uv).r;
-        // Squared shade: the fibres and the lines between muscles stay
-        // visible instead of one flat block of colour.
-        float3 lit = tint * (0.08 + 1.05 * shade * shade);
+        float3 tint = rgb / max(a, 0.001);
+        // The colour keeps the muscle's own light and dark (fibres stay
+        // visible), deeper in the grooves.
+        float3 lit = tint * (0.18 + 0.9 * shade);
         _surface.diffuse.rgb = mix(_surface.diffuse.rgb, lit, a);
-        // The accent's glow: bright enough for the camera's bloom.
-        _surface.emission.rgb += lit * 0.4 * a;
+        // A gentle inner glow, only on strongly lit muscles.
+        _surface.emission.rgb += lit * 0.22 * a * a;
     }
     """
 }
@@ -1550,7 +1562,10 @@ final class BodySceneView: SCNView, UIGestureRecognizerDelegate {
 
         if let geometry = model.geometry?.copy() as? SCNGeometry {
             let m = SCNMaterial()
-            m.lightingModel = .lambert
+            // A soft satin sheen: reads as a sculpted figure, not a decal.
+            m.lightingModel = .blinn
+            m.specular.contents = UIColor(white: 0.22, alpha: 1)
+            m.shininess = 0.22
             m.diffuse.contents = model.colorTexture
             m.diffuse.mipFilter = .linear
             m.shaderModifiers = [.surface: BodyModel.shader]
@@ -1581,9 +1596,28 @@ final class BodySceneView: SCNView, UIGestureRecognizerDelegate {
             let n = SCNNode(); n.light = l; n.eulerAngles = euler
             scene.rootNode.addChildNode(n)
         }
-        light(.ambient, 380, SCNVector3Zero)
-        light(.directional, 900, SCNVector3(-0.35, 0.45, 0))      // key, above right
-        light(.directional, 650, SCNVector3(0.1, .pi + 0.5, 0))  // rim from behind: the outline holds on black
+        // Studio lighting: key above right, cool fill left, two rims from
+        // behind so the silhouette holds on black.
+        light(.ambient, 260, SCNVector3Zero)
+        light(.directional, 950, SCNVector3(-0.45, 0.5, 0))
+        light(.directional, 300, SCNVector3(-0.1, -0.6, 0))
+        light(.directional, 700, SCNVector3(0.15, .pi + 0.7, 0))
+        light(.directional, 700, SCNVector3(0.15, .pi - 0.7, 0))
+
+        // A soft pool of light on the floor under the feet: the figure
+        // stands somewhere instead of floating on black.
+        let floor = SCNPlane(width: 1.1, height: 0.42)
+        let fm = SCNMaterial()
+        fm.lightingModel = .constant
+        fm.diffuse.contents = Self.floorGlow
+        fm.writesToDepthBuffer = false
+        fm.isDoubleSided = true
+        floor.materials = [fm]
+        let floorNode = SCNNode(geometry: floor)
+        floorNode.eulerAngles.x = -.pi / 2
+        floorNode.position = SCNVector3(0, -1.0, 0.02)
+        floorNode.renderingOrder = -1
+        scene.rootNode.addChildNode(floorNode)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
         pan.delegate = self
@@ -1593,6 +1627,18 @@ final class BodySceneView: SCNView, UIGestureRecognizerDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Radial glow for the floor: white at the centre fading to nothing.
+    private static let floorGlow: UIImage = {
+        let size = CGSize(width: 256, height: 256)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            let colors = [UIColor(white: 1, alpha: 0.13).cgColor, UIColor(white: 1, alpha: 0.035).cgColor,
+                          UIColor(white: 1, alpha: 0).cgColor] as CFArray
+            let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1])!
+            ctx.cgContext.drawRadialGradient(g, startCenter: CGPoint(x: 128, y: 128), startRadius: 0,
+                                             endCenter: CGPoint(x: 128, y: 128), endRadius: 128, options: [])
+        }
+    }()
+
     /// Whole body in view, arms included, at any width.
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -1600,7 +1646,9 @@ final class BodySceneView: SCNView, UIGestureRecognizerDelegate {
         let aspect = Float(bounds.width / bounds.height)
         let halfHeight = max(1.06, 0.68 / aspect)
         let distance = halfHeight / tan(Float(9) * .pi / 180)
-        cameraNode.position = SCNVector3(0, 0, distance)
+        // A touch above, looking slightly down: the floor reads as a floor.
+        cameraNode.position = SCNVector3(0, distance * 0.06, distance)
+        cameraNode.look(at: SCNVector3(0, -0.04, 0))
     }
 
     func setPalette(_ palette: [MuscleID: BodyTint]) {

@@ -445,7 +445,9 @@ def finish(col, side):
     # Muscle tissue: red (a* well above the plate's tendons and paper),
     # read over a few px so fibre lines don't count as gaps.
     red = cv2.GaussianBlur(np.clip((lab[..., 1] - 132) / 12, 0, 1), (0, 0), 3)
-    g = np.clip(0.20 + 0.55 * L ** 1.3 + 0.10 * (1 - red), 0, 1)
+    # Graphite figure: muscle a mid grey with its fibres, tendons and fascia
+    # a quieter grey (bright white tendons fought every highlight).
+    g = np.clip(red * (0.18 + 0.48 * L ** 1.4) + (1 - red) * (0.30 + 0.14 * L), 0, 1)
     grey = g * 255
     pl = part_is(side, 'head', 'hand', 'foot').astype(np.uint8)
     if side == "front":
@@ -454,7 +456,7 @@ def finish(col, side):
         cy = int((cj["crotch"][1] * S + (cj["notch"][1] + 0.83 * (cj["crotch"][1] - cj["notch"][1])) * S) / 2)
         cv2.ellipse(pl, (CW // 2, cy), (62, 70), 0, 0, 360, 1, -1)
     plain = cv2.GaussianBlur(pl.astype(np.float32), (0, 0), 4)
-    an = plain * 112 + (1 - plain) * grey
+    an = plain * 96 + (1 - plain) * grey
     anat = np.dstack([an, an, an * 1.04, alpha]).clip(0, 255).astype(np.uint8)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(24, 48))
     sh = clahe.apply((L * 255).astype(np.uint8)).astype(np.float32) / 255.0
