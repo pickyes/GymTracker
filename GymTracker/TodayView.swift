@@ -933,7 +933,21 @@ struct TodayView: View {
                 muscles.contains(lib.muscle)
                 && lib.name.localizedCaseInsensitiveContains("stretch")
                 && !blocked.contains(lib.muscle)
+                // A stretch that also moves an injured area (child's pose
+                // bends the knees, a twist turns the lower back) stays
+                // hidden too.
+                && blocked.isDisjoint(with: lib.secondaryMuscles ?? [])
             }
+    }
+
+    /// Before any workout is logged: a short full-body routine, one
+    /// stretch per big area, so the rest day still has something to do.
+    private var starterStretches: [LibraryExercise] {
+        let ids = ["stretch-chest", "stretch-lat", "stretch-shoulder", "stretch-quad-hip-flexor",
+                   "stretch-hamstring", "stretch-glute", "stretch-calf", "stretch-knees-to-chest"]
+        let blocked = InjuryAdaptation.stretchMuscles(for: store.profile?.limits ?? [])
+        return ids.compactMap { ExerciseLibrary.byId($0) }
+            .filter { !blocked.contains($0.muscle) && blocked.isDisjoint(with: $0.secondaryMuscles ?? []) }
     }
 
     /// True when at least one muscle the last workout used has its
@@ -1082,9 +1096,12 @@ struct TodayView: View {
             Text("Stretches to try")
                 .font(.headline)
             if recentlyUsedMuscles.isEmpty {
-                Text("Log a workout and stretches for the muscles you worked will show up here.")
+                Text("A gentle full-body routine. Once you log a workout, these follow the muscles you worked.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(starterStretches) { lib in stretchRow(lib) }
             } else {
                 Text("For \(recentlyUsedMuscles.map { $0.label }.joined(separator: ", ")) — worked in your last session.")
                     .font(.subheadline)
@@ -1102,28 +1119,7 @@ struct TodayView: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                 } else {
-                    ForEach(stretchesForRecentMuscles) { lib in
-                        Button { stretchDetail = lib } label: {
-                            HStack {
-                                Text(lib.name)
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(lib.muscle.label)
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondaryText)
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 12)
-                            .background(Theme.cardElevated)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    ForEach(stretchesForRecentMuscles) { lib in stretchRow(lib) }
                 }
             }
         }
@@ -1131,6 +1127,33 @@ struct TodayView: View {
         .background(Theme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+    }
+
+    /// One stretch: tap to see how to do it.
+    private func stretchRow(_ lib: LibraryExercise) -> some View {
+        Button { stretchDetail = lib } label: {
+            HStack {
+                Text(lib.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    // Longer names ("Hands-Behind-Back Chest Stretch")
+                    // shrink a little on the folded screen.
+                    .minimumScaleFactor(0.8)
+                Spacer()
+                Text(lib.muscle.label)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .background(Theme.cardElevated)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Compact (outer display, one-handed, glanceable)
