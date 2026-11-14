@@ -380,13 +380,18 @@ struct BodyFigureView: View {
     /// highlight colour it gives a tinted muscle with its fibres intact.
     private var shadeName: String { side == .front ? "BodyShadeFront" : "BodyShadeBack" }
 
+    /// Never lit for work or recovery (DaRon, Nov 14): the feet only ever
+    /// lit because calf and ankle work maps onto them, and a glowing foot
+    /// read as the thing being trained. A marked foot injury still shows.
+    static let neverLit: Set<MuscleID> = [.footLeft, .footRight]
+
     private var primaryLit: Set<MuscleID> {
-        guard let primary else { return highlighted }
-        return highlighted.intersection(primary)
+        guard let primary else { return highlighted.subtracting(Self.neverLit) }
+        return highlighted.intersection(primary).subtracting(Self.neverLit)
     }
     private var secondaryLit: Set<MuscleID> {
         guard let primary else { return [] }
-        return highlighted.subtracting(primary)
+        return highlighted.subtracting(primary).subtracting(Self.neverLit)
     }
 
     /// The shade image tinted with the highlight colour, cut to the given
@@ -417,7 +422,7 @@ struct BodyFigureView: View {
     /// Muscles in a recovery state, unless a highlight or injury covers them.
     private func recoveryIDs(_ state: MuscleRecovery) -> Set<MuscleID> {
         Set(recovery.compactMap { $0.value == state ? $0.key : nil })
-            .subtracting(highlighted).subtracting(injured)
+            .subtracting(highlighted).subtracting(injured).subtracting(Self.neverLit)
     }
 
     /// Injured areas not already under the main highlight.
@@ -451,7 +456,51 @@ struct BodyFigureView: View {
     private static let litStroke = Color.white.opacity(0.9)
     private static let stateStroke = Color.white.opacity(0.35)
 
+    /// Called when a drag turns the body round, so the page's Front/Back
+    /// control follows (3D body only).
+    var onSideChange: ((BodyDiagramSide) -> Void)? = nil
+
+    /// The 3D body (Nov 14): the real model, dragged round, every muscle
+    /// coloured on the model itself. The flat painting is the fallback if
+    /// the model can't load (no Metal).
     var body: some View {
+        if BodyModel.shared.isReady {
+            Body3DView(side: side, palette: palette, onTap: onTap, onSideChange: onSideChange)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Body, \(side.label.lowercased()) view")
+                .accessibilityValue(accessibilityLitText)
+                .accessibilityHint(onTap == nil ? "" : "Use the actions to mark a muscle")
+                .accessibilityActions {
+                    if let onTap {
+                        ForEach(muscleSpecs.filter { $0.side == side }, id: \.id) { spec in
+                            Button(spec.id.accessibilityLabel) { onTap(spec.id) }
+                        }
+                    }
+                }
+        } else {
+            flatFigure
+        }
+    }
+
+    /// What colours each muscle gets, in drawing order (later wins).
+    private var palette: [MuscleID: BodyTint] {
+        var p: [MuscleID: BodyTint] = [:]
+        for id in recoveryIDs(.fresh) { p[id] = BodyTint(color: Self.freshColor, strength: 1) }
+        for id in recoveryIDs(.recovering) { p[id] = BodyTint(color: Self.recoveringColor, strength: 1) }
+        for id in injuredOnly { p[id] = BodyTint(color: Self.litGlow, strength: 1) }
+        let lit = litColor ?? Self.litGlow
+        for id in secondaryLit { p[id] = BodyTint(color: lit, strength: 0.55) }
+        for id in primaryLit { p[id] = BodyTint(color: lit, strength: 1) }
+        return p
+    }
+
+    private var accessibilityLitText: String {
+        let names = (primaryLit.union(secondaryLit).union(injuredOnly))
+            .map(\.accessibilityLabel).sorted()
+        return names.isEmpty ? "" : names.joined(separator: ", ")
+    }
+
+    private var flatFigure: some View {
         GeometryReader { proxy in
             let scale = min(proxy.size.width / 200, proxy.size.height / 400)
             let w = 200 * scale, h = 400 * scale
@@ -775,10 +824,10 @@ struct BodyDiagramView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 260)
 
-            BodyFigureView(side: side, highlighted: litMuscles) { muscle in
+            BodyFigureView(side: side, highlighted: litMuscles, onTap: { muscle in
                 guard muscle.bodyPart != nil else { return }
                 withAnimation(AppAnimation.snappy) { toggle(muscle) }
-            }
+            }, onSideChange: { side = $0 })
             .frame(height: 360)
             .animation(AppAnimation.snappy, value: side)
 
@@ -1079,7 +1128,9 @@ struct LiveBodyView: View {
             BodyFigureView(side: side, highlighted: shownLit,
                            recovery: recoveryMap,
                            litColor: accent, primary: primaryLitMuscles,
-                           injured: injuredMuscles)
+                           injured: injuredMuscles,
+                           // Turning it by hand is a pick: it stops following the exercise.
+                           onSideChange: { userFlipped = true; side = $0 })
                 .modifier(LiveBodyFigureHeight(height: figureHeight))
                 // No animation until the first side is settled, so the
                 // figure never plays a flip as it appears.
@@ -1224,11 +1275,11 @@ struct BodyView: View {
             VStack(spacing: 16) {
                 statsRow
                 legendRow
-                BodyFigureView(side: side, highlighted: highlighted, recovery: recovery) { muscle in
+                BodyFigureView(side: side, highlighted: highlighted, recovery: recovery, onTap: { muscle in
                     withAnimation(AppAnimation.snappy) {
                         tappedMuscle = (tappedMuscle == muscle) ? nil : muscle
                     }
-                }
+                }, onSideChange: { side = $0 })
                 // D15 (2026-11-10): 360pt capped the figure at 180 wide
                 // in the wide open-pose pane. Regular width gets 520pt
                 // (figure 260 wide, +44%) while still fitting with the
@@ -1316,5 +1367,303 @@ struct BodyView: View {
                 .font(.subheadline.weight(.semibold))
         }
         .buttonStyle(.bordered)
+    }
+}
+
+// MARK: - 3D body (Nov 14)
+
+import SceneKit
+import MetalKit
+
+/// One muscle's colour on the 3D body. Strength 0…1 blends it over the grey.
+struct BodyTint: Equatable {
+    var color: Color
+    var strength: Float
+}
+
+/// The MetaHuman body for the app, loaded once and shared by every figure.
+/// Made by design/body-source/figure (export_model.py + make_assets.py):
+///   BodyModel  raw mesh (positions, normals, uvs, triangle indices)
+///   BodyColor  the grey anatomy, BodyShade its light/dark
+///   BodyIDs    which area each texel belongs to (bodyModelAreas)
+final class BodyModel {
+    static let shared = BodyModel()
+
+    let device: MTLDevice?
+    private(set) var geometry: SCNGeometry?
+    private(set) var colorTexture: MTLTexture?
+    private(set) var shadeTexture: MTLTexture?
+    private(set) var idTexture: MTLTexture?
+    private var ids: [UInt8] = []
+    private var idSize = (w: 0, h: 0)
+    var isReady: Bool { geometry != nil && idTexture != nil && colorTexture != nil }
+
+    /// Area index (texel value) → muscle, in ids.json order.
+    static let areas: [MuscleID?] = [nil, .abs, .adductorLeft, .adductorRight, .ankleLeft, .ankleRight, .bicepsLeft, .bicepsRight, .calfLeft, .calfRight, .deltLeft, .deltRight, .elbowLeft, .elbowRight, .footLeft, .footRight, .forearmLeft, .forearmRight, .gluteLeft, .gluteRight, .groin, .hamstringLeft, .hamstringRight, .handLeft, .handRight, .head, .hipFlexorLeft, .hipFlexorRight, .kneeLeft, .kneeRight, .latLeft, .latRight, .lowerBack, .midBack, .neck, .obliqueLeft, .obliqueRight, .outerHipLeft, .outerHipRight, .pecLeft, .pecRight, .quadLeft, .quadRight, .rotatorCuffLeft, .rotatorCuffRight, .serratusLeft, .serratusRight, .shinLeft, .shinRight, .trapLeft, .trapRight, .tricepsLeft, .tricepsRight, .wristLeft, .wristRight]
+    static let index: [MuscleID: Int] = {
+        var m: [MuscleID: Int] = [:]
+        for (i, a) in areas.enumerated() { if let a { m[a] = i } }
+        return m
+    }()
+
+    private init() {
+        device = MTLCreateSystemDefaultDevice()
+        guard let device else { return }
+        geometry = Self.loadGeometry()
+        let loader = MTKTextureLoader(device: device)
+        func texture(_ name: String, srgb: Bool) -> MTLTexture? {
+            guard let data = NSDataAsset(name: name)?.data else { return nil }
+            return try? loader.newTexture(data: data, options: [
+                .SRGB: srgb, .generateMipmaps: true,
+                .textureStorageMode: MTLStorageMode.private.rawValue])
+        }
+        colorTexture = texture("BodyColor", srgb: true)
+        shadeTexture = texture("BodyShade", srgb: false)
+        loadIDs(device: device)
+    }
+
+    private static func loadGeometry() -> SCNGeometry? {
+        guard let data = NSDataAsset(name: "BodyModel")?.data, data.count > 12 else { return nil }
+        let nv = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 4, as: UInt32.self) })
+        let ni = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 8, as: UInt32.self) })
+        let pos = 12, nrm = pos + nv * 12, uv = nrm + nv * 12, idx = uv + nv * 8
+        guard data.count >= idx + ni * 4 else { return nil }
+        let sources = [
+            SCNGeometrySource(data: data.subdata(in: pos..<nrm), semantic: .vertex, vectorCount: nv,
+                              usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12),
+            SCNGeometrySource(data: data.subdata(in: nrm..<uv), semantic: .normal, vectorCount: nv,
+                              usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12),
+            SCNGeometrySource(data: data.subdata(in: uv..<idx), semantic: .texcoord, vectorCount: nv,
+                              usesFloatComponents: true, componentsPerVector: 2, bytesPerComponent: 4, dataOffset: 0, dataStride: 8),
+        ]
+        let element = SCNGeometryElement(data: data.subdata(in: idx..<(idx + ni * 4)), primitiveType: .triangles,
+                                         primitiveCount: ni / 3, bytesPerIndex: 4)
+        return SCNGeometry(sources: sources, elements: [element])
+    }
+
+    private func loadIDs(device: MTLDevice) {
+        guard let data = NSDataAsset(name: "BodyIDs")?.data, data.count > 8 else { return }
+        let w = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 0, as: UInt32.self) })
+        let h = Int(data.withUnsafeBytes { $0.load(fromByteOffset: 4, as: UInt32.self) })
+        guard let raw = try? (data.subdata(in: 8..<data.count) as NSData).decompressed(using: .zlib),
+              raw.count == w * h else { return }
+        ids = [UInt8](raw as Data); idSize = (w, h)
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: w, height: h, mipmapped: false)
+        desc.usage = .shaderRead
+        guard let tex = device.makeTexture(descriptor: desc) else { return }
+        ids.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: w) }
+        idTexture = tex
+    }
+
+    /// The muscle at a texture coordinate (from a hit test).
+    func area(at uv: CGPoint) -> MuscleID? {
+        guard idSize.w > 0 else { return nil }
+        let x = min(max(Int(uv.x * CGFloat(idSize.w)), 0), idSize.w - 1)
+        let y = min(max(Int(uv.y * CGFloat(idSize.h)), 0), idSize.h - 1)
+        let i = Int(ids[y * idSize.w + x])
+        return i < Self.areas.count ? Self.areas[i] : nil
+    }
+
+    /// Lit muscles drawn in the shader: the area's palette colour, shaded by
+    /// the painting's own light and dark, plus a little glow (bloom).
+    static let shader = """
+    #pragma arguments
+    texture2d<float> bodyIDs;
+    texture2d<float> bodyShade;
+    texture2d<float> bodyPalette;
+    #pragma body
+    constexpr sampler nearestS(filter::nearest, address::clamp_to_edge);
+    constexpr sampler linearS(filter::linear, mip_filter::linear, address::clamp_to_edge);
+    float2 uv = _surface.diffuseTexcoord;
+    uint area = uint(round(bodyIDs.sample(nearestS, uv).r * 255.0));
+    float4 tint = bodyPalette.read(uint2(min(area, 63u), 0u));
+    if (tint.a > 0.001) {
+        float shade = bodyShade.sample(linearS, uv).r;
+        // Squared shade: the fibres and the lines between muscles stay
+        // visible instead of one flat block of colour.
+        float3 lit = tint.rgb * (0.12 + 0.95 * shade * shade);
+        _surface.diffuse.rgb = mix(_surface.diffuse.rgb, lit, tint.a);
+        _surface.emission.rgb += lit * 0.3 * tint.a;
+    }
+    """
+}
+
+/// The 3D body in a SceneKit view: drag sideways to turn it, tap a muscle.
+struct Body3DView: UIViewRepresentable {
+    let side: BodyDiagramSide
+    let palette: [MuscleID: BodyTint]
+    var onTap: ((MuscleID) -> Void)?
+    var onSideChange: ((BodyDiagramSide) -> Void)?
+
+    func makeUIView(context: Context) -> BodySceneView { BodySceneView(side: side) }
+
+    func updateUIView(_ view: BodySceneView, context: Context) {
+        view.onTap = onTap
+        view.onSideChange = onSideChange
+        view.setPalette(palette)
+        view.show(side)
+    }
+}
+
+final class BodySceneView: SCNView, UIGestureRecognizerDelegate {
+    var onTap: ((MuscleID) -> Void)?
+    var onSideChange: ((BodyDiagramSide) -> Void)?
+    private let model = BodyModel.shared
+    private let turntable = SCNNode()
+    private let cameraNode = SCNNode()
+    private var material: SCNMaterial?
+    private var paletteTexture: MTLTexture?
+    private var lastPalette: [MuscleID: BodyTint]? = nil
+    private var yaw: Float = 0
+    private var shownSide: BodyDiagramSide = .front
+
+    /// Starts already facing `side`: no turn plays as the figure appears.
+    init(side: BodyDiagramSide) {
+        shownSide = side
+        yaw = side == .front ? 0 : .pi
+        super.init(frame: .zero, options: [SCNView.Option.preferredDevice.rawValue: model.device as Any,
+                                           SCNView.Option.preferLowPowerDevice.rawValue: true])
+        backgroundColor = .clear
+        isOpaque = false
+        antialiasingMode = .multisampling4X
+        // Draws only when something changes (a turn, a new highlight).
+        rendersContinuously = false
+        isPlaying = false
+        let scene = SCNScene()
+        scene.background.contents = UIColor.clear
+        self.scene = scene
+
+        if let geometry = model.geometry?.copy() as? SCNGeometry {
+            let m = SCNMaterial()
+            m.lightingModel = .lambert
+            m.diffuse.contents = model.colorTexture
+            m.diffuse.mipFilter = .linear
+            m.shaderModifiers = [.surface: BodyModel.shader]
+            m.setValue(SCNMaterialProperty(contents: model.idTexture as Any), forKey: "bodyIDs")
+            m.setValue(SCNMaterialProperty(contents: model.shadeTexture as Any), forKey: "bodyShade")
+            geometry.materials = [m]
+            material = m
+            turntable.addChildNode(SCNNode(geometry: geometry))
+        }
+        turntable.eulerAngles.y = yaw
+        scene.rootNode.addChildNode(turntable)
+
+        let cam = SCNCamera()
+        cam.fieldOfView = 18
+        cam.zNear = 0.5; cam.zFar = 40
+        cam.wantsHDR = true
+        cam.wantsExposureAdaptation = false
+        cam.bloomIntensity = 1.1
+        cam.bloomThreshold = 0.75
+        cam.bloomBlurRadius = 10
+        cameraNode.camera = cam
+        scene.rootNode.addChildNode(cameraNode)
+        pointOfView = cameraNode
+
+        // Lights stay with the viewer: whichever side faces you is lit.
+        func light(_ type: SCNLight.LightType, _ intensity: CGFloat, _ euler: SCNVector3) {
+            let l = SCNLight(); l.type = type; l.intensity = intensity
+            let n = SCNNode(); n.light = l; n.eulerAngles = euler
+            scene.rootNode.addChildNode(n)
+        }
+        light(.ambient, 380, SCNVector3Zero)
+        light(.directional, 900, SCNVector3(-0.35, 0.45, 0))      // key, above right
+        light(.directional, 650, SCNVector3(0.1, .pi + 0.5, 0))  // rim from behind: the outline holds on black
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        pan.delegate = self
+        addGestureRecognizer(pan)
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped(_:))))
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Whole body in view, arms included, at any width.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let aspect = Float(bounds.width / bounds.height)
+        let halfHeight = max(1.06, 0.68 / aspect)
+        let distance = halfHeight / tan(Float(9) * .pi / 180)
+        cameraNode.position = SCNVector3(0, 0, distance)
+    }
+
+    func setPalette(_ palette: [MuscleID: BodyTint]) {
+        guard palette != lastPalette, let device = model.device, let material else { return }
+        lastPalette = palette
+        var bytes = [UInt8](repeating: 0, count: 64 * 4)
+        for (id, tint) in palette {
+            guard let i = BodyModel.index[id], i < 64 else { continue }
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            UIColor(tint.color).getRed(&r, green: &g, blue: &b, alpha: &a)
+            // sRGB → linear: the shader works in linear light.
+            func lin(_ c: CGFloat) -> UInt8 { UInt8(max(0, min(255, pow(Double(c), 2.2) * 255))) }
+            bytes[i * 4] = lin(r); bytes[i * 4 + 1] = lin(g); bytes[i * 4 + 2] = lin(b)
+            bytes[i * 4 + 3] = UInt8(max(0, min(255, tint.strength * Float(a) * 255)))
+        }
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 64, height: 1, mipmapped: false)
+        guard let tex = device.makeTexture(descriptor: desc) else { return }
+        bytes.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, 64, 1), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 64 * 4) }
+        paletteTexture = tex
+        // A new property (not new bytes in the old one) so SceneKit redraws.
+        material.setValue(SCNMaterialProperty(contents: tex), forKey: "bodyPalette")
+    }
+
+    /// Turn to face the given side, the short way round, unless a drag
+    /// already has it there.
+    func show(_ side: BodyDiagramSide) {
+        guard side != shownSide else { return }
+        shownSide = side
+        let target: Float = side == .front ? 0 : .pi
+        var delta = (target - yaw).truncatingRemainder(dividingBy: 2 * .pi)
+        if delta > .pi { delta -= 2 * .pi } else if delta < -.pi { delta += 2 * .pi }
+        turn(to: yaw + delta, duration: 0.55)
+    }
+
+    private func turn(to angle: Float, duration: CFTimeInterval) {
+        yaw = angle
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = duration
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeOut)
+        turntable.eulerAngles.y = angle
+        SCNTransaction.commit()
+    }
+
+    /// The side facing the viewer at the current turn.
+    private var facing: BodyDiagramSide { cos(yaw) >= 0 ? .front : .back }
+
+    @objc private func panned(_ g: UIPanGestureRecognizer) {
+        let dx = Float(g.translation(in: self).x)
+        g.setTranslation(.zero, in: self)
+        switch g.state {
+        case .changed:
+            yaw += dx * 0.012
+            SCNTransaction.begin(); SCNTransaction.disableActions = true
+            turntable.eulerAngles.y = yaw
+            SCNTransaction.commit()
+        case .ended, .cancelled:
+            // A flick keeps turning a little and eases out.
+            let v = Float(g.velocity(in: self).x) * 0.012
+            turn(to: yaw + v * 0.18, duration: 0.6)
+        default: break
+        }
+        if facing != shownSide {
+            shownSide = facing
+            onSideChange?(facing)
+        }
+    }
+
+    @objc private func tapped(_ g: UITapGestureRecognizer) {
+        guard let onTap else { return }
+        let hits = hitTest(g.location(in: self), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
+        guard let hit = hits.first, let area = model.area(at: hit.textureCoordinates(withMappingChannel: 0)) else { return }
+        onTap(area)
+    }
+
+    /// Only sideways drags turn the body; up and down still scroll the page.
+    override func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        guard let pan = g as? UIPanGestureRecognizer else { return true }
+        let v = pan.velocity(in: self)
+        return abs(v.x) > abs(v.y)
     }
 }

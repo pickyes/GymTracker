@@ -226,6 +226,7 @@ struct TodayView: View {
             }
         }
         .disableVerticalBar()
+        .onChange(of: effectivePlan == nil, initial: true) { _, rest in syncSinglePage(restDay: rest) }
         // Tap-outside-to-dismiss + drag-to-dismiss (Debug Pass 2): the
         // four layouts already carry the keyboard Done toolbar — this
         // is the second way out of the keyboard. Taps on a button,
@@ -768,6 +769,20 @@ struct TodayView: View {
         return .compact
     }
 
+    /// Today is one page only on a rest day with nothing started: the swap
+    /// button stays away there. Driven by the plan itself, not by the rest
+    /// screen appearing and disappearing (those events can be skipped
+    /// when the layout is rebuilt, which left a "Train anyway" workout
+    /// with no way to swap).
+    private func syncSinglePage(restDay: Bool) {
+        let page = ContentView.Page.today.rawValue
+        if restDay {
+            DuoSettings.shared.singlePages.insert(page)
+        } else {
+            DuoSettings.shared.singlePages.remove(page)
+        }
+    }
+
     @ViewBuilder
     private func todayContent(kind: TodayLayoutKind) -> some View {
         // The "Train anyway" plan wins while one is running on a rest
@@ -878,9 +893,6 @@ struct TodayView: View {
         // too — it used to sit outside any stack, so without this the
         // hoisted stack would show an empty bar above it.
         .sideBarItems(.today)
-        // One page even on the open Duo: no swap button while it shows.
-        .onAppear { DuoSettings.shared.singlePages.insert(ContentView.Page.today.rawValue) }
-        .onDisappear { DuoSettings.shared.singlePages.remove(ContentView.Page.today.rawValue) }
     }
 
     /// Recovery colour per muscle, from the store's logged history —
@@ -974,11 +986,11 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("What's recovering")
                 .font(.headline)
-            BodyFigureView(side: recoverySide, recovery: recoveryMap) { muscle in
+            BodyFigureView(side: recoverySide, recovery: recoveryMap, onTap: { muscle in
                 withAnimation(AppAnimation.snappy) {
                     tappedRecoveryMuscle = (tappedRecoveryMuscle == muscle) ? nil : muscle
                 }
-            }
+            }, onSideChange: { recoverySide = $0 })
             .frame(height: 360)
             if let muscle = tappedRecoveryMuscle {
                 Text(muscle.accessibilityLabel)
