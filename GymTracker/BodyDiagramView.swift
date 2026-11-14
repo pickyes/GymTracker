@@ -1472,18 +1472,33 @@ final class BodyModel {
     texture2d<float> bodyShade;
     texture2d<float> bodyPalette;
     #pragma body
-    constexpr sampler nearestS(filter::nearest, address::clamp_to_edge);
+    // The four area texels around this point, each looked up in the
+    // palette and blended like a linear filter: smooth edges on every lit
+    // muscle instead of texel steps (a plain nearest lookup was jagged).
+    constexpr sampler gatherS(filter::nearest, address::clamp_to_edge);
     constexpr sampler linearS(filter::linear, mip_filter::linear, address::clamp_to_edge);
     float2 uv = _surface.diffuseTexcoord;
-    uint area = uint(round(bodyIDs.sample(nearestS, uv).r * 255.0));
-    float4 tint = bodyPalette.read(uint2(min(area, 63u), 0u));
-    if (tint.a > 0.001) {
+    float2 size = float2(bodyIDs.get_width(), bodyIDs.get_height());
+    float2 f = fract(uv * size - 0.5);
+    float4 ids = bodyIDs.gather(gatherS, uv) * 255.0;
+    float4 w = float4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y));
+    float3 rgb = float3(0.0);
+    float a = 0.0;
+    for (int k = 0; k < 4; k++) {
+        uint area = min(uint(round(ids[k])), 63u);
+        float4 t = bodyPalette.read(uint2(area, 0u));
+        rgb += t.rgb * t.a * w[k];
+        a += t.a * w[k];
+    }
+    if (a > 0.002) {
+        float3 tint = rgb / a;
         float shade = bodyShade.sample(linearS, uv).r;
         // Squared shade: the fibres and the lines between muscles stay
         // visible instead of one flat block of colour.
-        float3 lit = tint.rgb * (0.12 + 0.95 * shade * shade);
-        _surface.diffuse.rgb = mix(_surface.diffuse.rgb, lit, tint.a);
-        _surface.emission.rgb += lit * 0.3 * tint.a;
+        float3 lit = tint * (0.12 + 0.95 * shade * shade);
+        _surface.diffuse.rgb = mix(_surface.diffuse.rgb, lit, a);
+        // The accent's glow: bright enough for the camera's bloom.
+        _surface.emission.rgb += lit * 0.4 * a;
     }
     """
 }
