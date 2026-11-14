@@ -667,6 +667,8 @@ struct ContentView: View {
                 OnboardingFlowView()
             }
         }
+        // Opening from closed: one layout, at the open size (UnfoldHold).
+        .modifier(UnfoldHoldModifier(isFinal: { Self.isWide($0) }))
         .disableVerticalBar()
         #if DEBUG
         // Testing: launch with -sampleHistory veteran|regular|newLifter.

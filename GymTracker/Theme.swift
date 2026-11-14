@@ -1116,6 +1116,10 @@ final class HingeState {
 
     enum Pose { case closed, partial, full, none }
 
+    private var pose: Pose = .none
+    /// When the hinge last left closed (an unfold has begun).
+    private var unfoldStarted: Date?
+
     /// Not observed: nothing re-renders on a sample (Apple: hinge data is
     /// for effects; layout follows size changes and reserved regions).
     func update(degrees deg: Double, pose new: Pose) {
@@ -1123,6 +1127,79 @@ final class HingeState {
             HingePresence.shared.hasHinge = true
             UserDefaults.standard.set(true, forKey: "deviceHasHinge")
         }
+        if pose == .closed && (new == .partial || new == .full) {
+            unfoldStarted = Date()
+            UnfoldHold.clock.armRelease()
+        }
+        if new == .closed { unfoldStarted = nil }
+        pose = new
+    }
+
+    /// An unfold from closed is under way (status only, never the angle).
+    var unfolding: Bool {
+        guard let start = unfoldStarted else { return false }
+        return Date().timeIntervalSince(start) < UnfoldHold.window
+    }
+
+    func unfoldLanded() { unfoldStarted = nil }
+}
+
+/// Opening the Duo from closed, iOS moves the app to the inner screen in
+/// two size updates (the front screen's size, then the open size; logged
+/// Nov 13) and keeps the inner screen black until the app has answered
+/// both. Laying the whole app out at the first size is wasted (nobody sees
+/// it), so while an unfold is under way the content keeps the size it had
+/// and is laid out once, at the open size. Released at the open size, or
+/// after `window` whatever happens.
+struct UnfoldHold: Layout {
+    static let window: TimeInterval = 1.5
+    static let clock = Clock()
+
+    /// Bumps once when the window ends, so a hold can never outlive it.
+    final class Clock: ObservableObject {
+        @Published private(set) var tick = 0
+        private var pending: DispatchWorkItem?
+        func armRelease() {
+            pending?.cancel()
+            let item = DispatchWorkItem { [weak self] in self?.tick += 1 }
+            pending = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + UnfoldHold.window + 0.05, execute: item)
+        }
+    }
+
+    final class Memory { var settled: CGSize = .zero }
+    let memory: Memory
+    let isFinal: (CGSize) -> Bool
+    /// The clock's tick: part of the layout's value, so the release re-runs it.
+    let tick: Int
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let size = bounds.size
+        let hinge = HingeState.shared
+        var use = size
+        if hinge.unfolding && !isFinal(size) && memory.settled != .zero {
+            use = memory.settled
+        } else {
+            if hinge.unfolding && isFinal(size) { hinge.unfoldLanded() }
+            memory.settled = size
+        }
+        for view in subviews {
+            view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(use))
+        }
+    }
+}
+
+/// See UnfoldHold.
+struct UnfoldHoldModifier: ViewModifier {
+    @ObservedObject private var clock = UnfoldHold.clock
+    @State private var memory = UnfoldHold.Memory()
+    let isFinal: (CGSize) -> Bool
+    func body(content: Content) -> some View {
+        UnfoldHold(memory: memory, isFinal: isFinal, tick: clock.tick) { content }
     }
 }
 
