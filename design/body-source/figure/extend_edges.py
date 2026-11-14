@@ -28,6 +28,15 @@ for side in ("Front", "Back"):
         src = im[inside]
         fill = src[np.clip(lab[grow] - 1, 0, len(src) - 1)]
         im[grow] = fill; im[grow, 3] = 255
+        if side == "Back":
+            # The back of the head: the painting's two dark ovals read as
+            # eyes on the 3D head. Painted out to the skull's own grey.
+            head = np.zeros(im.shape[:2], np.uint8); head[: int(50 * 5.6)] = 1
+            lum = im[..., :3].mean(2)
+            ref = np.median(lum[(head > 0) & inside])
+            dark = ((head > 0) & inside & (lum < ref * 0.8)).astype(np.uint8)
+            dark = cv2.dilate(dark, np.ones((9, 9), np.uint8))
+            im[..., :3] = cv2.inpaint(np.ascontiguousarray(im[..., :3]), dark, 12, cv2.INPAINT_TELEA)
         cv2.imwrite(os.path.join(P, f"Body{k}{side}.png"), im)
     # Muscle areas: empty pixels in the outer band (inside or just outside
     # the outline) take the nearest area; inner gaps between muscles stay.

@@ -242,6 +242,93 @@ bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
 bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.004)
 bpy.ops.object.mode_set(mode='OBJECT')
 
+# --- Muscle areas on the mesh itself (Nov 14). The paintings only face the
+# camera front and back; on the flanks, the sides of limbs and the head they
+# smear. So the painted area is trusted only where it faces you squarely
+# (FRONT_OK / BACK_OK), and everywhere else each vertex takes the nearest
+# trusted area across the mesh surface (Dijkstra on edge lengths), never
+# crossing into another body part. Faces then carry one flat area each, so
+# the side boundaries follow the mesh, cleanly.
+import heapq, json
+TRUST = 0.5   # |normal toward the camera| above this: the painting faces you squarely
+def load_ids(side):
+    img = bpy.data.images.load(os.path.join(HERE, f"ids_{side}.png"), check_existing=True)
+    w, h = img.size
+    a = np.array(img.pixels[:]).reshape(h, w, 4)[::-1, :, 0]
+    return np.round(a * 255 / 4).astype(int)
+IDF, IDB = load_ids("front"), load_ids("back")
+IH, IW = IDF.shape; KI = IW / 200.0
+nv = len(me.vertices)
+fac_attr = me.color_attributes["facing"]
+facing_v = np.array([fac_attr.data[i].color[0] for i in range(nv)])
+# How squarely each vertex faces front or back (0 = side, 1 = straight on),
+# from the surface itself: the painting's own facing saturates early.
+square_v = np.array([abs(v.normal[1]) for v in me.vertices])
+sq_attr = me.color_attributes.new("square", 'FLOAT_COLOR', 'POINT')
+for i in range(nv): sq_attr.data[i].color = (square_v[i],) * 3 + (1,)
+ufront, uback = me.uv_layers["uv_front"].data, me.uv_layers["uv_back"].data
+def sample(img, uv):
+    x = int(min(max(uv[0] * 200 * KI, 0), IW - 1)); y = int(min(max((1 - uv[1]) * 400 * KI, 0), IH - 1))
+    return int(img[y, x])
+votes = [dict() for _ in range(nv)]
+for loop in me.loops:
+    vi = loop.vertex_index
+    if square_v[vi] < TRUST: continue
+    lab = sample(IDF, ufront[loop.index].uv) if facing_v[vi] > 0.5 else sample(IDB, uback[loop.index].uv)
+    # A gap between muscles is only believed where it faces you squarely;
+    # off to the side it's the painting's edge, and the fill covers it.
+    if lab == 0 and square_v[vi] < 0.8: continue
+    votes[vi][lab] = votes[vi].get(lab, 0) + 1
+label = np.full(nv, -1, int)
+for i, v in enumerate(votes):
+    if v: label[i] = max(v, key=v.get)
+# Body part per vertex (same split as the painting map), so a fill never
+# crosses from the arm into the torso or from the neck into the head.
+gname = {g.index: g.name for g in o.vertex_groups}
+part = []
+for v in me.vertices:
+    best = max(v.groups, key=lambda g: g.weight, default=None)
+    part.append(segment(gname.get(best.group, "") if best else "", v.co[0]))
+adj = [[] for _ in range(nv)]
+for e in me.edges:
+    a, b = e.vertices; L = (me.vertices[a].co - me.vertices[b].co).length
+    adj[a].append((b, L)); adj[b].append((a, L))
+# Areas that never light for training (joints, serratus, fascia, groin) keep
+# their painted shape where trusted but don't spread: on the 3D flanks they
+# became large grey blotches. The muscles round them fill the sides instead.
+# (Head, hands and feet are their own body parts, so they still fill there.)
+NAMES = {v: k for k, v in json.load(open(os.path.join(HERE, "ids.json"))).items()}
+NO_SPREAD = {i for i, n in NAMES.items() if n.startswith(("serratus", "elbow", "wrist", "knee", "ankle", "hipFlexor"))
+             or n in ("midBack", "lowerBack", "groin")}
+dist = np.full(nv, np.inf); heap = []
+for i in range(nv):
+    if label[i] > 0 and label[i] not in NO_SPREAD: dist[i] = 0; heapq.heappush(heap, (0.0, i))
+filled = label.copy()
+while heap:
+    d, i = heapq.heappop(heap)
+    if d > dist[i]: continue
+    for j, L in adj[i]:
+        if label[j] >= 0 or part[j] != part[i]: continue
+        nd = d + L
+        if nd < dist[j]:
+            dist[j] = nd; filled[j] = filled[i]; heapq.heappush(heap, (nd, j))
+filled[filled < 0] = 0
+# Hands and feet are only ever hand and foot (a shin or forearm area painted
+# down over them lit the top of the foot).
+INDEX = {n: i for i, n in NAMES.items()}
+for i in range(nv):
+    pt = part[i]
+    if pt.startswith(("hand_", "foot_")):
+        side = "Left" if pt.endswith("_l") else "Right"
+        filled[i] = INDEX[("hand" if pt.startswith("hand") else "foot") + side]
+print("FLOOD trusted", int((label >= 0).sum()), "filled", int(((label < 0) & (filled > 0)).sum()), "of", nv)
+flood = me.color_attributes.new("flood", 'FLOAT_COLOR', 'CORNER')
+for poly in me.polygons:
+    labs = [int(filled[me.loops[li].vertex_index]) for li in poly.loop_indices]
+    lab = max(set(labs), key=labs.count)
+    c = lab * 4 / 255.0
+    for li in poly.loop_indices: flood.data[li].color = (c, c, c, 1)
+
 def material(kind):
     m = bpy.data.materials.new(kind); m.use_nodes = True
     nt = m.node_tree; N = nt.nodes; L = nt.links; N.clear()
@@ -255,23 +342,44 @@ def material(kind):
         if noncolor: n.image.colorspace_settings.name = 'Non-Color'
         if closest: n.interpolation = 'Closest'
         L.new(uv.outputs[0], n.inputs[0]); return n
+    def detail_weight(sq):
+        r = N.new("ShaderNodeMapRange"); r.interpolation_type = 'SMOOTHSTEP'
+        L.new(sq, r.inputs["Value"]); r.inputs["From Min"].default_value = 0.3; r.inputs["From Max"].default_value = 0.6
+        return r.outputs["Result"]
     def fmix(a, b):
         mm = N.new("ShaderNodeMix"); mm.data_type = 'FLOAT'; L.new(fac.outputs["Fac"], mm.inputs[0]); L.new(a, mm.inputs[2]); L.new(b, mm.inputs[3]); return mm.outputs[0]
     def cmix(a, b, f):
         mm = N.new("ShaderNodeMix"); mm.data_type = 'RGBA'; L.new(f, mm.inputs[0]); L.new(a, mm.inputs[6]); L.new(b, mm.inputs[7]); return mm.outputs[2]
+    def math(op, a, b=None, v=None):
+        n = N.new("ShaderNodeMath"); n.operation = op
+        L.new(a, n.inputs[0])
+        if b is not None: L.new(b, n.inputs[1])
+        elif v is not None: n.inputs[1].default_value = v
+        return n.outputs[0]
+    # How squarely a painting faces you: 0 at the side, 1 straight on.
+    sqn = N.new("ShaderNodeAttribute"); sqn.attribute_name = "square"; sq = sqn.outputs["Fac"]
     if kind == "ids":
         f = tex(os.path.join(HERE, "ids_front.png"), uf, True, True)
         b = tex(os.path.join(HERE, "ids_back.png"), ub, True, True)
-        step = N.new("ShaderNodeMath"); step.operation = 'GREATER_THAN'; step.inputs[1].default_value = 0.5
-        L.new(fac.outputs["Fac"], step.inputs[0])
-        col = cmix(b.outputs["Color"], f.outputs["Color"], step.outputs[0])
+        step = math('GREATER_THAN', fac.outputs["Fac"], v=0.5)
+        painted = cmix(b.outputs["Color"], f.outputs["Color"], step)
+        fl = N.new("ShaderNodeAttribute"); fl.attribute_name = "flood"
+        trusted = math('GREATER_THAN', sq, v=TRUST)
+        col = cmix(fl.outputs["Color"], painted, trusted)
     elif kind == "color":
         af, ab = tex(asset("front", "Anatomy"), uf, False), tex(asset("back", "Anatomy"), ub, False)
         skin = N.new("ShaderNodeRGB"); skin.outputs[0].default_value = (0.055, 0.055, 0.065, 1)
         col = cmix(skin.outputs[0], cmix(ab.outputs["Color"], af.outputs["Color"], fac.outputs["Fac"]), fmix(ab.outputs["Alpha"], af.outputs["Alpha"]))
+        # Toward the side the painted detail fades to plain body grey
+        # instead of smearing into stripes.
+        plain = N.new("ShaderNodeRGB"); plain.outputs[0].default_value = (0.20, 0.20, 0.215, 1)
+        col = cmix(plain.outputs[0], col, detail_weight(sq))
     else:
         sf, sb = tex(asset("front", "Shade"), uf, True), tex(asset("back", "Shade"), ub, True)
         col = fmix(sb.outputs["Color"], sf.outputs["Color"])
+        mm = N.new("ShaderNodeMix"); mm.data_type = 'FLOAT'
+        L.new(detail_weight(sq), mm.inputs[0]); mm.inputs[2].default_value = 0.8; L.new(col, mm.inputs[3])
+        col = mm.outputs[0]
     L.new(col, em.inputs[0])
     target = N.new("ShaderNodeTexImage"); N.active = target
     return m, target
@@ -321,3 +429,70 @@ with open(os.path.join(OUTD, "BodyModel.bin"), "wb") as f:
     f.write(struct.pack("<4sII", b"BDY1", len(P), len(I)))
     f.write(P.tobytes()); f.write(Nn.tobytes()); f.write(U.tobytes()); f.write(I.tobytes())
 print("MODEL", len(P), "verts", len(I) // 3, "tris")
+
+
+# --- The area map, texel by texel (Nov 14). Each vertex's area is blended
+# with its neighbours' (a few smoothing passes), then every texel of every
+# triangle takes the strongest blended area: curved, even boundaries
+# instead of triangle-edge steps. Where the body faces you squarely the
+# painting's own outline is used (it's exact there).
+SMOOTH = 3
+weights = [{int(filled[i]): 1.0} for i in range(nv)]
+nbr = [[j for j, _ in adj[i]] for i in range(nv)]
+for _ in range(SMOOTH):
+    new = []
+    for i in range(nv):
+        acc = dict(weights[i]); n = 1
+        for j in nbr[i]:
+            if part[j] != part[i]: continue
+            for k, w in weights[j].items(): acc[k] = acc.get(k, 0.0) + w
+            n += 1
+        new.append({k: w / n for k, w in acc.items() if w / n > 0.02})
+    weights = new
+uvA = me.uv_layers["AppUV"].data
+# Fresh: triangulating rebuilt the mesh, so earlier layer handles are stale.
+ufront, uback = me.uv_layers["uv_front"].data, me.uv_layers["uv_back"].data
+R = RES
+raster = np.zeros((R, R), np.uint8)
+for poly in me.polygons:
+    lis = list(poly.loop_indices)
+    if len(lis) != 3: continue
+    vs = [me.loops[li].vertex_index for li in lis]
+    P = np.array([[uvA[li].uv[0] * R, (1 - uvA[li].uv[1]) * R] for li in lis])
+    x0, y0 = np.floor(P.min(0)).astype(int); x1, y1 = np.ceil(P.max(0)).astype(int)
+    x0, y0 = max(x0, 0), max(y0, 0); x1, y1 = min(x1, R - 1), min(y1, R - 1)
+    if x1 < x0 or y1 < y0: continue
+    xs, ys = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+    (ax, ay), (bx, by), (cx, cy) = P
+    den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    if abs(den) < 1e-12: continue
+    l1 = ((by - cy) * (xs - cx) + (cx - bx) * (ys - cy)) / den
+    l2 = ((cy - ay) * (xs - cx) + (ax - cx) * (ys - cy)) / den
+    l3 = 1 - l1 - l2
+    inside = (l1 >= -0.02) & (l2 >= -0.02) & (l3 >= -0.02)
+    if not inside.any(): continue
+    bary = (l1[inside], l2[inside], l3[inside])
+    cands = set(weights[vs[0]]) | set(weights[vs[1]]) | set(weights[vs[2]])
+    best = None; bestv = None
+    for k in cands:
+        v = sum(bary[t] * weights[vs[t]].get(k, 0.0) for t in range(3))
+        if best is None: best, bestv = np.full(v.shape, k), v
+        else:
+            m = v > bestv; best[m] = k; bestv = np.where(m, v, bestv)
+    # Squarely facing: the painting's exact outline.
+    sqt = sum(bary[t] * square_v[vs[t]] for t in range(3))
+    sq_mask = sqt > 0.75
+    if sq_mask.any():
+        fac = sum(bary[t] * facing_v[vs[t]] for t in range(3))
+        uf = [np.array(ufront[li].uv) for li in lis]; ub = [np.array(uback[li].uv) for li in lis]
+        ufx = sum(bary[t] * uf[t][0] for t in range(3)); ufy = sum(bary[t] * uf[t][1] for t in range(3))
+        ubx = sum(bary[t] * ub[t][0] for t in range(3)); uby = sum(bary[t] * ub[t][1] for t in range(3))
+        def samp(img, u, v):
+            x = np.clip((u * 200 * KI).astype(int), 0, IW - 1); y = np.clip(((1 - v) * 400 * KI).astype(int), 0, IH - 1)
+            return img[y, x]
+        painted = np.where(fac > 0.5, samp(IDF, ufx, ufy), samp(IDB, ubx, uby))
+        best = np.where(sq_mask, painted, best)
+    yy = (ys[inside] - 0.5).astype(int); xx = (xs[inside] - 0.5).astype(int)
+    raster[yy, xx] = best.astype(np.uint8)
+np.save(os.path.join(OUTD, "BodyIDs_raster.npy"), raster)
+print("RASTER areas", len(np.unique(raster)))

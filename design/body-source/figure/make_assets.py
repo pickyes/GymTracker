@@ -18,7 +18,21 @@ def dataset(name, filename, data):
 dataset("BodyModel", "BodyModel.bin", open(os.path.join(M, "BodyModel.bin"), "rb").read())
 dataset("BodyColor", "BodyColor.png", open(os.path.join(M, "BodyColor.png"), "rb").read())
 dataset("BodyShade", "BodyShade.png", open(os.path.join(M, "BodyShade.png"), "rb").read())
-ids = cv2.imread(os.path.join(M, "BodyIDs.png"))[..., 2].astype(int)
+RAST = os.path.join(M, "BodyIDs_raster.npy")
+if os.path.exists(RAST):
+    # Drawn texel by texel (export_model.py): area indices already, no
+    # blending. Empty texels around each island take the nearest area so
+    # mipmapped/filtered lookups at island edges stay inside a muscle.
+    ids = np.load(RAST).astype(int) * 4
+    empty = ids == 0
+    # Only fill texels outside every island; gaps inside stay gaps.
+    covered = cv2.imread(os.path.join(M, "BodyShade.png"))[..., 0] > 0
+    pad = empty & ~covered
+    _, lab = cv2.distanceTransformWithLabels((pad | empty).astype(np.uint8), cv2.DIST_L2, 3, labelType=cv2.DIST_LABEL_PIXEL)
+    vals = ids[~(pad | empty)]
+    ids[pad] = vals[np.clip(lab[pad] - 1, 0, len(vals) - 1)]
+else:
+    ids = cv2.imread(os.path.join(M, "BodyIDs.png"))[..., 2].astype(int)
 # Texels blended at a border (not a multiple of 4) take the nearest clean
 # area, so lit muscles have clean edges instead of dark specks.
 bad = (ids % 4) != 0
