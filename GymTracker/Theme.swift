@@ -582,6 +582,23 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
         }
         let paneFit = clearOfFold(paneEnd.x, paneW)
         let mainFit = clearOfFold(mainEnd.x, mainW)
+        // The other end of a swap: each page keeps the size it starts with
+        // until the cards cross, and only then takes its new one (DaRon:
+        // the cards changed size before they moved).
+        let otherSwapped = !swappedEnd
+        let otherLeft = { () -> Double in
+            let c = DuoSplitHandle.clamp(sideDefault + sideShift)
+            return otherSwapped ? max(c, 1 - maxPane) : min(c, maxPane)
+        }()
+        let otherPaneShare = min(otherSwapped ? 1 - otherLeft : otherLeft, maxPane)
+        let otherMainW = stacked ? total : (wide ? total * (1 - otherPaneShare) : total)
+        let otherPaneW = stacked ? total : max(total - otherMainW, 0)
+        let otherPaneH = stacked ? (otherSwapped ? botH : topH) : size.height
+        let otherMainH = stacked ? (otherSwapped ? topH : botH) : size.height
+        let paneSizes = SwapFrame.Sizes(atEnd: CGSize(width: paneFit.w, height: paneH),
+                                        atStart: CGSize(width: otherPaneW, height: otherPaneH))
+        let mainSizes = SwapFrame.Sizes(atEnd: CGSize(width: mainFit.w, height: mainH),
+                                        atStart: CGSize(width: otherMainW, height: otherMainH))
         let cornerSlide: CGFloat = e
         return ZStack(alignment: .topLeading) {
             // A grey backdrop behind the cards, like Duo multitasking.
@@ -595,7 +612,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
                     // DS: the bottom half keeps clear of the corner buttons.
                     .safeAreaPadding(.trailing, stacked && paneClearsCorner && !inRail ? 76 * cornerSlide : 0)
                     .environment(\.duoCornerInset, stacked && paneClearsCorner && !inRail ? 76 * cornerSlide : 0)
-                    .frame(width: paneFit.w, height: paneH, alignment: .top)
+                    .modifier(SwapFrame(progress: e, target: e, sizes: paneSizes))
                     .clipped()
                     // Real layout position (not a visual-only offset), so
                     // safe areas and hit areas match where the page is.
@@ -609,7 +626,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
                 .environment(\.layoutDirection, direction)
                 .safeAreaPadding(.trailing, stacked && mainClearsCorner && !inRail ? 76 * (1 - cornerSlide) : 0)
                 .environment(\.duoCornerInset, stacked && mainClearsCorner && !inRail ? 76 * (1 - cornerSlide) : 0)
-                .frame(width: mainFit.w, height: mainH, alignment: .top)
+                .modifier(SwapFrame(progress: e, target: e, sizes: mainSizes))
                 .clipped(antialiased: stacked)
                 .alignmentGuide(.leading) { _ in wide ? -mainFit.x : 0 }
                 .alignmentGuide(.top) { _ in -mainEnd.y }
@@ -758,9 +775,44 @@ private struct SwapMotion: ViewModifier, Animatable {
         let rest = layout.position(role, slide: target)
         let inset = layout.insets(role, slide: s)
         content
+            // The live progress, for the page's size inside (SwapFrame):
+            // that part runs with animation off, so it can't animate itself.
+            .environment(\.swapLiveProgress, progress)
             .modifier(DuoSwapCard(lift: layout.lift(p), size: size,
                                   leading: inset.leading, trailing: inset.trailing))
             .offset(x: now.x - rest.x, y: now.y - rest.y)
+    }
+}
+
+/// A page's size during a swap: the size it started with until the cards
+/// cross (halfway), then its new size. The page is laid out again only that
+/// once, mid-flight, while the cards are small and moving.
+private struct SwapFrame: ViewModifier {
+    struct Sizes { var atEnd: CGSize; var atStart: CGSize }
+    var progress: Double
+    /// Where the swap ends.
+    var target: Double
+    var sizes: Sizes
+    /// Set by SwapMotion, which is animated (this one sits inside the part
+    /// that runs with animation off).
+    @Environment(\.swapLiveProgress) private var live
+    func body(content: Content) -> some View {
+        let p = live ?? progress
+        // Still in the first half of the travel from the other end?
+        let started = abs(p - target) >= 0.5
+        let size = started ? sizes.atStart : sizes.atEnd
+        content
+            .frame(width: size.width, height: size.height, alignment: .top)
+            .transaction { $0.animation = nil }
+    }
+}
+
+private struct SwapLiveProgressKey: EnvironmentKey { static let defaultValue: Double? = nil }
+
+extension EnvironmentValues {
+    var swapLiveProgress: Double? {
+        get { self[SwapLiveProgressKey.self] }
+        set { self[SwapLiveProgressKey.self] = newValue }
     }
 }
 
@@ -1200,6 +1252,58 @@ struct UnfoldHoldModifier: ViewModifier {
     let isFinal: (CGSize) -> Bool
     func body(content: Content) -> some View {
         UnfoldHold(memory: memory, isFinal: isFinal, tick: clock.tick) { content }
+    }
+}
+
+/// Where iOS runs its side bar, straight from SwiftUI (`toolbarVerticalEdge`,
+/// iOS 27.1): known in the same layout pass as the size change. The UIKit
+/// trait reader only learns it after the pass and reports it a frame late,
+/// so every fold laid the app out twice (old edge, then new).
+enum SystemBarEdge: Equatable {
+    /// Before iOS 27.1: the app falls back to the UIKit trait reader.
+    case unknown
+    case known(HorizontalEdge?)
+}
+
+private struct SystemBarEdgeKey: EnvironmentKey { static let defaultValue: SystemBarEdge = .unknown }
+
+extension EnvironmentValues {
+    var systemBarEdge: SystemBarEdge {
+        get { self[SystemBarEdgeKey.self] }
+        set { self[SystemBarEdgeKey.self] = newValue }
+    }
+}
+
+/// Attach once at the app's root (see SystemBarEdge).
+struct SystemBarEdgeBridge: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            Reader(content: content)
+        } else {
+            content
+        }
+    }
+
+    @available(iOS 27.1, *)
+    private struct Reader: View {
+        let content: Content
+        @Environment(\.toolbarVerticalEdge) private var edge
+        var body: some View {
+            content
+                .environment(\.systemBarEdge, .known(edge))
+                .modifier(LeadingBarTitles())
+        }
+    }
+
+    /// Bar titles line up with the app's leading page titles (iOS 27.2).
+    private struct LeadingBarTitles: ViewModifier {
+        func body(content: Content) -> some View {
+            if #available(iOS 27.2, *) {
+                content.toolbarTitleAlignment(.leading)
+            } else {
+                content
+            }
+        }
     }
 }
 
@@ -2043,6 +2147,30 @@ struct FixedSideBarStack: ViewModifier {
     }
 }
 
+extension ToolbarContent {
+    /// A side-bar button: laid out down the side when iOS runs its bar
+    /// vertically (iOS 27.1), as it is on the Duo.
+    @ToolbarContentBuilder
+    func sideBarAxis() -> some ToolbarContent {
+        if #available(iOS 27.1, *) {
+            self.axisBehavior(.verticalPreferred)
+        } else {
+            self
+        }
+    }
+}
+
+/// See SideBarItems: the page's buttons win over the tab icons for room.
+private struct KeepsToolbarItems: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.toolbarVerticalCompressionBehavior(.prefersToolbarItems)
+        } else {
+            content
+        }
+    }
+}
+
 struct SideBarItems: ViewModifier {
     let page: ContentView.Page
     @Environment(\.systemSideBar) private var sideBarOn
@@ -2068,6 +2196,9 @@ struct SideBarItems: ViewModifier {
             // rows clear of its side bar (ours on top left the list a
             // narrow strip).
             .toolbar(on ? .visible : .hidden, for: .navigationBar)
+            // Short screen: the page's buttons stay in the bar; the tab
+            // icons give way first (iOS 27.1).
+            .modifier(KeepsToolbarItems())
             // Only the buttons: no bar background or hairline across the top.
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
@@ -2080,6 +2211,7 @@ struct SideBarItems: ViewModifier {
                             Label("Back", systemImage: "chevron.left")
                         }
                     }
+                    .sideBarAxis()
                 }
                 if on {
                     if page == .today {
@@ -2098,6 +2230,7 @@ struct SideBarItems: ViewModifier {
                                 }
                             }
                         }
+                        .sideBarAxis()
                     }
                     if page == .notes {
                         ToolbarItem(placement: .primaryAction) {
@@ -2105,6 +2238,7 @@ struct SideBarItems: ViewModifier {
                                 Label("New note", systemImage: "square.and.pencil")
                             }
                         }
+                        .sideBarAxis()
                     }
                     if wide && duo.showSwapButton {
                         // Its own button in the side bar (DaRon), not inside
@@ -2114,6 +2248,7 @@ struct SideBarItems: ViewModifier {
                                 Label("Swap sides", systemImage: "arrow.left.arrow.right")
                             }
                         }
+                        .sideBarAxis()
                     }
                 }
             }

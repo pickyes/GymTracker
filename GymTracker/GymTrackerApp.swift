@@ -31,6 +31,8 @@ struct GymTrackerApp: App {
         WindowGroup {
             ZStack {
                 ContentView()
+                    // Where iOS runs its side bar, in the same layout pass.
+                    .modifier(SystemBarEdgeBridge())
                     .environmentObject(store)
                     .environmentObject(subscription)
                     .environmentObject(mcpServer)

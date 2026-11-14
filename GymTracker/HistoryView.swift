@@ -82,12 +82,10 @@ struct HistoryView: View {
         // Two-pane when open (regular width); collapses to a single
         // navigable column on the outer display automatically.
         sessionsSplitView
-            // Fold (Debug Pass 2): the title leading (16↔24pt) and the
-            // split view's column collapse/expand flip discretely on the
-            // size class, which used to snap with no animation. Animate
-            // them on the shared fold spring so History glides with the
-            // pose instead of popping.
-            .animation(FoldAnimation.morph, value: horizontalSizeClass)
+            // Fold: the new layout is simply there when iOS shows the new
+            // screen, like every other page (DaRon: the 0.25 s glide after
+            // the fold read as lag).
+            .transaction(value: horizontalSizeClass) { $0.animation = nil }
             .disableVerticalBar()
             // Leaving the page: All sessions folds back and its month
             // groups reset, so the next visit starts tidy.

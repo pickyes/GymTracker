@@ -64,7 +64,14 @@ struct ContentView: View {
     /// Top of the swap/menu column on screen, so Today's + never sits on it.
     @State private var cornerColumnTop: CGFloat = .infinity
     /// Where the system puts the vertical status bar (nil: nowhere).
-    @State private var verticalBarEdge: HorizontalEdge?
+    /// The UIKit trait reader's edge (a frame late; the fallback only).
+    @State private var traitBarEdge: HorizontalEdge?
+    @Environment(\.systemBarEdge) private var systemBarEdge
+    /// Where iOS runs its side bar: SwiftUI's value on iOS 27.1+.
+    private var verticalBarEdge: HorizontalEdge? {
+        if case .known(let edge) = systemBarEdge { return edge }
+        return traitBarEdge
+    }
     /// UIInterfaceOrientation raw value: which end of the side bar the
     /// folded screen's camera hole is at.
     @State private var interfaceOrientation = 0
@@ -645,7 +652,7 @@ struct ContentView: View {
                     // bottom-trailing menu button rode off the bottom edge.
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .background {
-                        VerticalBarEdgeReader(edge: $verticalBarEdge, orientation: $interfaceOrientation)
+                        VerticalBarEdgeReader(edge: $traitBarEdge, orientation: $interfaceOrientation)
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
