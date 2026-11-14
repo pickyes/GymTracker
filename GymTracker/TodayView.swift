@@ -2492,12 +2492,16 @@ struct RestTimerCard: View {
                             // The liquid sits inside real Liquid Glass, like
                             // the swap and menu buttons below it.
                             .background {
-                                LavaLiquidFill(
-                                    endsAt: store.restEndsAt,
-                                    pausedRemaining: store.restPausedRemaining,
-                                    total: restTotal,
-                                    color: pillAccent
-                                )
+                                // Its own graph: the water redraws every
+                                // frame without touching the rest of the app.
+                                IsolatedHost {
+                                    LavaLiquidFill(
+                                        endsAt: store.restEndsAt,
+                                        pausedRemaining: store.restPausedRemaining,
+                                        total: restTotal,
+                                        color: pillAccent
+                                    )
+                                }
                                 .clipShape(Capsule())
                             }
                             .liquidGlass(Capsule())

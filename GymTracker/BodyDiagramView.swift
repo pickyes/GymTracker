@@ -369,6 +369,10 @@ struct BodyFigureView: View {
     /// draw at reduced strength — a lighter fill, a faint edge, no glow —
     /// so the figure shows what the exercise mainly works.
     var primary: Set<MuscleID>? = nil
+    /// Injured areas, lit in the warm injury colour alongside the main
+    /// highlight (the live body's "Injuries" and "All" views). A muscle in
+    /// both shows the main highlight.
+    var injured: Set<MuscleID> = []
     var onTap: ((MuscleID) -> Void)? = nil
 
     private var anatomyName: String { side == .front ? "BodyAnatomyFront" : "BodyAnatomyBack" }
@@ -388,13 +392,14 @@ struct BodyFigureView: View {
     /// The shade image tinted with the highlight colour, cut to the given
     /// areas' exact outlines.
     @ViewBuilder
-    private func tintLayer(ids: Set<MuscleID>, scale: CGFloat) -> some View {
+    private func tintLayer(ids: Set<MuscleID>, scale: CGFloat, color: Color? = nil) -> some View {
         if !ids.isEmpty {
             let specs = muscleSpecs.filter { $0.side == side && ids.contains($0.id) }
+            let tint = color ?? litColor ?? Self.litGlow
             Image(shadeName)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .colorMultiply(litColor ?? Self.litGlow)
+                .colorMultiply(tint)
                 .mask {
                     Path { path in
                         for spec in specs { path.addPath(overlayPath(spec, scale: scale)) }
@@ -402,9 +407,15 @@ struct BodyFigureView: View {
                     .fill(style: FillStyle())
                     .frame(width: 200 * scale, height: 400 * scale)
                 }
+                // The accent's glow (DaRon): the same soft halo the + button
+                // and the side bar's current page have.
+                .shadow(color: tint.opacity(0.5), radius: 10)
                 .animation(AppAnimation.snappy, value: ids)
         }
     }
+
+    /// Injured areas not already under the main highlight.
+    private var injuredOnly: Set<MuscleID> { injured.subtracting(highlighted) }
 
     /// Segmented style (Nov 12, approved preview): a dark body silhouette,
     /// every muscle its own flat grey shape with the gaps between them
@@ -466,6 +477,7 @@ struct BodyFigureView: View {
                     // highlight colour — its own light and dark kept, so
                     // fibres and tendons stay visible (Nov 12). Prime
                     // movers full strength, synergists blended lighter.
+                    tintLayer(ids: injuredOnly, scale: scale, color: Self.litGlow)
                     if !highlighted.isEmpty {
                         tintLayer(ids: primaryLit, scale: scale)
                         tintLayer(ids: secondaryLit, scale: scale)
@@ -518,9 +530,11 @@ struct BodyFigureView: View {
     }
 
     private func muscleOverlay(_ spec: MuscleSpec, scale: CGFloat) -> some View {
-        let lit = highlighted.contains(spec.id)
-        let secondary = lit && (primary.map { !$0.contains(spec.id) } ?? false)
-        let litBase = litColor ?? Self.litGlow
+        let mainLit = highlighted.contains(spec.id)
+        let injuredLit = !mainLit && injured.contains(spec.id)
+        let lit = mainLit || injuredLit
+        let secondary = mainLit && (primary.map { !$0.contains(spec.id) } ?? false)
+        let litBase = injuredLit ? Self.litGlow : (litColor ?? Self.litGlow)
         let fill: Color?
         if lit {
             // Colour comes from the tinted painting (tintLayer); no flat fill.
@@ -889,6 +903,72 @@ struct LiveBodyView: View {
     @State private var userFlipped = false
     /// Set once the side is settled on appear; until then nothing animates.
     @State private var settled = false
+    /// What the figure lights up (DaRon): the working muscles by default,
+    /// or injuries, recovery, or all three together. Kept across launches.
+    @AppStorage("liveBodyHighlight") private var mode: LiveBodyHighlight = .working
+
+    /// Injured areas marked in the profile (Injuries and All views).
+    private var injuredMuscles: Set<MuscleID> {
+        guard mode == .injuries || mode == .all else { return [] }
+        return store.profile?.injuredMuscles ?? []
+    }
+
+    /// Fresh / recovering per muscle, from logged history (Recovery and
+    /// All views) — the same map the Body page draws.
+    private var recoveryMap: [MuscleID: MuscleRecovery] {
+        guard mode == .recovery || mode == .all else { return [:] }
+        let dates = store.lastTrainedDates()
+        var map: [MuscleID: MuscleRecovery] = [:]
+        for id in MuscleID.allCases {
+            guard let group = id.muscleGroup else { continue }
+            map[id] = store.recoveryState(for: group, dates: dates)
+        }
+        return map
+    }
+
+    /// The working muscles, when this view shows them.
+    private var shownLit: Set<MuscleID> {
+        mode == .working || mode == .all ? litMuscles : []
+    }
+
+    /// The button beside Front/Back that picks what's lit.
+    private var highlightMenu: some View {
+        Menu {
+            Picker("Highlight", selection: $mode) {
+                ForEach(LiveBodyHighlight.allCases, id: \.self) { m in
+                    Label(m.label, systemImage: m.systemImage).tag(m)
+                }
+            }
+        } label: {
+            Image(systemName: mode.systemImage)
+                .scaledFont(size: 15, weight: .semibold, maxScale: 1.3)
+                .foregroundStyle(mode == .working ? Theme.text : accent)
+                .frame(width: 36, height: 36)
+                .liquidGlass(Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Highlight")
+        .accessibilityValue(mode.label)
+    }
+
+    /// What the caption says for the views other than Working.
+    @ViewBuilder private var modeCaption: some View {
+        switch mode {
+        case .working:
+            EmptyView()
+        case .injuries:
+            Text(injuredMuscles.isEmpty ? "No injuries marked" : "Injuries")
+        case .recovery:
+            (Text("Fresh").foregroundColor(Color(red: 1.0, green: 0.18, blue: 0.33)) + Text(" · ")
+                + Text("Recovering").foregroundColor(Color(red: 0.55, green: 0.36, blue: 0.96)))
+        case .all:
+            (Text("Working").foregroundColor(accent) + Text(" · ")
+                + Text("Injuries").foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.1)) + Text(" · ")
+                + Text("Fresh").foregroundColor(Color(red: 1.0, green: 0.18, blue: 0.33)) + Text(" · ")
+                + Text("Recovering").foregroundColor(Color(red: 0.55, green: 0.36, blue: 0.96)))
+        }
+    }
 
     /// The exercise (library or custom) for the current id, if it resolves.
     private var resolvedExercise: LibraryExercise? {
@@ -989,19 +1069,31 @@ struct LiveBodyView: View {
             // Front/Back always sits under the title (DaRon Nov 12), so it
             // never collides with the clock and Wi-Fi in the top corner.
             VStack(alignment: .leading, spacing: 6) {
-                Text("Working now")
+                Text(mode.title)
                     .font(.headline)
-                sidePicker.frame(maxWidth: 160)
+                HStack(spacing: 8) {
+                    sidePicker.frame(maxWidth: 160)
+                    Spacer(minLength: 0)
+                    highlightMenu
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            BodyFigureView(side: side, highlighted: litMuscles,
-                           litColor: accent, primary: primaryLitMuscles)
+            BodyFigureView(side: side, highlighted: shownLit,
+                           recovery: recoveryMap,
+                           litColor: accent, primary: primaryLitMuscles,
+                           injured: injuredMuscles)
                 .modifier(LiveBodyFigureHeight(height: figureHeight))
                 // No animation until the first side is settled, so the
                 // figure never plays a flip as it appears.
                 .animation(settled ? AppAnimation.snappy : nil, value: side)
                 .animation(settled ? AppAnimation.snappy : nil, value: litMuscles)
-            if !litGroups.isEmpty {
+                .animation(settled ? AppAnimation.snappy : nil, value: mode)
+            if mode != .working {
+                modeCaption
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            if !litGroups.isEmpty && (mode == .working || mode == .all) {
                 litCaption
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
@@ -1050,6 +1142,35 @@ struct LiveBodyView: View {
         }
         .onChange(of: userFlipped) { _, newValue in
             userFlippedBinding?.wrappedValue = newValue
+        }
+    }
+}
+
+/// What the live body lights up.
+enum LiveBodyHighlight: String, CaseIterable {
+    case working, injuries, recovery, all
+    var label: String {
+        switch self {
+        case .working: return "Working"
+        case .injuries: return "Injuries"
+        case .recovery: return "Recovery"
+        case .all: return "All"
+        }
+    }
+    var title: String {
+        switch self {
+        case .working: return "Working now"
+        case .injuries: return "Injuries"
+        case .recovery: return "Recovery"
+        case .all: return "Everything"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .working: return "figure.strengthtraining.traditional"
+        case .injuries: return "bandage"
+        case .recovery: return "arrow.clockwise.heart"
+        case .all: return "square.stack.3d.up"
         }
     }
 }

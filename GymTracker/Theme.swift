@@ -424,6 +424,17 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// setting is saved once on release.
     @State private var liveSplit: Double?
     @State private var liveShift: Double?
+    /// When the pair last changed size (a plain reference: noting it never
+    /// causes another pass).
+    @State private var sizeClock = SizeClock()
+    final class SizeClock {
+        private var size: CGSize = .zero
+        private var since: Date = .distantPast
+        func note(_ s: CGSize) {
+            if abs(s.width - size.width) > 0.5 || abs(s.height - size.height) > 0.5 { size = s; since = Date() }
+        }
+        var stable: Bool { Date().timeIntervalSince(since) > 0.6 }
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -435,6 +446,12 @@ struct DuoPagePair<Pane: View, Main: View>: View {
             // with its margins). Like Settings and the home screen, the
             // pages step clear of it, and back when the Duo opens flat.
             let fold = wide && !stacked ? Self.activeFold(in: geo) : nil
+            // Glide only when the hinge moves on a screen that's already
+            // showing (partly open <-> open: same size). Coming from closed
+            // the screen has just changed size, and it appears with the
+            // pages already clear of the fold, as Settings does.
+            let _ = sizeClock.note(geo.size)
+            let foldGlides = sizeClock.stable && HingeState.shared.settledOpen
             // Open and upright (DaRon: Nintendo DS style): one page on
             // each half, top and bottom of the fold; the companion page is
             // the top screen. Same view either way (only the frames and
@@ -473,6 +490,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          mainWidth: wide && !stacked && s.height > s.width ? nil : mainWidth,
                          direction: direction,
                          fold: fold,
+                         foldGlides: foldGlides,
                          pane: pane, main: main)
         }
         // The pages span the whole screen, edge to edge (their content
@@ -492,9 +510,15 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     }
 }
 
-/// Lays the two pages out at a point in the swap. Animatable, so SwiftUI
-/// hands it every in-between value of `progress` during the slide.
-private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
+/// Lays the two pages out. NOT animated itself (Nov 13, animations were
+/// laggy): each page takes its final size and place at once, with no
+/// animation, and only light visual modifiers (SwapMotion, SwapFade) play
+/// the slide. Animating the whole stage re-laid out both pages at a new
+/// width on every frame of a swap (the pages trade widths) and rebuilt
+/// their content each frame: the swap ran at about 23 fps.
+private struct DuoPairStage<Pane: View, Main: View>: View {
+    /// Where the swap ends: 0 = unswapped, 1 = swapped. The slide between
+    /// them is animated by the modifiers that read it.
     var progress: Double
     var wide: Bool
     /// DS layout: halves stacked top and bottom instead of side by side.
@@ -514,13 +538,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var direction: LayoutDirection
     /// The fold's band while partly open (see DuoPagePair.activeFold).
     var fold: CGRect? = nil
+    var foldGlides = true
     var pane: () -> Pane
     var main: () -> Main
 
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
-    }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cornerButtonsInRail) private var inRail
 
@@ -538,105 +559,73 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         let sideDefault = hingeX > 0 && total > 0 && size.width >= size.height
             ? Double(min(max(hingeX / total, 0), 1))
             : DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
-        // The left page's share of the width: the line stays where it is
-        // when the pages swap (they trade widths), at the hinge unless
-        // dragged (DaRon).
-        let swapT = Double(min(max((progress - 0.2) / 0.6, 0), 1))
-        // The left page's share, kept so the main page never gets
-        // narrower than its minimum (the line and the pages always agree).
+        let e: Double = progress >= 0.5 ? 1 : 0
+        let swappedEnd = e == 1
+        // The left page's share: the line stays where it is when the pages
+        // swap (they trade widths), at the hinge unless dragged (DaRon),
+        // and the main page never gets narrower than its minimum.
         func capLeft(_ v: Double) -> Double {
             let c = DuoSplitHandle.clamp(v)
-            return swapT < 0.5 ? min(c, maxPane) : max(c, 1 - maxPane)
+            return swappedEnd ? max(c, 1 - maxPane) : min(c, maxPane)
         }
         let leftShare = capLeft(sideDefault + sideShift)
-        let paneShare = min(leftShare * (1 - swapT) + (1 - leftShare) * swapT, maxPane)
+        let paneShare = min(swappedEnd ? 1 - leftShare : leftShare, maxPane)
         let botH = size.height - topH
         // Side by side: the main page keeps the front screen's width.
         // Stacked (DS): both pages are full width, half height each.
         let mainW = stacked ? total : (wide ? total * (1 - paneShare) : total)
         let paneW = stacked ? total : max(total - mainW, 0)
-        let p = min(max(progress, 0), 1)
-        // One continuous motion in three overlapping beats: the cards lift
-        // in place (side by side, even gaps), slide past each other, and
-        // land side by side again before settling back to full screen.
-        func smooth(_ x: Double) -> Double { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
-        // Reduce Motion: no lift or slide, the pages trade places under a
-        // quick fade (red team: it ran the full motion, just faster).
-        let calm = reduceMotion
-        let slide = calm ? (p < 0.5 ? 0 : 1) : smooth((p - 0.2) / 0.6)
-        // Left-to-right x of each page, then mirrored for RTL languages.
-        var paneX = stacked ? 0 : slide * mainW
-        var mainX = stacked ? 0 : (1 - slide) * paneW
-        // Stacked: the companion page starts on top and slides down. Each
-        // page takes the size of the half it's moving into.
-        let paneY = stacked ? slide * topH : 0
-        let mainY = stacked ? (1 - slide) * topH : 0
-        let paneH = stacked ? topH + (botH - topH) * slide : size.height
-        let mainH = stacked ? botH + (topH - botH) * slide : size.height
-        if direction == .rightToLeft && !stacked {
-            paneX = total - paneX - paneW
-            mainX = total - mainX - mainW
-        }
-        // 0 at rest, 1 for most of the slide: the cards lift off quickly,
-        // hold their full card shape (even gaps, round corners) while
-        // they cross, and settle back at the very end.
-        let lift = wide && !calm ? smooth(p / 0.22) * smooth((1 - p) / 0.22) : 0
-        // Even spacing all around (DaRon): each card pulls in a full gap
-        // at the screen edge and half a gap on the side facing the other
-        // card, so edge | card | card | edge are all one gap apart. The
-        // half moves from one side to the other as the pages trade places.
+        // Stacked: each page takes the size of the half it ends in.
+        let paneH = stacked ? (swappedEnd ? botH : topH) : size.height
+        let mainH = stacked ? (swappedEnd ? topH : botH) : size.height
+        let layout = SwapLayout(total: total, paneW: paneW, mainW: mainW, topH: topH,
+                                stacked: stacked, rtl: direction == .rightToLeft,
+                                wide: wide, calm: reduceMotion)
+        let paneEnd = layout.position(.pane, slide: e)
+        let mainEnd = layout.position(.main, slide: e)
         // Partly open: a page that reaches into the fold's band stops at
-        // its near edge instead (at rest only; a swap runs flat).
+        // its near edge instead.
         func clearOfFold(_ x: CGFloat, _ w: CGFloat) -> (x: CGFloat, w: CGFloat) {
-            guard let f = fold, lift == 0, w > 0, x < f.maxX, x + w > f.minX else { return (x, w) }
+            guard let f = fold, w > 0, x < f.maxX, x + w > f.minX else { return (x, w) }
             if x + w / 2 < f.midX { return (x, max(f.minX - x, 0)) }
             return (f.maxX, max(x + w - f.maxX, 0))
         }
-        let paneFit = clearOfFold(paneX, paneW)
-        let mainFit = clearOfFold(mainX, mainW)
-        let g = DuoSwapCard.inset
-        let half = g / 2
-        var paneLead = g - half * slide, paneTrail = half + half * slide
-        var mainLead = half + half * slide, mainTrail = g - half * slide
-        if stacked {
-            paneLead = g; paneTrail = g; mainLead = g; mainTrail = g
-        }
-        if direction == .rightToLeft && !stacked {
-            swap(&paneLead, &paneTrail)
-            swap(&mainLead, &mainTrail)
-        }
+        let paneFit = clearOfFold(paneEnd.x, paneW)
+        let mainFit = clearOfFold(mainEnd.x, mainW)
+        let cornerSlide: CGFloat = e
         return ZStack(alignment: .topLeading) {
             // A grey backdrop behind the cards, like Duo multitasking.
             Color(.systemGray3)
-                .opacity(min(1, lift * 3))
+                .modifier(SwapFade(progress: e) { p in min(1, layout.lift(p) * 3) })
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
             if wide {
                 pane()
                     .environment(\.layoutDirection, direction)
                     // DS: the bottom half keeps clear of the corner buttons.
-                    // Follows the slide, so nothing jumps mid-swap (red team).
-                    .safeAreaPadding(.trailing, stacked && paneClearsCorner && !inRail ? 76 * slide : 0)
-                    .environment(\.duoCornerInset, stacked && paneClearsCorner && !inRail ? 76 * slide : 0)
+                    .safeAreaPadding(.trailing, stacked && paneClearsCorner && !inRail ? 76 * cornerSlide : 0)
+                    .environment(\.duoCornerInset, stacked && paneClearsCorner && !inRail ? 76 * cornerSlide : 0)
                     .frame(width: paneFit.w, height: paneH, alignment: .top)
                     .clipped()
-                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneFit.w, height: paneH),
-                                          leading: paneLead, trailing: paneTrail))
                     // Real layout position (not a visual-only offset), so
                     // safe areas and hit areas match where the page is.
                     .alignmentGuide(.leading) { _ in -paneFit.x }
-                    .alignmentGuide(.top) { _ in -paneY }
+                    .alignmentGuide(.top) { _ in -paneEnd.y }
+                    .modifier(SwapLayoutStill())
+                    .modifier(SwapMotion(progress: e, target: e, role: .pane, layout: layout,
+                                         size: CGSize(width: paneFit.w, height: paneH)))
             }
             main()
                 .environment(\.layoutDirection, direction)
-                .safeAreaPadding(.trailing, stacked && mainClearsCorner && !inRail ? 76 * (1 - slide) : 0)
-                .environment(\.duoCornerInset, stacked && mainClearsCorner && !inRail ? 76 * (1 - slide) : 0)
+                .safeAreaPadding(.trailing, stacked && mainClearsCorner && !inRail ? 76 * (1 - cornerSlide) : 0)
+                .environment(\.duoCornerInset, stacked && mainClearsCorner && !inRail ? 76 * (1 - cornerSlide) : 0)
                 .frame(width: mainFit.w, height: mainH, alignment: .top)
                 .clipped(antialiased: stacked)
-                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainFit.w, height: mainH),
-                                      leading: mainLead, trailing: mainTrail))
                 .alignmentGuide(.leading) { _ in wide ? -mainFit.x : 0 }
-                .alignmentGuide(.top) { _ in -mainY }
+                .alignmentGuide(.top) { _ in -mainEnd.y }
+                .modifier(SwapLayoutStill())
+                .modifier(SwapMotion(progress: e, target: e, role: .main, layout: layout,
+                                     size: CGSize(width: mainFit.w, height: mainH)))
                 // The front screen's page passes over the other one.
                 .zIndex(1)
             // At rest: a hairline at the hinge (DS fold, or Notes' pages).
@@ -644,10 +633,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 // Side by side: the same fade as the DS fold, on both
                 // sides of the line between the pages, wherever it's
                 // dragged (DaRon). (Notes' hairline is part of it.)
-                let x = (1 - slide) * paneW + slide * mainW
+                let x = swappedEnd ? mainW : paneW
                 FoldFade(width: size.height, vertical: true)
                     .offset(x: (direction == .rightToLeft ? total - x : x) - FoldFade.reach)
-                    .opacity(lift > 0 ? 0 : 1)
+                    .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 ? 0 : 1 })
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                     .zIndex(2)
@@ -660,7 +649,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .offset(y: topH - FoldFade.reach)
                     // Off for the whole swap, never half faded: a blend
                     // under a partial opacity draws a grey band (red team).
-                    .opacity(lift > 0 ? 0 : 1)
+                    .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 ? 0 : 1 })
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                     .zIndex(2)
@@ -668,8 +657,7 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                 DuoSplitHandle(share: $dragSplit, length: size.height, span: total,
                                horizontal: true, rest: 0.5, onCommit: commit)
                     .offset(y: size.height * DuoSplitHandle.clamp(dragSplit) - DuoSplitHandle.grab / 2)
-                    .opacity(lift > 0 ? 0 : 1)
-                    .allowsHitTesting(lift == 0)
+                    .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 ? 0 : 1 })
                     .zIndex(3)
             }
             if wide && !stacked {
@@ -690,14 +678,13 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     rest: mirrored ? 1 - sideDefault : sideDefault,
                     onCommit: commit)
                     .offset(x: lineX - DuoSplitHandle.grab / 2)
-                    .opacity(lift > 0 ? 0 : 1)
-                    .allowsHitTesting(lift == 0)
+                    .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 ? 0 : 1 })
                     .zIndex(3)
             }
         }
         // Stepping clear of the fold and back glides like the home screen
         // (Reduce Motion: no glide).
-        .animation(reduceMotion ? nil : AppAnimation.hinge, value: fold)
+        .animation(reduceMotion || !foldGlides ? nil : AppAnimation.hinge, value: fold)
         .frame(width: total, height: size.height, alignment: .topLeading)
         // One solid layer: the fold's black-and-white strip blends with the
         // pages under it. Without a solid backdrop, a page fading in (page
@@ -705,11 +692,104 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // band and then popped back (red team, animations).
         .background(wide ? Theme.background : Color.clear)
         .compositingGroup()
-        .opacity(calm && wide ? abs(1 - 2 * p) * 0.85 + 0.15 : 1)
+        // Reduce Motion: the pages trade places under a quick fade.
+        .modifier(SwapFade(progress: e) { p in reduceMotion && wide ? abs(1 - 2 * p) * 0.85 + 0.15 : 1 })
         .environment(\.layoutDirection, .leftToRight)
         // -1 = not in a pair (the + button falls back to duoSwapped).
-        .environment(\.duoSwapProgress, wide ? slide : -1)
+        .environment(\.duoSwapProgress, wide ? e : -1)
         .environment(\.duoStacked, stacked)
+    }
+}
+
+/// The numbers a swap needs, from its end state: where each page sits at
+/// any point of the slide, how far the cards lift, and their insets.
+private struct SwapLayout {
+    enum Role { case pane, main }
+    var total: CGFloat, paneW: CGFloat, mainW: CGFloat, topH: CGFloat
+    var stacked: Bool, rtl: Bool, wide: Bool, calm: Bool
+
+    static func smooth(_ x: Double) -> Double { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
+
+    /// One continuous motion in three overlapping beats: the cards lift in
+    /// place, slide past each other, and land. Reduce Motion: no slide.
+    func slide(_ p: Double) -> Double { calm ? (p < 0.5 ? 0 : 1) : Self.smooth((p - 0.2) / 0.6) }
+
+    /// 0 at rest, 1 for most of the slide: the cards lift off quickly,
+    /// hold their card shape while they cross, and settle at the end.
+    func lift(_ p: Double) -> Double {
+        wide && !calm ? Self.smooth(p / 0.22) * Self.smooth((1 - p) / 0.22) : 0
+    }
+
+    /// Left-to-right position of a page at a point of the slide.
+    func position(_ role: Role, slide s: Double) -> CGPoint {
+        var x: CGFloat, y: CGFloat
+        switch role {
+        case .pane: x = stacked ? 0 : s * mainW; y = stacked ? s * topH : 0
+        case .main: x = stacked ? 0 : (1 - s) * paneW; y = stacked ? (1 - s) * topH : 0
+        }
+        if rtl && !stacked { x = total - x - (role == .pane ? paneW : mainW) }
+        return CGPoint(x: x, y: y)
+    }
+
+    /// Even spacing all around (DaRon): each card pulls in a full gap at
+    /// the screen edge and half a gap on the side facing the other card.
+    func insets(_ role: Role, slide s: Double) -> (leading: CGFloat, trailing: CGFloat) {
+        let g = DuoSwapCard.inset, half = g / 2
+        if stacked { return (g, g) }
+        var r: (CGFloat, CGFloat) = role == .pane
+            ? (g - half * s, half + half * s)
+            : (half + half * s, g - half * s)
+        if rtl { r = (r.1, r.0) }
+        return (leading: r.0, trailing: r.1)
+    }
+}
+
+/// A page's slide and lift for one frame of a swap: only a visual offset
+/// and the card effect (scale, corners, shadow), so the page itself is
+/// never laid out again mid-swap. At rest it's exactly the page.
+private struct SwapMotion: ViewModifier, Animatable {
+    var progress: Double
+    /// Where the swap ends (not animated): the page's real place.
+    var target: Double
+    var role: SwapLayout.Role
+    var layout: SwapLayout
+    var size: CGSize
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let p = min(max(progress, 0), 1)
+        let s = layout.slide(p)
+        let now = layout.position(role, slide: s)
+        let rest = layout.position(role, slide: target)
+        let inset = layout.insets(role, slide: s)
+        content
+            .modifier(DuoSwapCard(lift: layout.lift(p), size: size,
+                                  leading: inset.leading, trailing: inset.trailing))
+            .offset(x: now.x - rest.x, y: now.y - rest.y)
+    }
+}
+
+/// An opacity that follows the swap frame by frame.
+private struct SwapFade: ViewModifier, Animatable {
+    var progress: Double
+    var value: (Double) -> Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.opacity(value(min(max(progress, 0), 1)))
+    }
+}
+
+/// A swap moves pages only visually (SwapMotion): their size and place
+/// change at once, never frame by frame (that re-laid out the whole page
+/// on every frame).
+private struct SwapLayoutStill: ViewModifier {
+    func body(content: Content) -> some View {
+        content.transaction { if $0.duoSwap { $0.animation = nil } }
     }
 }
 
@@ -1035,48 +1115,33 @@ final class HingePresence: ObservableObject {
     @Published fileprivate(set) var hasHinge = UserDefaults.standard.bool(forKey: "deviceHasHinge")
 }
 
-final class HingeState: ObservableObject {
+final class HingeState {
     static let shared = HingeState()
-    /// 0° = closed, 180° = flat. Devices without a hinge stay at 180.
-    @Published var degrees: Double = 180
-    /// 0…1 across the whole travel, closed to fully open. The hinge's
-    /// "fully open" is "as far as the device allows" (not necessarily
-    /// 180°), so the end points come from the status and the span from
-    /// the widest angle this phone has reported while fully open.
-    @Published private(set) var openness: Double = 1
     /// This phone folds (it has reported a hinge), remembered across
     /// launches. Slab iPhones never set it.
     var hasHinge: Bool { HingePresence.shared.hasHinge }
 
-    /// Widest angle seen at `.fullyOpen`, remembered across launches.
-    private var fullOpenDegrees: Double = {
-        let v = UserDefaults.standard.double(forKey: "hingeFullOpenDegrees")
-        return v > 90 ? v : 180
-    }()
-
     enum Pose { case closed, partial, full, none }
 
-    func update(degrees deg: Double, pose: Pose) {
-        degrees = deg
-        if pose != .none, !HingePresence.shared.hasHinge {
+    private var pose: Pose = .none
+    /// When the hinge last left closed (the inner screen came on).
+    private var openedAt: Date = .distantPast
+
+    /// The inner screen has been showing for a moment. Coming from closed,
+    /// the screen should already show the right layout (Settings fades in
+    /// with its pages clear of the fold), so only a hinge move while the
+    /// screen is showing glides.
+    var settledOpen: Bool { Date().timeIntervalSince(openedAt) > 0.8 }
+
+    /// Not observed: nothing re-renders on a sample (Apple: hinge data is
+    /// for effects; layout follows size changes and reserved regions).
+    func update(degrees deg: Double, pose new: Pose) {
+        if new != .none, !HingePresence.shared.hasHinge {
             HingePresence.shared.hasHinge = true
             UserDefaults.standard.set(true, forKey: "deviceHasHinge")
         }
-        switch pose {
-        case .none:
-            openness = 1
-        case .closed:
-            openness = 0
-        case .full:
-            if deg > 90, abs(deg - fullOpenDegrees) > 0.5 {
-                fullOpenDegrees = deg
-                UserDefaults.standard.set(deg, forKey: "hingeFullOpenDegrees")
-            }
-            openness = 1
-        case .partial:
-            // Never claim fully open (or closed) mid-travel.
-            openness = min(max(deg / fullOpenDegrees, 0.001), 0.999)
-        }
+        if pose == .closed && new != .closed { openedAt = Date() }
+        pose = new
     }
 }
 
@@ -1110,6 +1175,31 @@ struct HingeReader: ViewModifier {
 
 extension View {
     func hingeReader() -> some View { modifier(HingeReader()) }
+}
+
+/// Hosts a view in its own small SwiftUI graph. For views that redraw
+/// every frame (the rest pill's water): drawn inside the app's graph, each
+/// frame made SwiftUI walk the whole app marking it changed — 22% of the
+/// main thread while a rest ran, which made every other animation lag.
+struct IsolatedHost<Content: View>: UIViewRepresentable {
+    var content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    final class Coordinator { var host: UIHostingController<Content>? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let host = UIHostingController(rootView: content)
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        host.safeAreaRegions = []
+        context.coordinator.host = host
+        return host.view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.host?.rootView = content
+    }
 }
 
 // MARK: - Lava-lamp liquid (rest pill, Nov 12)
