@@ -414,6 +414,12 @@ struct BodyFigureView: View {
         }
     }
 
+    /// Muscles in a recovery state, unless a highlight or injury covers them.
+    private func recoveryIDs(_ state: MuscleRecovery) -> Set<MuscleID> {
+        Set(recovery.compactMap { $0.value == state ? $0.key : nil })
+            .subtracting(highlighted).subtracting(injured)
+    }
+
     /// Injured areas not already under the main highlight.
     private var injuredOnly: Set<MuscleID> { injured.subtracting(highlighted) }
 
@@ -433,12 +439,13 @@ struct BodyFigureView: View {
             : UIColor(white: 0.68, alpha: 1)
     })
 
-    /// State palette. Fresh = bright pink AND a dashed white outline, so
-    /// fresh is never colour-only (colourblind-safe); recovering = purple;
-    /// lit = the highlight colour (solid for prime movers, a light wash
-    /// for synergists).
-    private static let freshFill = Color(red: 1.0, green: 0.18, blue: 0.33).opacity(0.90)
-    private static let recoveringFill = Color(red: 0.55, green: 0.36, blue: 0.96).opacity(0.55)
+    /// State palette, drawn like the lit muscles (the painting tinted, with
+    /// the glow) so recovery reads as clearly as the working muscles
+    /// (DaRon, Nov 13: the white dashes threw him off). Fresh = bright
+    /// pink, recovering = violet: different hue AND brightness, so they
+    /// stay apart without colour.
+    static let freshColor = Color(red: 1.0, green: 0.22, blue: 0.40)
+    static let recoveringColor = Color(red: 0.52, green: 0.36, blue: 1.0)
     private static let litFill = Color(red: 1.0, green: 0.38, blue: 0.08).opacity(0.85)
     private static let litGlow = Color(red: 1.0, green: 0.45, blue: 0.1)
     private static let litStroke = Color.white.opacity(0.9)
@@ -477,6 +484,8 @@ struct BodyFigureView: View {
                     // highlight colour — its own light and dark kept, so
                     // fibres and tendons stay visible (Nov 12). Prime
                     // movers full strength, synergists blended lighter.
+                    tintLayer(ids: recoveryIDs(.fresh), scale: scale, color: Self.freshColor)
+                    tintLayer(ids: recoveryIDs(.recovering), scale: scale, color: Self.recoveringColor)
                     tintLayer(ids: injuredOnly, scale: scale, color: Self.litGlow)
                     if !highlighted.isEmpty {
                         tintLayer(ids: primaryLit, scale: scale)
@@ -532,20 +541,15 @@ struct BodyFigureView: View {
     private func muscleOverlay(_ spec: MuscleSpec, scale: CGFloat) -> some View {
         let mainLit = highlighted.contains(spec.id)
         let injuredLit = !mainLit && injured.contains(spec.id)
-        let lit = mainLit || injuredLit
+        let state = mainLit || injuredLit ? nil : recovery[spec.id]
+        let lit = mainLit || injuredLit || state != nil
         let secondary = mainLit && (primary.map { !$0.contains(spec.id) } ?? false)
-        let litBase = injuredLit ? Self.litGlow : (litColor ?? Self.litGlow)
-        let fill: Color?
-        if lit {
-            // Colour comes from the tinted painting (tintLayer); no flat fill.
-            fill = nil
-        } else if let state = recovery[spec.id] {
-            fill = state == .fresh ? Self.freshFill : Self.recoveringFill
-        } else {
-            // Resting: no fill — the detailed grey anatomy painting shows
-            // through (fibres, tendons, face), Nov 12.
-            fill = nil
-        }
+        let litBase = state == .fresh ? Self.freshColor
+            : state == .recovering ? Self.recoveringColor
+            : injuredLit ? Self.litGlow : (litColor ?? Self.litGlow)
+        // Colour comes from the tinted painting (tintLayer); no flat fill.
+        // Resting: the detailed grey anatomy painting shows through.
+        let fill: Color? = nil
         let shape = overlayPath(spec, scale: scale)
         // The overlay is a PLAIN view, not a Button: touch goes to
         // the figure's single tap-location handler (see BodyFigureView
@@ -573,12 +577,6 @@ struct BodyFigureView: View {
                     }
                     .opacity(secondary ? 0.6 : 1)
                     .frame(width: 200 * scale, height: 400 * scale)
-                } else if recovery[spec.id] == .fresh {
-                    // Fresh is never color-only: a dashed white outline
-                    // marks it as well as the pink fill (colorblind-safe).
-                    shape.stroke(Color.white.opacity(0.9),
-                                 style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                        .frame(width: 200 * scale, height: 400 * scale)
                 }
             }
             // Flat fills, no glow or pop: in the segmented style the
@@ -588,7 +586,7 @@ struct BodyFigureView: View {
         }
         .accessibilityLabel(spec.id.accessibilityLabel)
         .accessibilityValue(freshnessValue(for: spec))
-        .accessibilityAddTraits(lit ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAddTraits(mainLit || injuredLit ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { onTap?(spec.id) }
     }
 
@@ -960,13 +958,13 @@ struct LiveBodyView: View {
         case .injuries:
             Text(injuredMuscles.isEmpty ? "No injuries marked" : "Injuries")
         case .recovery:
-            (Text("Fresh").foregroundColor(Color(red: 1.0, green: 0.18, blue: 0.33)) + Text(" · ")
-                + Text("Recovering").foregroundColor(Color(red: 0.55, green: 0.36, blue: 0.96)))
+            (Text("Fresh").foregroundColor(BodyFigureView.freshColor) + Text(" · ")
+                + Text("Recovering").foregroundColor(BodyFigureView.recoveringColor))
         case .all:
             (Text("Working").foregroundColor(accent) + Text(" · ")
                 + Text("Injuries").foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.1)) + Text(" · ")
-                + Text("Fresh").foregroundColor(Color(red: 1.0, green: 0.18, blue: 0.33)) + Text(" · ")
-                + Text("Recovering").foregroundColor(Color(red: 0.55, green: 0.36, blue: 0.96)))
+                + Text("Fresh").foregroundColor(BodyFigureView.freshColor) + Text(" · ")
+                + Text("Recovering").foregroundColor(BodyFigureView.recoveringColor))
         }
     }
 
@@ -1290,8 +1288,8 @@ struct BodyView: View {
 
     private var legendRow: some View {
         HStack(spacing: 16) {
-            legendDot(color: Color(red: 1.0, green: 0.18, blue: 0.33), label: "Fresh", dashedRing: true)
-            legendDot(color: Color(red: 0.55, green: 0.36, blue: 0.96), label: "Recovering")
+            legendDot(color: BodyFigureView.freshColor, label: "Fresh")
+            legendDot(color: BodyFigureView.recoveringColor, label: "Recovering")
             // Resting = not tracked for recovery, drawn in the plain grey
             // (the swatch was red, a colour nothing on the figure uses).
             legendDot(color: BodyFigureView.muscleRest, label: "Resting")
@@ -1300,16 +1298,10 @@ struct BodyView: View {
         .foregroundStyle(Theme.secondaryText)
     }
 
-    private func legendDot(color: Color, label: String, dashedRing: Bool = false) -> some View {
+    private func legendDot(color: Color, label: String) -> some View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 10, height: 10)
-                .overlay {
-                    // Fresh is never color-only: the legend swatch
-                    // carries the same dashed ring as the figure.
-                    if dashedRing {
-                        Circle().stroke(Color.white, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-                    }
-                }
+                .shadow(color: color.opacity(0.5), radius: 4)
             Text(label)
         }
     }

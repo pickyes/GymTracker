@@ -950,7 +950,7 @@ struct TodayView: View {
 
     /// 1. What's recovering: the SAME figure and the SAME freshness
     /// coloring as the Body screen (BodyFigureView with the store's
-    /// recovery map — fresh = bright pink + dashed ring, recovering =
+    /// recovery map — fresh = bright pink, recovering =
     /// purple, resting = the image's own red), plus the one-line
     /// caption per recovering muscle and the front/back flip. Tap a
     /// muscle to see which one it is. No second diagram, no fake data.
@@ -1196,25 +1196,17 @@ struct TodayView: View {
         let detail = Text("\(byExercise ? setsText : exercisesText) · \(volume.formatted(.number.precision(.fractionLength(0)))) \(unit.label) lifted")
             .font(.subheadline)
             .foregroundStyle(Theme.secondaryText)
-        // Wide pane: ring beside the text. Narrow pane (open Duo held
-        // upright, ~200pt): ring over the text, centered.
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) {
-                ring
-                VStack(alignment: .leading, spacing: 4) {
-                    setsLine.fixedSize()
-                    detail.fixedSize()
-                }
-                Spacer(minLength: 0)
+        // Ring beside the text. One layout (Apple: ViewThatFits builds and
+        // measures every candidate on each pass, which slowed the unfold);
+        // the card only shows on the wide sideways pane, and the text wraps
+        // instead of switching layout at large sizes.
+        return HStack(spacing: 16) {
+            ring
+            VStack(alignment: .leading, spacing: 4) {
+                setsLine.fixedSize(horizontal: false, vertical: true)
+                detail.fixedSize(horizontal: false, vertical: true)
             }
-            VStack(spacing: 8) {
-                ring
-                setsLine
-                detail
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity)
+            Spacer(minLength: 0)
         }
         .padding(16)
         .themeCard()
@@ -3155,8 +3147,9 @@ struct SetRow: View {
     /// Reports focus changes up to TodayView (field id or nil on blur)
     /// so the layout can scroll the focused field above the keyboard.
     var onFieldFocus: ((String?) -> Void)? = nil
-    /// The card's layout choice for all its rows (nil: decide alone).
-    var compact: Bool? = nil
+    /// The card's layout choice for all its rows (a width breakpoint the
+    /// card works out once, instead of each row measuring both layouts).
+    var compact: Bool = false
     /// False on an exercise's only set (it can't be deleted).
     var canDelete: Bool = true
 
@@ -3211,14 +3204,7 @@ struct SetRow: View {
     var body: some View {
         // Narrow page (side bar on, line at the hinge): a compact row with
         // smaller boxes, so the whole row fits instead of being cut off.
-        if let compact {
-            row(compact: compact)
-        } else {
-            ViewThatFits(in: .horizontal) {
-                row(compact: false)
-                row(compact: true)
-            }
-        }
+        row(compact: compact)
     }
 
     private func row(compact: Bool) -> some View {

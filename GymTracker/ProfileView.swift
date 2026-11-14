@@ -88,13 +88,14 @@ enum ProfileSection: String, CaseIterable, Identifiable, Hashable {
 /// The colored rounded-square icon tile used in the Profile list.
 struct SectionIconTile: View {
     let section: ProfileSection
-    var size: CGFloat = 30
+    /// 28pt: the Settings app's row icons.
+    var size: CGFloat = 28
     var body: some View {
         Image(systemName: section.icon)
-            .font(.system(size: size * 0.52, weight: .semibold))
+            .font(.system(size: size * 0.54, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(section.tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .background(section.tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -123,6 +124,7 @@ struct ProfileView: View {
     @Environment(\.cornerButtonsInRail) private var inRail
     @Environment(\.systemSideBar) private var systemSideBar
     @Environment(\.railEdge) private var railEdge
+    @Environment(\.layoutDirection) private var direction
     @EnvironmentObject var store: WorkoutStore
     @EnvironmentObject var subscription: SubscriptionState
     @EnvironmentObject var mcpServer: MCPServer
@@ -193,6 +195,10 @@ struct ProfileView: View {
             }
         }
         .disableVerticalBar()
+        // The Settings app's sizing (DaRon): 20pt page margins and 52pt rows,
+        // here and on every page Profile opens.
+        .environment(\.pageListMargin, 20)
+        .environment(\.defaultMinListRowHeight, 52)
         .onChange(of: path.isEmpty, initial: true) { _, top in store.setCanGoBack("profile", !top) }
         // Open and upright the right pane has its own stack: the pages from
         // the sideways layout don't carry over.
@@ -255,25 +261,33 @@ struct ProfileView: View {
     private var rootList: some View {
         List {
             Group {
-            PageTitle(text: "Profile")
-                // In the clock's row, like Today (Nov 12).
-                .padding(.top, pageTitleTop)
-                // Same left edge as Today, Calendar and Notes.
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+            Section {
+                PageTitle(text: "Profile")
+                    // In the clock's row, like Today (Nov 12).
+                    .padding(.top, pageTitleTop)
+                    // Same left edge as Today, Calendar and Notes.
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+            // The account card sits just under the title, like Settings.
+            .listSectionSpacing(14)
             Section {
                 // Your photo and name: tap to edit (DaRon).
-                Button { editingIdentity = true } label: { summaryCard }
+                Button { editingIdentity = true } label: { summaryCard() }
                     .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 14, leading: 20, bottom: 14, trailing: 20))
             }
+            // Like Settings: plain groups, no titles over them.
             Section {
                 NavigationLink(value: ProfileRoute.section(.program)) { sectionRow(.program) }
+                    .listRowInsets(Self.rowInsets)
             }
             ForEach(groups, id: \.title) { group in
-                Section(group.title) {
+                Section {
                     ForEach(group.sections) { section in
                         NavigationLink(value: ProfileRoute.section(section)) { sectionRow(section) }
+                            .listRowInsets(Self.rowInsets)
                     }
                 }
             }
@@ -292,71 +306,82 @@ struct ProfileView: View {
         .infinityTopEdge()
     }
 
-    /// Open Duo: the same list as a sidebar; the chosen row is lit and
-    /// its page shows beside it.
+    /// Open Duo: the Settings app's sidebar (DaRon: copy its layout): a
+    /// grey column with the account at the top and plain rows, the open one
+    /// on a lighter capsule; its page shows beside it.
     private var sidebar: some View {
-        List {
-            Group {
-            PageTitle(text: "Profile")
-                .padding(.top, pageTitleTop)
-                // Same left edge as Today, Calendar and Notes.
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-            Section {
-                // The header opens Your Program too, but only the row
-                // below lights up for it (one highlight, not two).
-                Button { editingIdentity = true } label: { summaryCard }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { editingIdentity = true } label: { summaryCard(chevron: false) }
                     .buttonStyle(.plain)
-                    .listRowBackground(Theme.card)
-            }
-            Section {
-                sidebarButton(.program) { sectionRow(.program) }
-            }
-            ForEach(groups, id: \.title) { group in
-                Section(group.title) {
-                    ForEach(group.sections) { section in
-                        sidebarButton(section) { sectionRow(section) }
-                    }
+                    // Settings: the picture 36pt in, level with the row icons'
+                    // capsule padding plus a little.
+                    .padding(.leading, 36)
+                    .padding(.trailing, 20)
+                    .padding(.top, 71)  // + the arrangement's 24pt inset = 95
+                    .padding(.bottom, 22)
+                ForEach(Array(([[ProfileSection.program]] + groups.map(\.sections)).enumerated()), id: \.offset) { index, sections in
+                    if index > 0 { Spacer().frame(height: 20) }
+                    ForEach(sections) { sidebarRow($0) }
                 }
+                Color.clear.frame(height: LayoutClearance.bottom(restActive: store.isRestActive, fabOffset: fabBottomOffset))
             }
-            clearanceRow
-            }
-            // Rows take the app's card color (set on the List itself it does nothing).
-            .listRowBackground(Theme.card)
         }
-        // Grouped rounded sections inside the page margins, like the
-        // Settings app (the plain list ran the icons off the edge).
-        .listStyle(.insetGrouped)
-        .pageListMargins()
-        // The title sits in the clock's row, like the other pages.
-        .contentMargins(.top, 0, for: .scrollContent)
-        .oledList()
-        .ignoresSafeArea(edges: .top)
-        .infinityTopEdge()
+        .scrollIndicators(.hidden)
+        .background(Self.sidebarGrey.ignoresSafeArea())
     }
 
-    /// A sidebar row: opens its page beside the list; the open one is lit.
-    private func sidebarButton<Label: View>(_ section: ProfileSection, @ViewBuilder label: () -> Label) -> some View {
-        Button { selected = section; userPicked = true; wideRoutes = [] } label: {
-            label()
+    /// The Settings sidebar's grey and its selected-row capsule (measured
+    /// from Settings on the Duo).
+    private static let sidebarGrey = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0x46 / 255, green: 0x4C / 255, blue: 0x50 / 255, alpha: 1)
+            : UIColor(red: 0.95, green: 0.95, blue: 0.97, alpha: 1)
+    })
+    private static let sidebarSelected = Color(UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0x5D / 255, green: 0x62 / 255, blue: 0x65 / 255, alpha: 1)
+            : UIColor(white: 0.86, alpha: 1)
+    })
+
+    /// Settings' row insets: icon 18pt in, chevron 20pt from the edge.
+    private static let rowInsets = EdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 20)
+
+    /// A sidebar row: opens its page beside the list; the open one sits on
+    /// the lighter capsule, 20pt in from each side like Settings.
+    private func sidebarRow(_ section: ProfileSection) -> some View {
+        let on = selected == section
+        return Button { selected = section; userPicked = true; wideRoutes = [] } label: {
+            HStack(spacing: 10) {
+                SectionIconTile(section: section)
+                Text(section.title)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 52)
+            .background { if on { Capsule().fill(Self.sidebarSelected) } }
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .listRowBackground(selected == section ? Color.accentColor.opacity(0.3) : Theme.card)
+        .padding(.horizontal, 20)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    /// Apple Account-style card at the top: the plan you're on.
-    private var summaryCard: some View {
+    /// Apple Account-style card at the top: the plan you're on. Sized like
+    /// Settings' account row: 60pt picture, bold name, the plan under it.
+    private func summaryCard(chevron: Bool = true) -> some View {
         let typedName = identity.name.trimmingCharacters(in: .whitespaces)
         return HStack(spacing: 14) {
             Group {
                 if identity.photo != nil {
-                    ProfileAvatar(size: 58)
+                    ProfileAvatar(size: 60)
                 } else {
                     Image(systemName: "person.crop.circle.badge.plus")
-                        .font(.system(size: 26, weight: .semibold))
+                        .font(.system(size: 27, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
-                        .frame(width: 58, height: 58)
+                        .frame(width: 60, height: 60)
                         .background(Color.accentColor.opacity(0.18), in: Circle())
                 }
             }
@@ -364,7 +389,7 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(!typedName.isEmpty ? typedName
                      : (store.profile?.name ?? (identity.photo == nil ? "Add your name and photo" : "Add your name")))
-                    .font(.title3.weight(.bold))
+                    .font(.title2.weight(.bold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(2)
                 if let program = store.activeProgram, let profile = store.profile {
@@ -380,22 +405,25 @@ struct ProfileView: View {
                 }
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.tertiaryText)
+            if chevron {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.tertiaryText)
+            }
         }
-        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .accessibilityLabel("Edit name and photo")
     }
 
+    /// A Settings row: 28pt icon, the name 15pt after it, 52pt tall.
     private func sectionRow(_ section: ProfileSection) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 15) {
             SectionIconTile(section: section)
             Text(section.title)
                 .foregroundStyle(Theme.text)
             Spacer(minLength: 0)
         }
+        .frame(minHeight: 52)
         .contentShape(Rectangle())
     }
 
@@ -412,21 +440,46 @@ struct ProfileView: View {
     /// other page. Swap mirrors it.
     @ViewBuilder
     private func pair<Detail: View>(@ViewBuilder detail: () -> Detail) -> some View {
+        // Like Settings (DaRon): the sidebar on the left, 320pt, and the
+        // page beside it. Swap puts the sidebar on the right.
+        let detailOnRight = !swapped
         let detailPage = detail()
-        DuoPagePair(wide: true, swapped: swapped, stacksWhenTall: false) {
-            detailPage
-                // Inside the page's margins on both sides, so the cards end
-                // short of the middle line instead of running into it.
-                .contentMargins(.leading, 16, for: .scrollContent)
-                // On the right page the corner buttons sit over its right
-                // edge (not where iOS draws the side bar: they're in it).
-                .contentMargins(.trailing, swapped && !inRail && !systemSideBar ? 92 : 16, for: .scrollContent)
-                // Lists inside set their own margins: same room.
-                .environment(\.pageListExtraTrailing, swapped && !inRail && !systemSideBar ? 76 : 0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } main: {
-            sidebar
-                .background(Theme.card.opacity(0.45))
+            // Settings' 20pt margins on both sides.
+            .contentMargins(.leading, 20, for: .scrollContent)
+            // On the right page the corner buttons sit over its right
+            // edge (not where iOS draws the side bar: they're in it).
+            .contentMargins(.trailing, detailOnRight && !inRail && !systemSideBar ? 96 : 20, for: .scrollContent)
+            // The header card starts level with the account, like
+            // Settings (it sat against the top edge).
+            // (58 + the 24pt top inset the arrangement adds = 82.)
+            .contentMargins(.top, 58, for: .scrollContent)
+            // Lists inside set their own margins: same room.
+            .environment(\.pageListExtraTrailing, detailOnRight && !inRail && !systemSideBar ? 76 : 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            if #available(iOS 27.1, *) {
+                // Apple's own two-pane container for iPhone Duo: the system
+                // splits the pages around the fold when it's partly open
+                // (their recommended path before reading the fold yourself).
+                // Swap mirrors it; each page keeps the real direction.
+                let mirrored: LayoutDirection = direction == .leftToRight ? .rightToLeft : .leftToRight
+                ArrangementView {
+                    sidebar
+                        .environment(\.layoutDirection, direction)
+                        .splitArrangementLayoutSize(minWidth: 280, idealWidth: 320)
+                } secondary: {
+                    detailPage
+                        .environment(\.layoutDirection, direction)
+                }
+                .arrangementViewStyle(.split.axes(.horizontal))
+                .environment(\.layoutDirection, swapped ? mirrored : direction)
+            } else {
+                DuoPagePair(wide: true, swapped: !swapped, stacksWhenTall: false, dividerAt: 320) {
+                    detailPage
+                } main: {
+                    sidebar
+                }
+            }
         }
         // Where iOS draws the side bar: a hairline keeps both panes clear of
         // it (iOS insets a page only once it stops touching that edge), and
@@ -447,6 +500,9 @@ struct ProfileView: View {
                 // The header card is the title: the bar's small title said
                 // the same thing again above it.
                 .modifier(NoBarTitle())
+                // The header card starts 82pt down, like Settings' pages
+                // (58 below the bar's own 24).
+                .contentMargins(.top, 58, for: .scrollContent)
         case .programs: ProgramsView()
         case .library: ProgramLibraryView()
         case .builder: CustomProgramBuilderView()
@@ -531,17 +587,22 @@ struct ProfileView: View {
         }
     }
 
-    /// Settings-style header: big icon tile, title, one-line blurb.
+    /// Settings-style header: 60pt icon tile, bold title, the blurb in
+    /// body text under it, 20pt in from the card's edge (measured from
+    /// Settings' General page).
     private func headerCard(_ section: ProfileSection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionIconTile(section: section, size: 58)
-            Text(section.title)
-                .font(.title2.weight(.bold))
-            Text(section.blurb)
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
+        VStack(alignment: .leading, spacing: 14) {
+            SectionIconTile(section: section, size: 60)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(section.title)
+                    .font(.title.weight(.bold))
+                Text(section.blurb)
+                    .font(.body)
+                    .foregroundStyle(Theme.secondaryText)
+            }
         }
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowInsets(EdgeInsets(top: 15, leading: 20, bottom: 20, trailing: 20))
     }
 
     @ViewBuilder

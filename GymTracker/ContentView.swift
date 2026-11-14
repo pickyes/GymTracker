@@ -250,8 +250,14 @@ struct ContentView: View {
             dismissKeyboard()
             withAnimation(AppAnimation.snappy) { selectedPage = page }
         } label: {
-            Image(systemName: page == .profile ? "person.fill" : page.systemImage)
-                .font(.title3.weight(.semibold))
+            Group {
+                if page == .profile && identity.photo != nil {
+                    ProfileAvatar(size: 28)
+                } else {
+                    Image(systemName: page == .profile ? "person.fill" : page.systemImage)
+                        .font(.title3.weight(.semibold))
+                }
+            }
                 .foregroundStyle(active ? effectiveAccent : Theme.text)
                 .frame(width: 47, height: 47)
                 .background {
@@ -1202,7 +1208,11 @@ struct ContentView: View {
     /// white on the effective accent when active (lit).
     private func pillLabel(systemImage: String, title: String, isActive: Bool) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: systemImage)
+            if systemImage == Page.profile.systemImage && identity.photo != nil {
+                ProfileAvatar(size: 20)
+            } else {
+                Image(systemName: systemImage)
+            }
             Text(title)
         }
         .font(.subheadline.weight(.semibold))
@@ -1521,10 +1531,16 @@ extension View {
             // content for its bar itself.
             .toolbar(barShown ? .automatic : .hidden, for: .tabBar)
             .tabItem {
-                Label(page.title, systemImage: page.systemImage)
-                    // Notes keeps the outlined pencil (the tab bar fills
-                    // symbols by default; DaRon's reference is the outline).
-                    .environment(\.symbolVariants, page == .notes ? .none : .fill)
+                // Profile shows your picture (DaRon), round and in its own
+                // colours; the person icon until there is one.
+                if page == .profile, let icon = ProfileIdentity.shared.tabIcon {
+                    Label { Text(page.title) } icon: { Image(uiImage: icon) }
+                } else {
+                    Label(page.title, systemImage: page.systemImage)
+                        // Notes keeps the outlined pencil (the tab bar fills
+                        // symbols by default; DaRon's reference is the outline).
+                        .environment(\.symbolVariants, page == .notes ? .none : .fill)
+                }
             }
             .tag(page)
     }

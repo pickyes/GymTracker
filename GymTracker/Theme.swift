@@ -383,6 +383,10 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// Side by side: the main page never gets narrower than this when the
     /// line is dragged (Today's workout rows need the folded width).
     var mainMinWidth: CGFloat? = nil
+    /// Side by side: where the line between the pages sits, in points from
+    /// the left, instead of at the hinge (Profile: the Settings app's 320pt
+    /// sidebar).
+    var dividerAt: CGFloat? = nil
     @ViewBuilder var pane: () -> Pane
     @ViewBuilder var main: () -> Main
 
@@ -424,17 +428,6 @@ struct DuoPagePair<Pane: View, Main: View>: View {
     /// setting is saved once on release.
     @State private var liveSplit: Double?
     @State private var liveShift: Double?
-    /// When the pair last changed size (a plain reference: noting it never
-    /// causes another pass).
-    @State private var sizeClock = SizeClock()
-    final class SizeClock {
-        private var size: CGSize = .zero
-        private var since: Date = .distantPast
-        func note(_ s: CGSize) {
-            if abs(s.width - size.width) > 0.5 || abs(s.height - size.height) > 0.5 { size = s; since = Date() }
-        }
-        var stable: Bool { Date().timeIntervalSince(since) > 0.6 }
-    }
 
     var body: some View {
         GeometryReader { geo in
@@ -446,12 +439,6 @@ struct DuoPagePair<Pane: View, Main: View>: View {
             // with its margins). Like Settings and the home screen, the
             // pages step clear of it, and back when the Duo opens flat.
             let fold = wide && !stacked ? Self.activeFold(in: geo) : nil
-            // Glide only when the hinge moves on a screen that's already
-            // showing (partly open <-> open: same size). Coming from closed
-            // the screen has just changed size, and it appears with the
-            // pages already clear of the fold, as Settings does.
-            let _ = sizeClock.note(geo.size)
-            let foldGlides = sizeClock.stable && HingeState.shared.settledOpen
             // Open and upright (DaRon: Nintendo DS style): one page on
             // each half, top and bottom of the fold; the companion page is
             // the top screen. Same view either way (only the frames and
@@ -489,8 +476,8 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          // got only ~216pt and every page in it wrapped.
                          mainWidth: wide && !stacked && s.height > s.width ? nil : mainWidth,
                          direction: direction,
+                         dividerAt: dividerAt,
                          fold: fold,
-                         foldGlides: foldGlides,
                          pane: pane, main: main)
         }
         // The pages span the whole screen, edge to edge (their content
@@ -536,9 +523,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
     var mainMinWidth: CGFloat?
     var mainWidth: CGFloat?
     var direction: LayoutDirection
+    var dividerAt: CGFloat? = nil
     /// The fold's band while partly open (see DuoPagePair.activeFold).
     var fold: CGRect? = nil
-    var foldGlides = true
     var pane: () -> Pane
     var main: () -> Main
 
@@ -556,9 +543,10 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
         // Upright the hinge runs across, not down the middle: there the
         // pages share the width equally (at "the hinge" the side bar's
         // width all came out of the right page, which got ~216pt).
-        let sideDefault = hingeX > 0 && total > 0 && size.width >= size.height
-            ? Double(min(max(hingeX / total, 0), 1))
-            : DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth)
+        let sideDefault = dividerAt.map { total > 0 ? Double(min(max($0 / total, 0), 1)) : 0.5 }
+            ?? (hingeX > 0 && total > 0 && size.width >= size.height
+                ? Double(min(max(hingeX / total, 0), 1))
+                : DuoPagePair<Pane, Main>.sideDefault(total: total, mainWidth: mainWidth))
         let e: Double = progress >= 0.5 ? 1 : 0
         let swappedEnd = e == 1
         // The left page's share: the line stays where it is when the pages
@@ -583,10 +571,12 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
                                 wide: wide, calm: reduceMotion)
         let paneEnd = layout.position(.pane, slide: e)
         let mainEnd = layout.position(.main, slide: e)
-        // Partly open: a page that reaches into the fold's band stops at
-        // its near edge instead.
+        // Partly open: the pages split at the fold, one on each side of its
+        // band, like Settings (Apple: split views go to an even split at
+        // the fold). The left page ends at the band, the right one starts
+        // after it, wherever the line was.
         func clearOfFold(_ x: CGFloat, _ w: CGFloat) -> (x: CGFloat, w: CGFloat) {
-            guard let f = fold, w > 0, x < f.maxX, x + w > f.minX else { return (x, w) }
+            guard let f = fold, w > 0 else { return (x, w) }
             if x + w / 2 < f.midX { return (x, max(f.minX - x, 0)) }
             return (f.maxX, max(x + w - f.maxX, 0))
         }
@@ -633,9 +623,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
                 // Side by side: the same fade as the DS fold, on both
                 // sides of the line between the pages, wherever it's
                 // dragged (DaRon). (Notes' hairline is part of it.)
-                let x = swappedEnd ? mainW : paneW
+                let x = fold?.midX ?? (swappedEnd ? mainW : paneW)
                 FoldFade(width: size.height, vertical: true)
-                    .offset(x: (direction == .rightToLeft ? total - x : x) - FoldFade.reach)
+                    .offset(x: (fold == nil && direction == .rightToLeft ? total - x : x) - FoldFade.reach)
                     .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 ? 0 : 1 })
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -678,13 +668,16 @@ private struct DuoPairStage<Pane: View, Main: View>: View {
                     rest: mirrored ? 1 - sideDefault : sideDefault,
                     onCommit: commit)
                     .offset(x: lineX - DuoSplitHandle.grab / 2)
-                    .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 ? 0 : 1 })
+                    .modifier(SwapFade(progress: e) { p in layout.lift(p) > 0 || fold != nil ? 0 : 1 })
+                    // Partly open the pages split at the fold: no line to drag.
+                    .allowsHitTesting(fold == nil)
                     .zIndex(3)
             }
         }
-        // Stepping clear of the fold and back glides like the home screen
-        // (Reduce Motion: no glide).
-        .animation(reduceMotion || !foldGlides ? nil : AppAnimation.hinge, value: fold)
+        // Stepping clear of the fold and back is instant (DaRon: "1ms"):
+        // the pages are in place the frame iOS reports the fold, under the
+        // system's own hinge blur — no glide after it.
+        .transaction(value: fold) { $0.animation = nil }
         .frame(width: total, height: size.height, alignment: .topLeading)
         // One solid layer: the fold's black-and-white strip blends with the
         // pages under it. Without a solid backdrop, a page fading in (page
@@ -1123,16 +1116,6 @@ final class HingeState {
 
     enum Pose { case closed, partial, full, none }
 
-    private var pose: Pose = .none
-    /// When the hinge last left closed (the inner screen came on).
-    private var openedAt: Date = .distantPast
-
-    /// The inner screen has been showing for a moment. Coming from closed,
-    /// the screen should already show the right layout (Settings fades in
-    /// with its pages clear of the fold), so only a hinge move while the
-    /// screen is showing glides.
-    var settledOpen: Bool { Date().timeIntervalSince(openedAt) > 0.8 }
-
     /// Not observed: nothing re-renders on a sample (Apple: hinge data is
     /// for effects; layout follows size changes and reserved regions).
     func update(degrees deg: Double, pose new: Pose) {
@@ -1140,8 +1123,6 @@ final class HingeState {
             HingePresence.shared.hasHinge = true
             UserDefaults.standard.set(true, forKey: "deviceHasHinge")
         }
-        if pose == .closed && new != .closed { openedAt = Date() }
-        pose = new
     }
 }
 
@@ -2070,21 +2051,28 @@ struct SideBarItems: ViewModifier {
 struct PageListMargins: ViewModifier {
     /// Extra room on the trailing side (the open Duo's corner buttons).
     @Environment(\.pageListExtraTrailing) private var extraTrailing
+    /// 16pt app-wide; Profile uses the Settings app's 20pt (DaRon).
+    @Environment(\.pageListMargin) private var margin
     @State private var insets = EdgeInsets()
 
     static let margin: CGFloat = 16
 
     func body(content: Content) -> some View {
         content
-            .contentMargins(.leading, Self.margin + insets.leading, for: .scrollContent)
-            .contentMargins(.trailing, Self.margin + insets.trailing + extraTrailing, for: .scrollContent)
+            .contentMargins(.leading, margin + insets.leading, for: .scrollContent)
+            .contentMargins(.trailing, margin + insets.trailing + extraTrailing, for: .scrollContent)
             .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets = $0 }
     }
 }
 
 private struct PageListExtraTrailingKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+private struct PageListMarginKey: EnvironmentKey { static let defaultValue: CGFloat = PageListMargins.margin }
 
 extension EnvironmentValues {
+    var pageListMargin: CGFloat {
+        get { self[PageListMarginKey.self] }
+        set { self[PageListMarginKey.self] = newValue }
+    }
     var pageListExtraTrailing: CGFloat {
         get { self[PageListExtraTrailingKey.self] }
         set { self[PageListExtraTrailingKey.self] = newValue }

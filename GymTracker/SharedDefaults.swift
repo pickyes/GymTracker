@@ -97,7 +97,21 @@ final class ProfileIdentity: ObservableObject {
     static let shared = ProfileIdentity()
 
     @Published var name: String { didSet { if name != oldValue { saveName() } } }
-    @Published private(set) var photo: UIImage?
+    @Published private(set) var photo: UIImage? { didSet { tabIcon = Self.roundIcon(photo) } }
+    /// The photo as a small round icon in its own colours, for the Profile
+    /// button in the side bars (DaRon: the profile icon is your picture).
+    @Published private(set) var tabIcon: UIImage?
+
+    private static func roundIcon(_ image: UIImage?, side: CGFloat = 28) -> UIImage? {
+        guard let image else { return nil }
+        let size = CGSize(width: side, height: side)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).addClip()
+            let scale = max(side / image.size.width, side / image.size.height)
+            let w = image.size.width * scale, h = image.size.height * scale
+            image.draw(in: CGRect(x: (side - w) / 2, y: (side - h) / 2, width: w, height: h))
+        }.withRenderingMode(.alwaysOriginal)
+    }
 
     private static var folder: URL {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedDefaults.suiteName)
@@ -109,6 +123,7 @@ final class ProfileIdentity: ObservableObject {
     private init() {
         name = (try? JSONDecoder().decode(String.self, from: Data(contentsOf: Self.nameURL))) ?? ""
         photo = (try? Data(contentsOf: Self.photoURL)).flatMap(UIImage.init(data:))
+        tabIcon = Self.roundIcon(photo)
     }
 
     /// Sets (or clears, with nil) the photo; stored as a small square JPEG.
