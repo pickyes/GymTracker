@@ -920,6 +920,12 @@ struct ProfileView: View {
             Text("Status \(Self.versionText) — No account. Your data stays on your devices.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+            // Required credit for the body figure's muscle artwork (CC BY 4.0).
+            Link(destination: URL(string: "https://openstax.org/details/books/anatomy-and-physiology")!) {
+                Text("Muscle artwork adapted from OpenStax, Anatomy and Physiology (CC BY 4.0).")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
         }
     }
 

@@ -29,6 +29,36 @@ PREV = os.path.join(HERE, "fit_preview"); os.makedirs(PREV, exist_ok=True)
 S = 5.6                       # px per canvas unit
 CW, CH = 1120, 2240
 
+# --- Which drawing the anatomy comes from: "openstax" (modern, CC BY 4.0,
+# default) or "bougle" (1899 engravings, public domain).
+PLATES = os.environ.get("PLATES", "openstax")
+OS_SRC = os.path.join(HERE, "..", "openstax", "openstax_1105.jpg")
+
+def remove_lines(img):
+    """OpenStax prints black label leader lines across the figure."""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    m = ((hsv[..., 2] < 95) & (hsv[..., 1] < 90)).astype(np.uint8)
+    m = cv2.dilate(m, np.ones((5, 5), np.uint8))
+    return cv2.inpaint(img, m, 4, cv2.INPAINT_TELEA)
+
+# OpenStax joints (px in each cropped plate). Front: the person's right is
+# superficial (viewer's left), so the plate is flipped first; numbers below
+# are after the flip (x' = 1303 - x). Back: viewer's right for the upper
+# body and thighs, viewer's left (mirrored) for the calves.
+OS_FRONT_CROP, OS_BACK_CROP = (0, 1300), (1560, 2900)
+OS_FRONT_MID = 691
+OS_FRONT_J = {"crown": (691, 30), "chin": (691, 185), "notch": (691, 228), "crotch": (691, 648),
+              "shoulder": (823, 280), "elbow": (878, 500), "wrist": (938, 645),
+              "hip": (758, 635), "knee": (748, 905), "ankle": (733, 1140)}
+OS_FRONT_TORSO = [(0.49, 848), (0.57, 843), (0.65, 838), (0.72, 813), (0.80, 808)]
+OS_FRONT_INNER = [((560, 715), (691, 535)), ((585, 522), (728, 350)),
+                  ((690, 505), (803, 340)), ((560, 940), (691, 625))]
+OS_BACK_MID = 612
+OS_BACK_J = {"crown": (612, 30), "chin": (612, 180), "notch": (612, 220), "crotch": (612, 700),
+             "shoulder": (770, 325), "elbow": (800, 515), "wrist": (845, 655),
+             "hip": (690, 660), "knee": (675, 910), "ankle": (665, 1130)}
+OS_BACK_INNER = [((560, 840), (612, 640))]
+
 # --- Joints, read off the plates (px) and the canvas (units, person's left
 # = canvas right half). The outline is matched automatically between them
 # (edge_pairs): at the same proportion along each limb and down the torso,
@@ -354,35 +384,53 @@ for side in ("front", "back"):
     w_[:, :CW // 2] = mir[:, :CW // 2]
     oldids_src[side] = w_ * canvas_mask(side)
 
-front_plate = remove_labels(remove_fold_bar(cv2.imread(os.path.join(SRC, "Bougle_whole2.jpg"))))
-back_plate = remove_labels(cv2.imread(os.path.join(SRC, "Bougle_whole5.jpg")))
-fp, fmask = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_plate, FRONT_J, FRONT_TORSO, FRONT_INNER)
-fw = warp(front_plate, fp, fmask, arms=(canvas_mask('front'), CANVAS['front'], fmask, FRONT_J, 'front'))
-front_mirror_plate = front_plate[:, ::-1].copy()
-FJ_M = {k: (front_plate.shape[1] - 1 - (2 * FRONT_MID - x), y) for k, (x, y) in FRONT_J.items()}
-# (the viewer-left half, mirrored onto the right: same joints, x flipped twice)
-FJ_M = {k: (2 * FRONT_MID - x, y) for k, (x, y) in FRONT_J.items()}
-FJ_M = {k: (front_plate.shape[1] - 1 - x, y) for k, (x, y) in FJ_M.items()}
-FT_M = [(t, front_plate.shape[1] - 1 - (2 * FRONT_MID - px)) for t, px in FRONT_TORSO]  # assumed symmetric
-FI_M = [(c, (front_plate.shape[1] - 1 - (2 * FRONT_MID - p[0]), p[1])) for c, p in FRONT_INNER]
-fpm, fmm = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_mirror_plate, FJ_M, FT_M, FI_M)
-fwm = warp(front_mirror_plate, fpm, fmm)
-front = mirror_half(fw, right=True)
-abs_zone = (oldids_src["front"] == names["abs"]).astype(np.uint8)
-abs_zone = cv2.dilate(abs_zone, np.ones((25, 25), np.uint8))
-z = cv2.GaussianBlur(abs_zone.astype(np.float32), (31, 31), 0)[..., None]
-front = mirror_half((front * (1 - z) + mirror_half(fwm, right=True) * z).astype(np.uint8), right=True)
+if PLATES == "openstax":
+    whole = remove_lines(cv2.imread(OS_SRC))
+    front_plate = whole[OS_FRONT_CROP[0]:OS_FRONT_CROP[1], ::-1].copy()
+    back_plate = whole[OS_BACK_CROP[0]:OS_BACK_CROP[1]].copy()
+    fp, fmask = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_plate, OS_FRONT_J, OS_FRONT_TORSO, OS_FRONT_INNER)
+    front = mirror_half(warp(front_plate, fp, fmask, arms=(canvas_mask('front'), CANVAS['front'], fmask, OS_FRONT_J, 'front')), right=True)
+    bp, bmask = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_plate, OS_BACK_J, None, OS_BACK_INNER)
+    bu = mirror_half(warp(back_plate, bp, bmask, arms=(canvas_mask('back'), CANVAS['back'], bmask, OS_BACK_J, 'back')), right=True)
+    back_mirror_plate = back_plate[:, ::-1].copy()
+    BL = {k: (back_plate.shape[1] - 1 - (2 * OS_BACK_MID - x), y) for k, (x, y) in OS_BACK_J.items()}
+    BLI = [(c, (back_plate.shape[1] - 1 - (2 * OS_BACK_MID - p[0]), p[1])) for c, p in OS_BACK_INNER]
+    blp, blm = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_mirror_plate, BL, None, BLI)
+    bl = mirror_half(warp(back_mirror_plate, blp, blm), right=True)
+    # Calves from the side where the gastrocnemius is whole.
+    ky = CANVAS["back"]["knee"][1] + 4
+    t = np.clip((ys - ky) / 10, 0, 1)[..., None]
+    back = (bu * (1 - t) + bl * t).astype(np.uint8)
+else:
+    front_plate = remove_labels(remove_fold_bar(cv2.imread(os.path.join(SRC, "Bougle_whole2.jpg"))))
+    back_plate = remove_labels(cv2.imread(os.path.join(SRC, "Bougle_whole5.jpg")))
+    fp, fmask = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_plate, FRONT_J, FRONT_TORSO, FRONT_INNER)
+    fw = warp(front_plate, fp, fmask, arms=(canvas_mask('front'), CANVAS['front'], fmask, FRONT_J, 'front'))
+    front_mirror_plate = front_plate[:, ::-1].copy()
+    FJ_M = {k: (front_plate.shape[1] - 1 - (2 * FRONT_MID - x), y) for k, (x, y) in FRONT_J.items()}
+    # (the viewer-left half, mirrored onto the right: same joints, x flipped twice)
+    FJ_M = {k: (2 * FRONT_MID - x, y) for k, (x, y) in FRONT_J.items()}
+    FJ_M = {k: (front_plate.shape[1] - 1 - x, y) for k, (x, y) in FJ_M.items()}
+    FT_M = [(t, front_plate.shape[1] - 1 - (2 * FRONT_MID - px)) for t, px in FRONT_TORSO]  # assumed symmetric
+    FI_M = [(c, (front_plate.shape[1] - 1 - (2 * FRONT_MID - p[0]), p[1])) for c, p in FRONT_INNER]
+    fpm, fmm = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_mirror_plate, FJ_M, FT_M, FI_M)
+    fwm = warp(front_mirror_plate, fpm, fmm)
+    front = mirror_half(fw, right=True)
+    abs_zone = (oldids_src["front"] == names["abs"]).astype(np.uint8)
+    abs_zone = cv2.dilate(abs_zone, np.ones((25, 25), np.uint8))
+    z = cv2.GaussianBlur(abs_zone.astype(np.float32), (31, 31), 0)[..., None]
+    front = mirror_half((front * (1 - z) + mirror_half(fwm, right=True) * z).astype(np.uint8), right=True)
 
-bp, bmask = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_plate, BACK_UPPER_J, None, BACK_UPPER_INNER)
-bu = mirror_half(warp(back_plate, bp, bmask, arms=(canvas_mask('back'), CANVAS['back'], bmask, BACK_UPPER_J, 'back')), right=True)
-back_mirror_plate = back_plate[:, ::-1].copy()
-BL = {k: (back_plate.shape[1] - 1 - (2 * BACK_MID - x), y) for k, (x, y) in BACK_LEGS_J.items()}
-BLI = [(c, (back_plate.shape[1] - 1 - (2 * BACK_MID - p[0]), p[1])) for c, p in BACK_LEGS_INNER]
-blp, blm = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_mirror_plate, BL, None, BLI)
-bl = mirror_half(warp(back_mirror_plate, blp, blm), right=True)
-wy = (CANVAS['back']['notch'][1] + 0.78 * (CANVAS['back']['crotch'][1] - CANVAS['back']['notch'][1]))
-t = np.clip((ys - wy) / 14, 0, 1)[..., None]
-back = (bu * (1 - t) + bl * t).astype(np.uint8)
+    bp, bmask = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_plate, BACK_UPPER_J, None, BACK_UPPER_INNER)
+    bu = mirror_half(warp(back_plate, bp, bmask, arms=(canvas_mask('back'), CANVAS['back'], bmask, BACK_UPPER_J, 'back')), right=True)
+    back_mirror_plate = back_plate[:, ::-1].copy()
+    BL = {k: (back_plate.shape[1] - 1 - (2 * BACK_MID - x), y) for k, (x, y) in BACK_LEGS_J.items()}
+    BLI = [(c, (back_plate.shape[1] - 1 - (2 * BACK_MID - p[0]), p[1])) for c, p in BACK_LEGS_INNER]
+    blp, blm = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_mirror_plate, BL, None, BLI)
+    bl = mirror_half(warp(back_mirror_plate, blp, blm), right=True)
+    wy = (CANVAS['back']['notch'][1] + 0.78 * (CANVAS['back']['crotch'][1] - CANVAS['back']['notch'][1]))
+    t = np.clip((ys - wy) / 14, 0, 1)[..., None]
+    back = (bu * (1 - t) + bl * t).astype(np.uint8)
 for nm, pairs, plate, pm in (("front", fp, front_plate, fmask), ("back", bp, back_plate, bmask)):
     v = plate.copy(); v[pm == 0] = (v[pm == 0] * 0.35).astype(np.uint8)
     for c, p in pairs: cv2.circle(v, (int(p[0]), int(p[1])), 9, (0, 255, 0), -1)
