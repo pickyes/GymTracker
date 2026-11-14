@@ -1495,7 +1495,7 @@ final class BodyModel {
         float shade = bodyShade.sample(linearS, uv).r;
         // Squared shade: the fibres and the lines between muscles stay
         // visible instead of one flat block of colour.
-        float3 lit = tint * (0.12 + 0.95 * shade * shade);
+        float3 lit = tint * (0.08 + 1.05 * shade * shade);
         _surface.diffuse.rgb = mix(_surface.diffuse.rgb, lit, a);
         // The accent's glow: bright enough for the camera's bloom.
         _surface.emission.rgb += lit * 0.4 * a;

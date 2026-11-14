@@ -28,6 +28,10 @@ for side in ("Front", "Back"):
         src = im[inside]
         fill = src[np.clip(lab[grow] - 1, 0, len(src) - 1)]
         im[grow] = fill; im[grow, 3] = 255
+        # Smoothed: nearest-pixel growth drew streaks that showed on the
+        # 3D body's flanks.
+        soft = cv2.GaussianBlur(im, (0, 0), 14)
+        im[grow] = soft[grow]; im[grow, 3] = 255
         if side == "Back":
             # The back of the head: the painting's two dark ovals read as
             # eyes on the 3D head. Painted out to the skull's own grey.
