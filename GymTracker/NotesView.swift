@@ -378,7 +378,9 @@ struct NotesView: View {
     private var listPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if openFolder != nil && !inSideBar {
+                // Either side bar (ours or iOS's) carries its own Back:
+                // a second chevron here doubled it.
+                if openFolder != nil && !inSideBar && !systemSideBar {
                     Button {
                         withAnimation(AppAnimation.snappy) { openFolder = nil }
                     } label: {

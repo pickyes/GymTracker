@@ -990,6 +990,9 @@ private struct KeyboardDoneToolbar: ViewModifier {
 struct MenuPill<Content: View>: View {
     var label: String
     var isActive: Bool = false
+    /// Stretch to the column's width, so a row of pills lines up with
+    /// one another (and with full-width pills like Favorites).
+    var fills: Bool = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -1006,6 +1009,7 @@ struct MenuPill<Content: View>: View {
             }
             .frame(minHeight: 44)
             .padding(.horizontal, 12)
+            .frame(maxWidth: fills ? .infinity : nil)
             .background(isActive ? Color.accentColor.opacity(0.15) : Theme.card)
             .clipShape(Capsule())
             .overlay(Capsule().stroke(isActive ? Color.accentColor.opacity(0.4) : Theme.border, lineWidth: 1))
@@ -2240,7 +2244,7 @@ struct SideBarItems: ViewModifier {
                         }
                         .sideBarAxis()
                     }
-                    if wide && duo.showSwapButton {
+                    if wide && duo.showSwapButton && !duo.singlePages.contains(page.rawValue) {
                         // Its own button in the side bar (DaRon), not inside
                         // the "more" menu.
                         ToolbarItem(placement: .primaryAction) {

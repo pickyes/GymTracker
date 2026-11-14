@@ -1223,6 +1223,10 @@ struct SessionDetailView: View {
     /// Called after this session is deleted, so the presenter can drop
     /// its selection (a stale id left the compact push on a dead page).
     var onDelete: (() -> Void)? = nil
+    /// The title as the list's first row instead of in the bar: for a pane
+    /// that hides its bar (Calendar's open-Duo companion). Its stack runs
+    /// under the top edge, where the bar's large title sat over the date.
+    var titleInList = false
     @State private var exportRequest: ExportRequest?
     /// D6: delete confirmation for this detail view's trash button.
     /// (HistoryView holds its own sessionToDelete for the swipe path —
@@ -1230,9 +1234,19 @@ struct SessionDetailView: View {
     /// call; the detail view cannot reach the list's state directly.)
     @State private var showDeleteConfirm = false
 
+    private var title: String { "\(session.dayKey) · \(session.dayTitle)" }
+
     var body: some View {
         List {
             Group {
+            if titleInList {
+                // Level with the page title opposite: the stack already
+                // keeps the bar's height clear above the list.
+                PageTitle(text: title)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .listRowBackground(Color.clear)
+            }
             Section {
                 Text(session.date, format: .dateTime.weekday(.wide).month().day().year().hour().minute())
                 if session.finisherDone {
@@ -1303,7 +1317,9 @@ struct SessionDetailView: View {
         }
         .pageListMargins()
         .oledList()
-        .navigationTitle("\(session.dayKey) · \(session.dayTitle)")
+        // In-list title: no bar title as well (the hidden bar still drew
+        // it, blurred, under the scroll edge).
+        .navigationTitle(titleInList ? "" : title)
         // D6: delete confirmation (same wording as the list swipe path).
         .confirmationDialog("Delete this workout?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {

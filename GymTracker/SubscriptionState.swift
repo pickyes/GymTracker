@@ -14,11 +14,14 @@ final class SubscriptionState: ObservableObject {
     nonisolated static let yearlyID = "com.daronbarkley.GymTracker.pro.yearly"
     nonisolated static let lifetimeID = "com.daronbarkley.GymTracker.pro.lifetime"
 
-    /// Proposed prices (for DaRon to decide — NOT a decision). Shown when the
-    /// App Store Connect products aren't configured yet (e.g. simulator).
+    /// Proposed prices (for DaRon to decide — NOT a decision). Shown only
+    /// in debug builds when the App Store Connect products aren't
+    /// configured yet (e.g. simulator), so the paywall layout can be judged.
     nonisolated static let proposedMonthlyPrice = "$4.99"
     nonisolated static let proposedYearlyPrice = "$29.99"
     nonisolated static let proposedLifetimePrice = "$59.99"
+    /// Shown in place of a price that hasn't loaded.
+    nonisolated static let missingPrice = "—"
 
     @Published var products: [Product] = []
     @Published var purchasedProductIDs: Set<String> = []
@@ -53,17 +56,37 @@ final class SubscriptionState: ObservableObject {
     }
 
     /// Billed price, most prominent (Apple rule): the StoreKit price when
-    /// products loaded, else the proposed price.
+    /// products loaded. Without one a release build shows no price at
+    /// all: a hard-coded US price is wrong in every other storefront and
+    /// may not match what Apple charges. Debug builds show the proposed
+    /// price instead.
     func displayPrice(for productID: String) -> String {
         if let product = product(for: productID) {
             return product.displayPrice
         }
+        #if DEBUG
         switch productID {
         case Self.monthlyID: return Self.proposedMonthlyPrice
         case Self.yearlyID: return Self.proposedYearlyPrice
         case Self.lifetimeID: return Self.proposedLifetimePrice
-        default: return ""
+        default: return Self.missingPrice
         }
+        #else
+        return Self.missingPrice
+        #endif
+    }
+
+    /// Whole percent saved by paying yearly instead of 12 months, from
+    /// the loaded StoreKit prices, rounded down so it never overstates
+    /// the saving. Nil until both products load, or when yearly saves
+    /// nothing.
+    var yearlySavingsPercent: Int? {
+        guard let monthly = monthlyProduct?.price, let yearly = yearlyProduct?.price,
+              monthly > 0 else { return nil }
+        let fullYear = NSDecimalNumber(decimal: monthly * 12).doubleValue
+        let saving = (1 - NSDecimalNumber(decimal: yearly).doubleValue / fullYear) * 100
+        guard saving.isFinite, saving >= 1 else { return nil }
+        return Int(saving.rounded(.down))
     }
 
     /// Free-trial length in days for a product, read from its loaded
@@ -118,7 +141,7 @@ final class SubscriptionState: ObservableObject {
             await refreshIntroOfferEligibility()
         } catch {
             // Products aren't configured yet (simulator / App Store Connect).
-            // The paywall falls back to the proposed prices.
+            // The paywall shows no prices (debug builds: the proposed ones).
             products = []
         }
     }

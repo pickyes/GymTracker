@@ -46,7 +46,7 @@ struct PaywallView: View {
                         Text(programName)
                             .font(.title3)
                             .foregroundStyle(Theme.secondaryText)
-                        Text("Free gets you the full plan, unlimited logging, and your whole history — forever. Pro adds more programs and deeper tracking.")
+                        Text("Free gets you the full plan, unlimited logging, and your whole history — forever. Pro adds unlimited programs and custom exercises, more gym profiles, and accent colors.")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -80,14 +80,16 @@ struct PaywallView: View {
 
                     // Plan cards.
                     VStack(spacing: 10) {
-                        planCard(.yearly, badge: "Best value — save 50%",
-                                 billed: subscription.displayPrice(for: SubscriptionState.yearlyID) + "/year",
+                        // The saving comes from the loaded prices; until
+                        // they load the badge makes no number claim.
+                        planCard(.yearly, badge: subscription.yearlySavingsPercent.map { "Best value — save \($0)%" } ?? "Best value",
+                                 billed: priceText(SubscriptionState.yearlyID, per: "year"),
                                  sub: yearlyTrialDays.map { "\($0)-day free trial · then billed yearly" } ?? "Billed yearly")
                         planCard(.monthly, badge: nil,
-                                 billed: subscription.displayPrice(for: SubscriptionState.monthlyID) + "/month",
+                                 billed: priceText(SubscriptionState.monthlyID, per: "month"),
                                  sub: "Billed monthly")
                         planCard(.lifetime, badge: nil,
-                                 billed: subscription.displayPrice(for: SubscriptionState.lifetimeID),
+                                 billed: priceText(SubscriptionState.lifetimeID, per: nil),
                                  sub: "One-time payment, yours forever")
                     }
 
@@ -349,15 +351,27 @@ struct PaywallView: View {
         subscription.trialDays(for: SubscriptionState.yearlyID)
     }
 
+    /// "$29.99/year", or just the missing-price dash when the price
+    /// hasn't loaded ("—/year" would read as a price).
+    private func priceText(_ productID: String, per unit: String?) -> String {
+        let price = subscription.displayPrice(for: productID)
+        guard let unit, price != SubscriptionState.missingPrice else { return price }
+        return "\(price)/\(unit)"
+    }
+
     private var buyButtonLabel: String {
+        // No loaded price, no price on the button: tapping it explains
+        // that the App Store couldn't be reached.
+        let price = subscription.displayPrice(for: selectedPlan.productID)
+        let hasPrice = price != SubscriptionState.missingPrice
         switch selectedPlan {
         case .yearly:
             if let trialDays = yearlyTrialDays {
                 return "Start \(trialDays)-day free trial"
             }
-            return "Subscribe — \(subscription.displayPrice(for: SubscriptionState.yearlyID))/year"
-        case .monthly: return "Subscribe — \(subscription.displayPrice(for: SubscriptionState.monthlyID))/month"
-        case .lifetime: return "Buy lifetime — \(subscription.displayPrice(for: SubscriptionState.lifetimeID))"
+            return hasPrice ? "Subscribe — \(price)/year" : "Subscribe yearly"
+        case .monthly: return hasPrice ? "Subscribe — \(price)/month" : "Subscribe monthly"
+        case .lifetime: return hasPrice ? "Buy lifetime — \(price)" : "Buy lifetime"
         }
     }
 
@@ -397,7 +411,7 @@ struct PrivacyPolicyView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Last updated November 12, 2026")
+                    Text("Last updated November 14, 2026")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                     section("The short version",
@@ -405,7 +419,7 @@ struct PrivacyPolicyView: View {
                     section("What's stored, and where",
                             "Your programs, logged sets, notes, bodyweight, profile answers (like goals, experience, and injuries you mention), and settings are stored on this device, shared only with the app's own widget and Live Activity. Deleting the app deletes them. Device backups you make through Apple may include them.")
                     section("Optional features you turn on",
-                            "Apple Calendar: adds your planned workout days to your calendar (write-only; Status can't read your other events). Flashlight signal: uses the torch to flash when a rest timer ends. Local network access (Muse): when you enable it, a server runs only while the app is open, so your own devices on your Wi-Fi can read and log workouts with your approval; it's never reachable from the internet. Export: creates a file only when you tap Export, and you choose where it goes.")
+                            "Apple Calendar: adds your planned workout days to your calendar and keeps them up to date. Status asks for full calendar access because it has to find its own events again to update or remove them; it only changes the events it added, and doesn't keep or send your other events. If that calendar syncs with iCloud, the events show on your other devices too. Flashlight signal: uses the torch to flash when a rest timer ends. Local network access (Muse): when you enable it, a server runs only while the app is open, so your own devices on your Wi-Fi can read and log workouts with your approval; it's never reachable from the internet. Export: creates a file only when you tap Export, and you choose where it goes.")
                     section("Purchases",
                             "Subscriptions and purchases are processed by Apple. Status receives only whether you have Pro, never your payment details.")
                     section("Children",

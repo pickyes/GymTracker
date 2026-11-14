@@ -195,7 +195,7 @@ struct SettingsView: View {
                         .foregroundStyle(Theme.secondaryText)
                     Button("Open Settings") { calendarSync.openSystemSettings() }
                 } else if calendarSync.isEnabled {
-                    Text("Your planned workout days show in Apple Calendar, on this phone only. Nothing is sent anywhere.")
+                    Text("Your planned workout days show in Apple Calendar, and on your other devices if that calendar syncs with iCloud. Status only changes the events it added.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                     if calendarSync.syncedEventCount > 0 {
@@ -204,7 +204,7 @@ struct SettingsView: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                 } else {
-                    Text("Adds your planned workout days to Apple Calendar, on this phone only. Nothing is sent anywhere.")
+                    Text("Adds your planned workout days to Apple Calendar and keeps them up to date. Status asks for full calendar access to find its own events again, and only ever changes those. An iCloud calendar shows them on your other devices too.")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -388,8 +388,8 @@ struct SettingsView: View {
         )
     }
 
-    /// The Apple Calendar toggle. Turning on requests write-only
-    /// calendar access (async); the toggle only flips on when access
+    /// The Apple Calendar toggle. Turning on requests full calendar
+    /// access (async; see CalendarSyncManager.setEnabled for why); the toggle only flips on when access
     /// is granted, so a denial snaps it back off. Turning off stops
     /// new events and asks whether to remove the ones already added.
     private var calendarBinding: Binding<Bool> {

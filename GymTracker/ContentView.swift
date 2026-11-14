@@ -366,7 +366,9 @@ struct ContentView: View {
         .accessibilityAddTraits(active ? .isSelected : [])
     }
     /// The Calendar companion page's width (narrow when upright).
-    private var showSwapButton: Bool { duo.showSwapButton }
+    private var showSwapButton: Bool {
+        duo.showSwapButton && !duo.singlePages.contains(selectedPage.rawValue)
+    }
     /// The day chosen on the Calendar page (also shown on the open
     /// Duo's other page).
     @State private var calendarDay: Date = Calendar.current.startOfDay(for: Date())
@@ -950,10 +952,11 @@ struct ContentView: View {
         let cal = Calendar.current
         if let session = store.sessions.first(where: { cal.isDate($0.date, inSameDayAs: calendarDay) }) {
             NavigationStack {
-                SessionDetailView(session: session)
-                    // No bar background or hairline: the share/trash
-                    // buttons float like the rest of the page.
-                    .toolbarBackground(.hidden, for: .navigationBar)
+                // The title is the list's first row and the bar is gone: it
+                // held nothing else, and with the stack under the top edge
+                // its large title sat over the date row.
+                SessionDetailView(session: session, titleInList: true)
+                    .toolbar(.hidden, for: .navigationBar)
                     // Scrolled sets fade softly under the title (the system's
                     // soft edge) instead of the hard-edged frosted band.
                     .softTopEdge()

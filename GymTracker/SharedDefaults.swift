@@ -39,6 +39,10 @@ final class DuoSettings: ObservableObject {
     @Published var sideStrip: Bool { didSet { if sideStrip != oldValue { save() } } }
     /// A light accent-color tint on the side bar.
     @Published var sideTint: Bool { didSet { if sideTint != oldValue { save() } } }
+    /// Pages (`ContentView.Page` raw values) showing one page, not a pair,
+    /// on the open Duo right now, like the rest-day Today. There is
+    /// nothing to swap there, so the swap button stays away. Not saved.
+    @Published var singlePages: Set<String> = []
 
     private struct Values: Codable {
         var swapSides = false

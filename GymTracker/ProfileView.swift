@@ -136,9 +136,12 @@ struct ProfileView: View {
     @State private var showInvite = false
     @State private var showManageSubscription = false
     @State private var showPrivacyPolicy = false
-    @State private var showExport = false
+    /// A restore was started from this page, so its result shows here.
+    @State private var showRestoreResult = false
     @State private var showRetakeConfirm = false
-    @State private var exportURL: URL?
+    /// The exported file being shared. One item, not a flag plus a URL,
+    /// so the share sheet never builds before the file is there.
+    @State private var exportFile: SharedFile?
     @State private var isApproving = false
     @State private var grantMessage: String?
     /// Folded: the pushed section.
@@ -248,10 +251,8 @@ struct ProfileView: View {
         .sheet(isPresented: $showInvite) {
             InviteView(onClose: { showInvite = false })
         }
-        .sheet(isPresented: $showExport) {
-            if let exportURL {
-                ShareSheet(activityItems: [exportURL])
-            }
+        .sheet(item: $exportFile) { file in
+            ShareSheet(activityItems: [file.url])
         }
     }
 
@@ -867,7 +868,32 @@ struct ProfileView: View {
                 Button("Manage Subscription") { showManageSubscription = true }
             }
             Button("Restore Purchases") {
+                showRestoreResult = true
                 Task { await subscription.restore() }
+            }
+            .disabled(subscription.isRestoring)
+            // The paywall shows the restore result only while it's open,
+            // so a restore started here reports back here. Gated on a
+            // tap here, so a message left over from the paywall doesn't
+            // show up on this page. A restore that finds Pro shows as
+            // the "Pro" row above.
+            if showRestoreResult {
+                if subscription.isRestoring {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Restoring purchases…")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                } else if let error = subscription.purchaseError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.vividRed)
+                } else if let notice = subscription.purchaseNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
             }
         }
         if InviteCode.isEnabled {
@@ -891,10 +917,19 @@ struct ProfileView: View {
             Link("Terms of Use (EULA)", destination: PaywallView.termsOfUseURL)
         }
         Section("About") {
-            Text("Status v1.0 — your data stays on this device. No account, no network.")
+            Text("Status \(Self.versionText) — No account. Your data stays on your devices.")
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
+    }
+
+    /// "1.0 (2)", read from the bundle so the About line always names
+    /// the build that's installed.
+    private static var versionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        guard let build = info?["CFBundleVersion"] as? String else { return version }
+        return "\(version) (\(build))"
     }
 
     private func programRow(name: String, active: Bool) -> some View {
@@ -996,8 +1031,7 @@ struct ProfileView: View {
             .appendingPathComponent("gym-tracker-workouts.json")
         do {
             try data.write(to: url)
-            exportURL = url
-            showExport = true
+            exportFile = SharedFile(url: url)
         } catch {
             // If the write fails there's nothing to share.
         }

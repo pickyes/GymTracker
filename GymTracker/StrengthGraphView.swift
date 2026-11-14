@@ -452,14 +452,50 @@ struct StrengthGraphView: View {
     }
 
     private var emptyStateView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("No strength data yet")
+        let copy = emptyStateCopy
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(copy.title)
                 .font(.headline)
-            Text("Finish a workout from Today and your estimated max lift will show up here — past, current, and where you could be if you stay consistent.")
+            Text(copy.detail)
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
         }
         .padding(.vertical, 8)
+    }
+
+    /// Why the chart is empty, in words that fit the history. "Finish a
+    /// workout" was wrong for someone with workouts logged: the estimate
+    /// only comes from some sets, and a short range can miss them.
+    private var emptyStateCopy: (title: String, detail: String) {
+        if store.sessions.isEmpty {
+            return ("No strength data yet",
+                    "Finish a workout from Today and your estimated max lift will show up here — past, current, and where you could be if you stay consistent.")
+        }
+        // Only worked out here, on the empty screen.
+        let sessions = store.sessions.sorted { $0.date < $1.date }
+        let anyTime: [GraphPoint]
+        switch selection {
+        case .overall: anyTime = overallPoints(sessions: sessions, cutoff: nil)
+        case .exercise(let id, _): anyTime = exercisePoints(sessions: sessions, cutoff: nil, exerciseId: id)
+        }
+        if !anyTime.isEmpty, let span = rangeSpanText {
+            return ("Nothing in this range",
+                    "No estimated max lift in the last \(span). Pick a longer range to see your earlier lifts.")
+        }
+        return ("No estimate yet",
+                "The estimated max lift comes from working sets of \(oneRepMaxMaxReps) reps or fewer on compound lifts. Log one and it shows up here — past, current, and where you could be if you stay consistent.")
+    }
+
+    /// The range in words ("3 months"), nil for All.
+    private var rangeSpanText: String? {
+        switch range {
+        case .oneWeek: return "week"
+        case .oneMonth: return "month"
+        case .threeMonths: return "3 months"
+        case .sixMonths: return "6 months"
+        case .oneYear: return "year"
+        case .all: return nil
+        }
     }
 
     // MARK: - Data (on-device, from local sessions)

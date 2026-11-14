@@ -242,6 +242,7 @@ struct PlanRevealView: View {
             .pageListMargins()
             .oledList()
             .navigationTitle("Swap exercise")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { swapTarget = nil }

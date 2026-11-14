@@ -49,9 +49,10 @@ struct TodayView: View {
     /// (never "missed").
     @State private var trainingAnywayPlan: DayPlan? = nil
     /// The next workout the rest-day preview sheet is showing, if any.
-    @State private var previewPlan: DayPlan? = nil
-    @State private var previewDate: Date = Date()
-    @State private var showNextPreview = false
+    /// The next workout shown in full (its preview sheet). One item, not
+    /// a flag plus separate plan/date state: with the flag the sheet
+    /// could build before the plan landed and came up empty.
+    @State private var nextPreview: NextPreview? = nil
     /// The stretch whose detail sheet is open from the rest-day
     /// stretches section, if any.
     @State private var stretchDetail: LibraryExercise? = nil
@@ -339,11 +340,9 @@ struct TodayView: View {
                 applySessionMod(mod)
             }
         }
-        .sheet(isPresented: $showNextPreview) {
-            if let plan = previewPlan {
-                NextWorkoutPreviewSheet(plan: plan, date: previewDate) { plan in
-                    startTrainAnyway(plan: plan)
-                }
+        .sheet(item: $nextPreview) { preview in
+            NextWorkoutPreviewSheet(plan: preview.plan, date: preview.date) { plan in
+                startTrainAnyway(plan: plan)
             }
         }
         .sheet(item: $stretchDetail) { lib in
@@ -471,7 +470,7 @@ struct TodayView: View {
     /// missed requires a scheduled workout, and today has none.
     private func startTrainAnyway(plan: DayPlan) {
         store.ensureDraft(for: plan)
-        showNextPreview = false
+        nextPreview = nil
         Self.setTrainAnywayDay(Date())
         withAnimation(AppAnimation.snappy) { trainingAnywayPlan = plan }
     }
@@ -879,6 +878,9 @@ struct TodayView: View {
         // too — it used to sit outside any stack, so without this the
         // hoisted stack would show an empty bar above it.
         .sideBarItems(.today)
+        // One page even on the open Duo: no swap button while it shows.
+        .onAppear { DuoSettings.shared.singlePages.insert(ContentView.Page.today.rawValue) }
+        .onDisappear { DuoSettings.shared.singlePages.remove(ContentView.Page.today.rawValue) }
     }
 
     /// Recovery colour per muscle, from the store's logged history —
@@ -1001,9 +1003,7 @@ struct TodayView: View {
         Group {
             if let next = store.nextWorkout(after: Date()) {
                 Button {
-                    previewPlan = next.plan
-                    previewDate = next.date
-                    showNextPreview = true
+                    nextPreview = NextPreview(plan: next.plan, date: next.date)
                 } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -1024,12 +1024,16 @@ struct TodayView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // The card itself is the button: with the padding
+                    // and background outside the label only the text
+                    // took taps, and the gaps around it did nothing.
+                    .padding()
+                    .background(Theme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+                    .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
-                .padding()
-                .background(Theme.card)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
             }
         }
     }
@@ -1418,7 +1422,7 @@ struct TodayView: View {
                     .padding(.leading, 16)
                     .padding(.top, 2)
                     .onLongPressGesture(minimumDuration: 0.5, perform: openCalendar)
-                Text(plan.subtitle)
+                Text(plan.focus)
                     .font(.body)
                     .foregroundStyle(Theme.text)
                     .padding(.leading, 16)
@@ -2136,7 +2140,7 @@ struct TodayView: View {
             // Subtitle in full-bright primary text, larger — the dim
             // secondary gray was unreadable on black. (DaRon 21:25:
             // "i cant read the words under".)
-            Text(plan.subtitle)
+            Text(plan.focus)
                 .font(.body)
                 .foregroundStyle(Theme.text)
             if let mod = store.draftSessionMod, mod.shorterSession {
@@ -3262,8 +3266,11 @@ struct SetRow: View {
             // (DaRon 21:27: make this a visible plus button as well —
             // the old trigger was a dim "·" at half opacity.)
             Menu {
-                ForEach(SetKind.allCases, id: \.self) { kind in
-                    Button(kind.label) { set.kind = kind }
+                // A picker, so the open menu ticks the set's current kind.
+                Picker("Set type", selection: $set.kind) {
+                    ForEach(SetKind.allCases, id: \.self) { kind in
+                        Text(kind.label).tag(kind)
+                    }
                 }
             } label: {
                 // Neutral chip (Nov 12 UI pass): a blue "+" here read as
@@ -3425,7 +3432,14 @@ struct NumberField: View {
         .onChange(of: text) { _, newText in liveUpdate(newText) }
         .onChange(of: isFocused) { _, focused in
             onFocusChange?(focused)
-            if !focused {
+            if focused {
+                // Select what's there, so typing replaces it. Typing after
+                // the old value appended to it: "85" then "95" became 8595,
+                // which the range then clamped to 2,000 lb.
+                DispatchQueue.main.async {
+                    UIApplication.shared.sendAction(#selector(UIResponder.selectAll(_:)), to: nil, from: nil, for: nil)
+                }
+            } else {
                 commit()
                 editing = false
             }
@@ -3588,6 +3602,8 @@ struct AddExerciseSheet: View {
                     }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                    // Two rows of controls, not list rows: no line between them.
+                    .listRowSeparator(.hidden)
                     // Sort + favorites-only: the same single-pill row as
                     // the filters above — no card behind the pills.
                     HStack(spacing: 12) {
@@ -3596,6 +3612,7 @@ struct AddExerciseSheet: View {
                     }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
                 }
 
                 if sortedPool.isEmpty {
@@ -3640,6 +3657,7 @@ struct AddExerciseSheet: View {
             .pageListMargins()
             .oledList()
             .navigationTitle("Add exercise")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -3662,7 +3680,7 @@ struct AddExerciseSheet: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
-            MenuPill(label: currentLabel, isActive: selection.wrappedValue != nil) {
+            MenuPill(label: currentLabel, isActive: selection.wrappedValue != nil, fills: true) {
                 Picker(title, selection: selection) {
                     Text(allLabel).tag(nil as T?)
                     ForEach(options, id: \.1) { label, value in
@@ -3671,7 +3689,8 @@ struct AddExerciseSheet: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        // Leading, so each caption sits over its pill's left edge.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Sort control: the same single clean pill as the filters.
@@ -3680,7 +3699,7 @@ struct AddExerciseSheet: View {
             Text("Sort")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.secondaryText)
-            MenuPill(label: sortOption.label) {
+            MenuPill(label: sortOption.label, fills: true) {
                 Picker("Sort", selection: $sortOption) {
                     ForEach(ExerciseSort.allCases, id: \.self) { option in
                         Text(option.label).tag(option)
@@ -3688,7 +3707,8 @@ struct AddExerciseSheet: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        // Leading, so each caption sits over its pill's left edge.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Favorites-only switch: the same single clean pill shape, with a
@@ -3719,7 +3739,8 @@ struct AddExerciseSheet: View {
             }
             .buttonStyle(.plain)
         }
-        .frame(maxWidth: .infinity)
+        // Leading, so each caption sits over its pill's left edge.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// One exercise row: tap adds it (built through
@@ -3836,6 +3857,7 @@ struct SwapExerciseSheet: View {
             .pageListMargins()
             .oledList()
             .navigationTitle("Swap exercise")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -3915,6 +3937,7 @@ struct ExerciseHistorySheet: View {
             .pageListMargins()
             .oledList()
             .navigationTitle(template.name)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -3987,6 +4010,7 @@ struct PlateCalculatorSheet: View {
             .pageListMargins()
             .oledList()
             .navigationTitle("Plates — \(template.name)")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -4060,6 +4084,7 @@ struct SessionModSheet: View {
             .pageListMargins()
             .oledList()
             .navigationTitle("Modify this workout")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -4095,7 +4120,7 @@ struct NextWorkoutPreviewSheet: View {
                         .bold()
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(plan.subtitle)
+                    Text(plan.focus)
                         .font(.body)
                         .foregroundStyle(Theme.text)
                     Text("About \(plan.estimatedMinutes) minutes")
@@ -4283,4 +4308,31 @@ private struct FoldClearance: ViewModifier {
     func body(content: Content) -> some View {
         content.padding(.bottom, stacked ? FoldFade.reach + 18 : 0)
     }
+}
+
+extension DayPlan {
+    /// The subtitle without its leading weekday: "Monday · Squat, hinge"
+    /// reads "Squat, hinge". Every place Today shows it already names the
+    /// day just above, and a "Train anyway" workout runs on another day
+    /// than the plan's, where "Monday" on a Saturday read as a mistake.
+    var focus: String {
+        let parts = subtitle.components(separatedBy: " · ")
+        guard parts.count > 1, Self.weekdayNames.contains(parts[0]) else { return subtitle }
+        return parts.dropFirst().joined(separator: " · ")
+    }
+
+    /// The programs write English day names; the user's calendar
+    /// language is added in case a program is ever localised.
+    private static let weekdayNames: Set<String> = {
+        var english = Calendar(identifier: .gregorian)
+        english.locale = Locale(identifier: "en_US_POSIX")
+        return Set(english.weekdaySymbols + Calendar.current.weekdaySymbols)
+    }()
+}
+
+/// The next scheduled workout, as the item its preview sheet presents.
+struct NextPreview: Identifiable {
+    let plan: DayPlan
+    let date: Date
+    var id: String { "\(plan.key)-\(date.timeIntervalSince1970)" }
 }

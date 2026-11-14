@@ -841,8 +841,10 @@ struct ExportSheet: View {
     @State private var format: ExportFormat = .csv
     @State private var rangeFrom: Date
     @State private var rangeTo: Date
-    @State private var shareURL: URL?
-    @State private var showingShare = false
+    /// The exported file being shared. One item, not a flag plus a URL:
+    /// with the flag the share sheet could build before the URL landed
+    /// and came up empty.
+    @State private var shareFile: SharedFile?
     @State private var copied = false
     @State private var errorMessage: String?
     /// True while a file / copy text is being built off the main thread.
@@ -910,10 +912,8 @@ struct ExportSheet: View {
             .onChange(of: rangeTo) { _, _ in applyRange() }
             .onChange(of: format) { _, _ in copied = false }
             .onChange(of: scope) { _, _ in copied = false }
-            .sheet(isPresented: $showingShare) {
-                if let shareURL {
-                    ShareSheet(activityItems: [shareURL])
-                }
+            .sheet(item: $shareFile) { file in
+                ShareSheet(activityItems: [file.url])
             }
             .alert("Couldn't export", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -1030,8 +1030,7 @@ struct ExportSheet: View {
                 isBuilding = false
                 switch result {
                 case .success(let url):
-                    shareURL = url
-                    showingShare = true
+                    shareFile = SharedFile(url: url)
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }
@@ -1056,4 +1055,10 @@ struct ExportSheet: View {
             }
         }
     }
+}
+
+/// A file handed to the share sheet, as the item the sheet presents.
+struct SharedFile: Identifiable {
+    let url: URL
+    var id: URL { url }
 }

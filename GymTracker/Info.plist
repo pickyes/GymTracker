@@ -79,14 +79,18 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Apple Calendar (opt-in, write-only): the prompt text the user
-	     sees the first time they turn the integration on in Settings.
-	     The app only adds its own workout events — it never reads the
-	     user's other calendar events and never sends anything anywhere. -->
+	<!-- Apple Calendar (opt-in): the prompt text the user sees the first
+	     time they turn the integration on in Settings. The app asks for
+	     FULL access: updating or removing its own events means reading
+	     them back, which write-only access can't do (see
+	     CalendarSyncManager.setEnabled). It only changes the events it
+	     created and never sends anything anywhere. The write-only text
+	     covers a user who picks "Add Events Only" in Settings; sync then
+	     only adds. -->
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Status adds your planned workout days to Apple Calendar and keeps them up to date when your program changes. It only changes or removes the events it created, on this phone, and never sends anything anywhere.</string>
+	<string>Status adds your planned workout days to Apple Calendar and keeps them up to date when your program changes. It needs full access to find the events it created again, and only ever changes or removes those. It never sends anything anywhere.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-	<string>Status adds your planned workout days to Apple Calendar so you can see them alongside your day. It only adds its own workout events, on this phone — it never reads your other calendar events and never sends anything anywhere.</string>
+	<string>Status adds your planned workout days to Apple Calendar so you can see them alongside your day. It only adds its own workout events — it never reads your other calendar events and never sends anything anywhere.</string>
 	<!-- Camera (flashlight Morse signal, opt-in, off by default): the
 	     torch needs camera access. The prompt text the user sees the
 	     first time they turn the flashlight signal on in Settings.

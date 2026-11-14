@@ -629,11 +629,14 @@ final class MCPServer: ObservableObject {
         defer { freeifaddrs(ifaddr) }
         for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let flags = Int32(ptr.pointee.ifa_flags)
-            let addr = ptr.pointee.ifa_addr.pointee
+            // Some interfaces (VPN / utun) come back with no address at
+            // all, and dereferencing that null pointer crashes.
+            guard let addrPtr = ptr.pointee.ifa_addr else { continue }
+            let addr = addrPtr.pointee
             guard (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING),
                   addr.sa_family == UInt8(AF_INET) else { continue }
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            if getnameinfo(ptr.pointee.ifa_addr, socklen_t(addr.sa_len),
+            if getnameinfo(addrPtr, socklen_t(addr.sa_len),
                            &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
                 let ip = String(cString: hostname)
                 if ip != "127.0.0.1" {

@@ -5,15 +5,17 @@ import UIKit
 // MARK: - Apple Calendar integration (opt-in, on-device only)
 
 /// Syncs the active program's planned workout days to Apple Calendar,
-/// using EventKit. Opt-in, off by default, nothing leaves the device:
-/// the app only writes its own workout events into the user's own
-/// calendar — it never reads the user's other events and never sends
-/// anything anywhere.
+/// using EventKit. Opt-in, off by default, and the app sends nothing
+/// anywhere: it only writes its own workout events into the user's own
+/// calendar (which Apple syncs like any other event when it's an
+/// iCloud calendar).
 ///
 /// How it works:
-/// - Access is WRITE-ONLY (the least privilege that does the job):
-///   the app can add events and read back the ones it created, nothing
-///   else. The permission prompt says exactly that.
+/// - Access is FULL access: updating or removing the app's own events
+///   means reading them back, which write-only access can't do (see
+///   `setEnabled`). The app only ever changes the events it created.
+///   Write-only (the user picked "Add Events Only") still works, but
+///   sync can then only add. The permission prompt says this.
 /// - Events go in a dedicated "Status" calendar when one can be
 ///   created, so they never mix into the user's personal calendar.
 ///   If creating one fails, they fall back to the default calendar.
@@ -67,7 +69,7 @@ final class CalendarSyncManager: ObservableObject {
 
     // MARK: - Enable / disable
 
-    /// Turn the integration on or off. Turning on requests write-only
+    /// Turn the integration on or off. Turning on requests full
     /// calendar access; if the user denies it, the toggle stays off and
     /// `accessDenied` is set so Settings can point at system Settings.
     /// Turning off stops new events; the events already added stay

@@ -207,6 +207,18 @@ struct LogSetIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        // The same bounds the MCP log_set tool uses. Siri can mishear a
+        // number and a Shortcut can pass anything; a huge weight traps
+        // later when it is shown as a whole number, and negative reps
+        // make no sense. Refuse instead of checking off a set with it.
+        if let weight, !(weight.isFinite && (0...2000).contains(weight)) {
+            return .result(value: "Weight must be between 0 and 2000 lb.",
+                           dialog: "That weight doesn't look right. Try a number between 0 and 2000 pounds.")
+        }
+        guard (0...1000).contains(reps) else {
+            return .result(value: "Reps must be between 0 and 1000.",
+                           dialog: "That rep count doesn't look right. Try a number between 0 and 1000.")
+        }
         guard var draft = GymTrackerIntentData.ensureDraft() else {
             return .result(value: "No workout today (rest day).",
                            dialog: "There's no workout today — it's a rest day.")
@@ -341,7 +353,15 @@ struct StartRestTimerIntent: AppIntent {
     init(seconds: Double?) { self.seconds = seconds }
 
     func perform() async throws -> some IntentResult {
-        let duration = seconds ?? 90
+        let requested = seconds ?? 90
+        guard requested.isFinite else {
+            return .result(value: "Pass the rest length in seconds.",
+                           dialog: "I didn't catch how long to rest.")
+        }
+        // The same 1 second to 1 hour bounds as the MCP start_rest_timer
+        // tool: Int() traps on a huge value, and a negative rest would
+        // end before it starts.
+        let duration = min(max(requested, 1), 3600)
         let endsAt = Date().addingTimeInterval(duration)
         SharedDefaults.store.set(endsAt.timeIntervalSince1970, forKey: GymTrackerIntentData.restEndsAtKey)
         return .result(value: "Rest timer started for \(Int(duration)) seconds.",

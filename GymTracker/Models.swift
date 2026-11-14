@@ -3296,6 +3296,14 @@ final class WorkoutStore: ObservableObject {
     /// has no saved data, so no new user is ever given his split here.
     private func adoptReturningUserIfNeeded() {
         guard !hasCompletedOnboarding else { return }
+        // A device that has been through setup before is never adopted.
+        // Retake setup clears the onboarding flag too, so an app killed
+        // mid-retake looks like a pre-onboarding install by its data
+        // alone, and adoption would hand that user DaRon's preset. The
+        // old build wrote no profile and no setup date (both arrived
+        // with onboarding), and a retake leaves its snapshot, so any of
+        // them means setup ran here; the retake flow picks up instead.
+        guard preRetakeProgram == nil, profile == nil, setupDate == nil else { return }
         let hasExistingData = !sessions.isEmpty || bodyWeightLb != nil || draftDayKey != nil
         guard hasExistingData else { return }
         // This device ran the pre-onboarding build — that is DaRon's

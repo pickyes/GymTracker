@@ -21,7 +21,7 @@ import WidgetKit
 struct RestTimerLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RestTimerAttributes.self) { context in
-            RestTimerLockScreenView(state: context.state)
+            RestTimerLockScreenView(state: context.state, isStale: context.isStale)
         } dynamicIsland: { context in
             let accent = Color(hex: context.state.accentHex)
             return DynamicIsland {
@@ -42,7 +42,7 @@ struct RestTimerLiveActivity: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    RestTimerCountdownText(state: context.state, style: .island)
+                    RestTimerCountdownText(state: context.state, isStale: context.isStale, style: .island)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -68,7 +68,7 @@ struct RestTimerLiveActivity: Widget {
                 Image(systemName: "timer")
                     .foregroundStyle(accent)
             } compactTrailing: {
-                RestTimerCountdownText(state: context.state, style: .compact)
+                RestTimerCountdownText(state: context.state, isStale: context.isStale, style: .compact)
             } minimal: {
                 Image(systemName: "timer")
                     .foregroundStyle(accent)
@@ -88,6 +88,7 @@ struct RestTimerLiveActivity: Widget {
 /// countdown, "Drink water" row, paused badge.
 private struct RestTimerLockScreenView: View {
     let state: RestTimerAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
         let accent = Color(hex: state.accentHex)
@@ -115,7 +116,7 @@ private struct RestTimerLockScreenView: View {
                         .background(Capsule().fill(accent.opacity(0.18)))
                 }
             }
-            RestTimerCountdownText(state: state, style: .lock)
+            RestTimerCountdownText(state: state, isStale: isStale, style: .lock)
             HStack(spacing: 6) {
                 Image(systemName: "drop.fill")
                     .font(.subheadline)
@@ -186,9 +187,12 @@ private struct RestTimerSetControlsView: View {
 
 /// The countdown, always in the accent color. While running it counts
 /// down live from `endsAt`; while paused it shows the frozen remaining
-/// seconds as static text.
+/// seconds as static text; once the rest is over it shows 0:00.
 private struct RestTimerCountdownText: View {
     let state: RestTimerAttributes.ContentState
+    /// The activity's `isStale`: the app sets the stale date to the end
+    /// of the rest, so a stale activity is a finished rest.
+    let isStale: Bool
     let style: Style
 
     enum Style {
@@ -199,11 +203,18 @@ private struct RestTimerCountdownText: View {
 
     var body: some View {
         let accent = Color(hex: state.accentHex)
+        let now = Date()
         Group {
             if state.isPaused || state.endsAt == nil {
                 Text(formatted(state.remainingSeconds))
+            } else if let endsAt = state.endsAt, endsAt > now, !isStale {
+                Text(timerInterval: now...endsAt, countsDown: true)
             } else {
-                Text(timerInterval: Date()...state.endsAt!, countsDown: true)
+                // The rest is over. An end time already in the past is
+                // normal here (the stale-date re-render, a lock-screen
+                // intent pushing the stored end), and `now...endsAt`
+                // would then be a reversed range, which traps.
+                Text(formatted(0))
             }
         }
         .font(font)
