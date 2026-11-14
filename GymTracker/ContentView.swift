@@ -410,7 +410,7 @@ struct ContentView: View {
                         // (ignoring safe areas), and a view that touches the
                         // safe area's edge spreads into it — so they stop 1pt
                         // short of the rail (the rail covers that point).
-                        pageStack
+                        pageStack(screen: proxy.size)
                             // Plus a clear column for the buttons beside the
                             // strip, so nothing runs under them (DaRon).
                             // Strip on: stop short of the strip. Strip off: just
@@ -729,11 +729,18 @@ struct ContentView: View {
     /// and hit-testable. Hidden pages are also pruned from the
     /// VoiceOver tree (opacity 0 + allowsHitTesting false does NOT
     /// prune them) — only the visible page is exposed.
-    private var pageStack: some View {
+    /// `screen`: the whole screen's live size, from the root reader.
+    private func pageStack(screen: CGSize) -> some View {
         GeometryReader { geo in
             // The keyboard-free size, unless it's not measured yet or came
             // back degenerate (a zero height blanked the whole Today page).
-            let steadyOK = steadySize.width > 200 && steadySize.height > 200
+            // The keyboard only ever changes the height, so a new screen
+            // width is a new screen (unfold, rotate): use it in this pass.
+            // The stored size only catches up a pass later, and that pass
+            // laid the whole app out as still folded, then again as open.
+            let sameScreen = abs(steadySize.width - screen.width) < 1
+            let steadyOK = sameScreen && steadySize.width > 200 && steadySize.height > 200
+            let screenNow = steadyOK ? steadySize : screen
             // A width change (unfold, rotate) is never the keyboard: take
             // the live size at once instead of a frame late (red team).
             // The keyboard only ever changes the height: keep the page's own
@@ -742,7 +749,7 @@ struct ContentView: View {
             let size = steadyOK ? CGSize(width: geo.size.width, height: steadySize.height) : geo.size
             // Open or folded comes from the whole screen: the side bar's
             // width narrowed the pages under the "open" cut-off in DS mode.
-            let wide = Self.isWide(steadyOK ? steadySize : size)
+            let wide = Self.isWide(screenNow)
             Group {
                 if useTabs {
                     // A real tab view: iOS presents its tab bar down the
@@ -899,7 +906,6 @@ struct ContentView: View {
                     mainMinWidth: 380) {
             companionPage
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .hingeReveal()
         } main: {
             mainPage
                 .modifier(CompactWhen(wide))

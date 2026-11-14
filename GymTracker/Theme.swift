@@ -393,6 +393,14 @@ struct DuoPagePair<Pane: View, Main: View>: View {
         return max(Double(1 - m / total), 0)
     }
 
+    /// The fold's band while the Duo is partly open, left to right in the
+    /// pair's space; nil when open flat, folded, or before iOS 27.1.
+    static func activeFold(in geo: GeometryProxy) -> CGRect? {
+        guard #available(iOS 27.1, *) else { return nil }
+        return geo.reservedRegions(kind: .division, layoutDirectionBehavior: .fixed)
+            .first(where: \.isActive)?.frame
+    }
+
     /// The companion page's default share of the width side by side.
     static func sideDefault(total: CGFloat, mainWidth: CGFloat?) -> Double {
         guard total > 0 else { return 0.5 }
@@ -423,6 +431,10 @@ struct DuoPagePair<Pane: View, Main: View>: View {
             // live size at once, or one frame drew the old layout (red team).
             let s = steady.width > 0 && abs(steady.width - geo.size.width) < 1 ? steady : geo.size
             let stacked = wide && stacksWhenTall && s.height > s.width
+            // Partly open, iOS reserves a band down the fold ("division",
+            // with its margins). Like Settings and the home screen, the
+            // pages step clear of it, and back when the Duo opens flat.
+            let fold = wide && !stacked ? Self.activeFold(in: geo) : nil
             // Open and upright (DaRon: Nintendo DS style): one page on
             // each half, top and bottom of the fold; the companion page is
             // the top screen. Same view either way (only the frames and
@@ -460,6 +472,7 @@ struct DuoPagePair<Pane: View, Main: View>: View {
                          // got only ~216pt and every page in it wrapped.
                          mainWidth: wide && !stacked && s.height > s.width ? nil : mainWidth,
                          direction: direction,
+                         fold: fold,
                          pane: pane, main: main)
         }
         // The pages span the whole screen, edge to edge (their content
@@ -499,6 +512,8 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
     var mainMinWidth: CGFloat?
     var mainWidth: CGFloat?
     var direction: LayoutDirection
+    /// The fold's band while partly open (see DuoPagePair.activeFold).
+    var fold: CGRect? = nil
     var pane: () -> Pane
     var main: () -> Main
 
@@ -570,6 +585,15 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
         // at the screen edge and half a gap on the side facing the other
         // card, so edge | card | card | edge are all one gap apart. The
         // half moves from one side to the other as the pages trade places.
+        // Partly open: a page that reaches into the fold's band stops at
+        // its near edge instead (at rest only; a swap runs flat).
+        func clearOfFold(_ x: CGFloat, _ w: CGFloat) -> (x: CGFloat, w: CGFloat) {
+            guard let f = fold, lift == 0, w > 0, x < f.maxX, x + w > f.minX else { return (x, w) }
+            if x + w / 2 < f.midX { return (x, max(f.minX - x, 0)) }
+            return (f.maxX, max(x + w - f.maxX, 0))
+        }
+        let paneFit = clearOfFold(paneX, paneW)
+        let mainFit = clearOfFold(mainX, mainW)
         let g = DuoSwapCard.inset
         let half = g / 2
         var paneLead = g - half * slide, paneTrail = half + half * slide
@@ -594,24 +618,24 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     // Follows the slide, so nothing jumps mid-swap (red team).
                     .safeAreaPadding(.trailing, stacked && paneClearsCorner && !inRail ? 76 * slide : 0)
                     .environment(\.duoCornerInset, stacked && paneClearsCorner && !inRail ? 76 * slide : 0)
-                    .frame(width: paneW, height: paneH, alignment: .top)
+                    .frame(width: paneFit.w, height: paneH, alignment: .top)
                     .clipped()
-                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneW, height: paneH),
+                    .modifier(DuoSwapCard(lift: lift, size: CGSize(width: paneFit.w, height: paneH),
                                           leading: paneLead, trailing: paneTrail))
                     // Real layout position (not a visual-only offset), so
                     // safe areas and hit areas match where the page is.
-                    .alignmentGuide(.leading) { _ in -paneX }
+                    .alignmentGuide(.leading) { _ in -paneFit.x }
                     .alignmentGuide(.top) { _ in -paneY }
             }
             main()
                 .environment(\.layoutDirection, direction)
                 .safeAreaPadding(.trailing, stacked && mainClearsCorner && !inRail ? 76 * (1 - slide) : 0)
                 .environment(\.duoCornerInset, stacked && mainClearsCorner && !inRail ? 76 * (1 - slide) : 0)
-                .frame(width: mainW, height: mainH, alignment: .top)
+                .frame(width: mainFit.w, height: mainH, alignment: .top)
                 .clipped(antialiased: stacked)
-                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainW, height: mainH),
+                .modifier(DuoSwapCard(lift: lift, size: CGSize(width: mainFit.w, height: mainH),
                                       leading: mainLead, trailing: mainTrail))
-                .alignmentGuide(.leading) { _ in wide ? -mainX : 0 }
+                .alignmentGuide(.leading) { _ in wide ? -mainFit.x : 0 }
                 .alignmentGuide(.top) { _ in -mainY }
                 // The front screen's page passes over the other one.
                 .zIndex(1)
@@ -671,6 +695,9 @@ private struct DuoPairStage<Pane: View, Main: View>: View, Animatable {
                     .zIndex(3)
             }
         }
+        // Stepping clear of the fold and back glides like the home screen
+        // (Reduce Motion: no glide).
+        .animation(reduceMotion ? nil : AppAnimation.hinge, value: fold)
         .frame(width: total, height: size.height, alignment: .topLeading)
         // One solid layer: the fold's black-and-white strip blends with the
         // pages under it. Without a solid backdrop, a page fading in (page
@@ -993,19 +1020,12 @@ extension View {
 }
 
 
-// MARK: - Hinge-driven unfold reveal (iPhone Duo, iOS 27.1+)
+// MARK: - The hinge (iPhone Duo, iOS 27.1+)
 
-/// Ties a view to the physical hinge using Apple's `onHingeChange`
-/// (`DeviceHinge.angle`, 180° = flat). While the phone is partly open the
-/// view sits slightly dimmed and recessed; it reaches full brightness and
-/// size exactly as the hinge reaches flat, so the pane revealed by the
-/// unfold looks like it was already there, waiting. No layout changes —
-/// only opacity/scale, so nothing moves or reflows. Devices without a
-/// hinge (or iOS < 27.1) show the view as-is.
-/// The Duo's hinge, read the whole time the app runs (DaRon, Nov 12: "read
-/// the hinge at 0° when opening and stay on the whole time"). One shared
-/// value, fed from the app's root, so a pane that appears mid-opening
-/// already knows the angle instead of popping in at full brightness.
+/// The Duo's hinge, read the whole time the app runs with Apple's
+/// `onHingeChange` (180° = flat). Layout never follows the angle (Apple:
+/// hinge data is for effects; layout follows size changes and the fold's
+/// reserved region, see DuoPagePair.activeFold).
 /// Whether this phone folds, on its own (Nov 13). Pages and the root read
 /// only this; the live angle (HingeState) changes many times a second while
 /// the hinge moves, and the whole app was re-rendering on every sample —
@@ -1088,55 +1108,8 @@ struct HingeReader: ViewModifier {
     }
 }
 
-/// The waiting pane while the hinge moves (DaRon, Nov 12: closing the
-/// phone shrank the body and its buttons). Fully lit and full size the
-/// whole way from 0° to 180°: while the phone is part-way open the pane
-/// keeps the exact size it had fully open, top-aligned, so nothing in it
-/// shrinks or moves, whatever the system does to the layout mid-fold.
-struct HingeReveal: ViewModifier {
-    @ObservedObject private var hinge = HingeState.shared
-    /// Kept for call sites; the pane no longer scales from the hinge.
-    var anchor: UnitPoint = .trailing
-    @State private var openSize: CGSize = .zero
-    /// The hinge moved within this time: hold the size until then. Held
-    /// still at any angle the pane fits its space again (a phone resting
-    /// part-open kept an old, wider size and cut the body off).
-    @State private var movingUntil: Date = .distantPast
-    @State private var tick = 0
-
-    func body(content: Content) -> some View {
-        let moving = Date() < movingUntil && openSize.width > 0
-        content
-            .frame(width: moving ? openSize.width : nil,
-                   height: moving ? openSize.height : nil,
-                   alignment: .topLeading)
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                guard size.width > 0, size.height > 0 else { return }
-                if Date() >= movingUntil {
-                    // At rest (any angle): that's the size to hold mid-fold.
-                    openSize = size
-                } else if openSize.width > 0,
-                          (size.width > size.height) != (openSize.width > openSize.height) {
-                    // Rotated mid-fold: the held size no longer fits.
-                    openSize = .zero
-                }
-            }
-            .onChange(of: hinge.openness) { _, now in
-                guard now > 0 && now < 1 else { movingUntil = .distantPast; tick += 1; return }
-                movingUntil = Date().addingTimeInterval(0.6)
-                tick += 1
-                let mine = tick
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-                    // Settled: lay out at the real size again.
-                    if tick == mine { tick += 1 }
-                }
-            }
-    }
-}
-
 extension View {
     func hingeReader() -> some View { modifier(HingeReader()) }
-    func hingeReveal(anchor: UnitPoint = .trailing) -> some View { modifier(HingeReveal(anchor: anchor)) }
 }
 
 // MARK: - Lava-lamp liquid (rest pill, Nov 12)

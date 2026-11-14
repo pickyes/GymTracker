@@ -677,6 +677,10 @@ enum AppAnimation {
     /// Press feedback: a quick squeeze that springs back (side bar
     /// buttons, the selected page icon).
     static let press = Animation.spring(response: 0.25, dampingFraction: 0.6)
+    /// The pages stepping clear of the fold when the Duo is partly open,
+    /// and back when it opens flat: the home screen's own glide, measured
+    /// in the simulator (0.45 s, easing out).
+    static let hinge = Animation.easeOut(duration: 0.45)
     // Folding and unfolding: FoldAnimation.morph (Theme.swift).
 }
 

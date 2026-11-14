@@ -70,6 +70,10 @@ struct TodayView: View {
     @State private var standbyCard: StandbyCard? = .rest
     /// Progress card: headline shows exercises instead of sets (tap).
     @State private var progressShowsExercises = false
+    /// The page's last real size (see body). A plain reference, so
+    /// remembering it never causes another pass.
+    @State private var lastRealSize = LastRealSize()
+    final class LastRealSize { var size: CGSize = .zero }
     /// Live-body side/flip, hoisted out of LiveBodyView (Debug Pass 2):
     /// LiveBodyView is rebuilt per layout (a new identity each swap),
     /// so its own @State would snap the figure back to the auto side on
@@ -147,7 +151,16 @@ struct TodayView: View {
         // they present from this stack's hierarchy.)
         NavigationStack {
             GeometryReader { proxy in
-                let rawKind = layoutKind(for: proxy.size)
+                // Opening the Duo, iOS resizes the page through in-between
+                // frames with no height (382×0, then 867×0) before the real
+                // one. Each used to lay the whole workout out again; those
+                // frames keep the last real size instead, so the page is
+                // laid out once, at its new size.
+                let live = proxy.size
+                let degenerate = live.width < 1 || live.height < 1
+                let _ = degenerate ? () : (lastRealSize.size = live)
+                let layoutSize = degenerate && lastRealSize.size != .zero ? lastRealSize.size : live
+                let rawKind = layoutKind(for: layoutSize)
                 // Fold/unfold (Nov 12 redesign): NO morph and no delay.
                 // Folded and open-upright are the SAME workout column view
                 // (see compactLayout), so opening the phone keeps it
@@ -174,8 +187,10 @@ struct TodayView: View {
                     // measured taller than the screen and pushed the body
                     // pane's progress card off the bottom edge. Only ever
                     // shrinks to the real page height, never grows.
-                    .frame(height: (rawKind == .tent || rawKind == .propped) ? visibleHeight(proxy.size.height) : nil, alignment: .top)
+                    .frame(height: (rawKind == .tent || rawKind == .propped) ? visibleHeight(layoutSize.height) : nil, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
+                    .frame(width: degenerate ? layoutSize.width : nil,
+                           height: degenerate ? layoutSize.height : nil, alignment: .top)
                     // The keyboard doesn't squeeze the page: the workout
                     // column already scrolls clear of it on its own
                     // (contentBottomPadding), so the body pane and the
@@ -186,7 +201,7 @@ struct TodayView: View {
                     // snapped the keyboard padding, scrolls and the body
                     // pane's front/back turn (red team, animations).
                     .transaction(value: rawKind) { $0.animation = nil }
-                    .transaction(value: proxy.size) { $0.animation = nil }
+                    .transaction(value: layoutSize) { $0.animation = nil }
                     // Calendar open: the page behind blurs and goes black
                     // and white, like behind the open menu (DaRon, Nov 12).
                     .blur(radius: showCalendarDropdown ? 3 : 0)  // light: the page stays readable behind it
@@ -196,7 +211,7 @@ struct TodayView: View {
                     // unfolds downward out of it. Never a sheet.
                     .overlay {
                         if showCalendarDropdown {
-                            calendarDropdownOverlay(size: proxy.size, kind: rawKind)
+                            calendarDropdownOverlay(size: layoutSize, kind: rawKind)
                         }
                     }
                     .animation(AppAnimation.snappy, value: showCalendarDropdown)
@@ -1261,9 +1276,6 @@ struct TodayView: View {
             // (no window-height cap: reading the window during layout
             // blanked the whole Today page on a launch while open)
             .ignoresSafeArea(edges: .top)
-            // Follows the real hinge: the waiting pane comes up to full
-            // brightness exactly as the phone opens flat.
-            .hingeReveal(anchor: anchor)
         }
     }
 
@@ -2881,6 +2893,11 @@ struct ExerciseCard: View {
                     compact: rowsCompact,
                     canDelete: sets.count > 1
                 )
+                // Rebuilt only when what the row shows changes: the card's
+                // closures are new every time, so without this every page
+                // re-layout (each step of opening the Duo) rebuilt every
+                // row and its two text fields.
+                .equatable()
                 // A row never stretches its card. The full row is as wide
                 // as the card's cut-off for "wide enough", so after a fold
                 // it held the card open at that width, the card measured
@@ -3299,6 +3316,7 @@ struct SetRow: View {
                 NumberField(prompt: "–", keyboardType: .decimalPad, range: weightRange, value: weightBinding, width: compact ? 50 : fieldWidth, fieldID: "field-weight-\(template.id)-\(number)", accessibilityLabel: "Set \(number) weight, \(unit == .kg ? "kilograms" : "pounds")", onFocusChange: { focused in
                     onFieldFocus?(focused ? "field-weight-\(template.id)-\(number)" : nil)
                 })
+                    .equatable()
                     .layoutPriority(1)
                 Text(unit.label)  // pairs too: "lb", not the old "s" (as in "40s")
                     .font(.caption)
@@ -3311,6 +3329,7 @@ struct SetRow: View {
                 NumberField(prompt: "–", keyboardType: .numberPad, range: 0...999, value: repsBinding, width: compact ? 50 : fieldWidth, fieldID: "field-reps-\(template.id)-\(number)", accessibilityLabel: "Set \(number) reps", onFocusChange: { focused in
                     onFieldFocus?(focused ? "field-reps-\(template.id)-\(number)" : nil)
                 })
+                    .equatable()
                     .layoutPriority(1)
                 Text(compact ? "×" : "reps")
                     .font(.caption)
@@ -3354,6 +3373,15 @@ struct SetRow: View {
     }
 }
 
+/// What a set row shows. The closures (delete, focus) are left out: they
+/// look the set up by id when they run, so an older copy does the same.
+extension SetRow: Equatable {
+    static func == (l: SetRow, r: SetRow) -> Bool {
+        l.number == r.number && l.set == r.set && l.template == r.template
+            && l.previous == r.previous && l.compact == r.compact && l.canDelete == r.canDelete
+    }
+}
+
 // MARK: - Tap-to-edit numeric field (decimal / number keypad)
 
 struct NumberField: View {
@@ -3372,10 +3400,52 @@ struct NumberField: View {
 
     @FocusState private var isFocused: Bool
     @State private var text: String = ""
+    /// The real text field exists only while it's being edited. At rest
+    /// the box is plain text that looks the same: every set row has two
+    /// of these, and ~40 live UIKit text fields made opening the Duo
+    /// (and every layout change) slow — the screen stayed black for
+    /// about a third of a second longer.
+    @State private var editing = false
 
     var body: some View {
-        TextField(prompt, text: $text)
-            .keyboardType(keyboardType)
+        Group {
+            if editing {
+                box(TextField(prompt, text: $text)
+                    .keyboardType(keyboardType)
+                    .focused($isFocused))
+                    // Focus once it exists, so the keyboard comes up from
+                    // the same tap.
+                    .task { isFocused = true }
+            } else {
+                box(Text(text.isEmpty ? prompt : text)
+                    .foregroundStyle(text.isEmpty ? Color(.placeholderText) : Theme.text))
+                    .contentShape(Rectangle())
+                    .onTapGesture { editing = true }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityValue(text)
+                    .accessibilityHint("Double-tap to edit")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { editing = true }
+            }
+        }
+        .accessibilityLabel(accessibilityLabel ?? prompt)
+        .id(fieldID)
+        .onAppear { syncFromValue() }
+        .onChange(of: value) { syncFromValue() }
+        .onChange(of: text) { _, newText in liveUpdate(newText) }
+        .onChange(of: isFocused) { _, focused in
+            onFocusChange?(focused)
+            if !focused {
+                commit()
+                editing = false
+            }
+        }
+        .onSubmit { commit() }
+    }
+
+    /// The box, the same for the text and the live field.
+    private func box(_ content: some View) -> some View {
+        content
             .multilineTextAlignment(.center)
             .font(.subheadline)
             .monospacedDigit()
@@ -3392,17 +3462,6 @@ struct NumberField: View {
             .background(Theme.cardElevated)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
-            .focused($isFocused)
-            .accessibilityLabel(accessibilityLabel ?? prompt)
-            .id(fieldID)
-            .onAppear { syncFromValue() }
-            .onChange(of: value) { syncFromValue() }
-            .onChange(of: text) { _, newText in liveUpdate(newText) }
-            .onChange(of: isFocused) { _, focused in
-                onFocusChange?(focused)
-                if !focused { commit() }
-            }
-            .onSubmit { commit() }
     }
 
     private func displayText(for value: Double?) -> String {
@@ -3452,6 +3511,16 @@ struct NumberField: View {
             value = min(max(parsed, range.lowerBound), range.upperBound)
         }
         text = displayText(for: value)
+    }
+}
+
+/// What a number field shows. The focus callback is left out (it only
+/// reports the field's own id, which is compared).
+extension NumberField: Equatable {
+    static func == (l: NumberField, r: NumberField) -> Bool {
+        l.prompt == r.prompt && l.keyboardType == r.keyboardType && l.range == r.range
+            && l.value == r.value && l.width == r.width && l.fieldID == r.fieldID
+            && l.accessibilityLabel == r.accessibilityLabel
     }
 }
 
