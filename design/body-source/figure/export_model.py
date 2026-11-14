@@ -211,6 +211,28 @@ for o, (co, nrm, dom) in ((body, (bco, bnrm, bdom)), (face, (fco, fnrm, fdom))):
     add_layers(o, *map_mesh(co, nrm, dom, None))
 print("MAPPED")
 
+# Projection (Nov 14): the paintings are now fitted to the body's own
+# straight-on render (render_relief.py / bougle_fit.py), so they go back on
+# from that same orthographic camera, front and back. Each painted muscle
+# lands on the body's sculpted muscle; the sides are handled by the fill.
+import json as _json
+_F = _json.load(open(os.path.join(HERE, "relief", "frame.json")))
+_SCL, _ZT, _VT = _F["scale"], _F["ztop"], _F["vtop"]
+for o in (body, face):
+    me_ = o.data
+    co_ = np.array([o.matrix_world @ v.co for v in me_.vertices])
+    ny = np.array([(o.matrix_world.to_3x3() @ v.normal).normalized()[1] for v in me_.vertices])
+    u_f = (560 + co_[:, 0] * _SCL) / 1120.0; u_b = (560 - co_[:, 0] * _SCL) / 1120.0
+    v_ = 1.0 - (_VT + (_ZT - co_[:, 2]) * _SCL) / 2240.0
+    for name, u in (("uv_front", u_f), ("uv_back", u_b)):
+        uvd = me_.uv_layers[name].data
+        for loop in me_.loops:
+            uvd[loop.index].uv = (u[loop.vertex_index], v_[loop.vertex_index])
+    f = np.clip((-ny + 0.3) / 0.6, 0, 1); f = f * f * (3 - 2 * f)
+    fa = me_.color_attributes["facing"]
+    for i in range(len(f)): fa.data[i].color = (f[i], f[i], f[i], 1)
+print("PROJECTED")
+
 
 # ---------------------------------------------------------------------------
 # The app's 3D body (Nov 14): one light mesh, one texture layout, three

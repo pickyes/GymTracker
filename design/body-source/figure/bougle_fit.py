@@ -34,11 +34,25 @@ CW, CH = 1120, 2240
 # (edge_pairs): at the same proportion along each limb and down the torso,
 # the plate's outline point goes to the canvas's. Plates are used one half
 # at a time, with the used half on the right (mirrored where needed).
-CANVAS_J = {
+# The canvas is the 3D body's own straight-on render (render_relief.py):
+# joints projected from the skeleton, in canvas units (px / S).
+FRAME = json.load(open(os.path.join(HERE, "relief", "frame.json")))
+CANVAS = {side: {k: (x / S, y / S) for k, (x, y) in FRAME["joints"][side].items()} for side in ("front", "back")}
+# The old painting's joints (units), for carrying the old muscle areas over.
+OLD_J = {
     "crown": (100, 4), "chin": (100, 51), "notch": (100, 78), "crotch": (100, 205),
     "shoulder": (144, 92), "elbow": (152.8, 141.8), "wrist": (161.8, 195),
     "hip": (118, 194), "knee": (117.5, 288.7), "ankle": (122.4, 359.6),
 }
+OLD_J_BACK = dict(OLD_J, notch=(100, 64.6))
+# Interior anatomy matched by eye between the body's clay render (canvas px)
+# and the plates (px): where the sculpted muscles are.
+FRONT_INNER = [((560, 715), (497, 1120)),   # navel
+               ((585, 522), (535, 835)),    # pec underline, by the sternum
+               ((690, 505), (740, 850)),    # pec underline, outer
+               ((560, 940), (497, 1590))]   # top of the pubis
+BACK_UPPER_INNER = [((560, 840), (506, 1440))]  # top of the natal cleft
+BACK_LEGS_INNER = [((640, 1005), (642, 1720))]  # gluteal fold
 FRONT_MID = 495
 FRONT_J = {"crown": (495, 31), "chin": (495, 387), "notch": (495, 540), "crotch": (497, 1710),
            "shoulder": (817, 622), "elbow": (833, 1090), "wrist": (890, 1493),
@@ -46,7 +60,7 @@ FRONT_J = {"crown": (495, 31), "chin": (495, 387), "notch": (495, 540), "crotch"
 # The front plate draws the external oblique's tendon sheet nearly paper
 # coloured, so its torso edge is given, not cut: (canvas y, plate x) on the
 # viewer's right, where the arm hangs clear of the torso.
-FRONT_TORSO = [(140, 757), (150, 757), (160, 753), (170, 755), (180, 762)]
+FRONT_TORSO = [(0.49, 757), (0.57, 757), (0.65, 753), (0.72, 755), (0.80, 762)]  # (notch->crotch t, plate x)
 BACK_MID = 506
 BACK_UPPER_J = {"crown": (506, 27), "chin": (506, 385), "notch": (506, 440), "crotch": (506, 1560),
                 "shoulder": (833, 624), "elbow": (857, 1084), "wrist": (890, 1511),
@@ -108,7 +122,7 @@ def edge_pairs(cmask, cj, pmask, pj, side_x=1):
     # Torso and head: straight out from the midline, only where no arm is
     # alongside (the march would run on into it: rejected by the limit).
     for a, b, ts, lim in (("crown", "chin", (0.25, 0.5, 0.75), 24), ("chin", "notch", (0.5,), 20),
-                          ("notch", "crotch", (0.45, 0.55, 0.65, 0.75, 0.85), 42)):
+                          ("notch", "crotch", (0.15, 0.3, 0.45, 0.55, 0.65, 0.75, 0.85), 60)):
         A, B = np.array(cj[a], float) * S, np.array(cj[b], float) * S
         a2, b2 = np.array(pj[a], float), np.array(pj[b], float)
         for t in ts:
@@ -116,34 +130,35 @@ def edge_pairs(cmask, cj, pmask, pj, side_x=1):
             kc = march(cmask, pc, (1, 0), lim * S); kp = march(pmask, pp, (1, 0), lim * S * sc)
             if kc and kp: out.append(((pc[0] + kc, pc[1]), (pp[0] + kp, pp[1])))
     # Top and outer edge of the shoulder.
-    for d in ((0, -1), (1, 0)):
+    for d in ((0, -1),):  # straight up only: the body's arms are raised
         kc = march(cmask, np.array(cj["shoulder"]) * S, d, 30 * S); kp = march(pmask, np.array(pj["shoulder"], float), d, 30 * S * sc)
         if kc and kp:
             out.append(((cj["shoulder"][0] * S + d[0] * kc, cj["shoulder"][1] * S + d[1] * kc),
                         (pj["shoulder"][0] + d[0] * kp, pj["shoulder"][1] + d[1] * kp)))
     return out
 
-def fit_pairs(cmask, cj, plate, pj, torso=None):
+def fit_pairs(cmask, cj, plate, pj, torso=None, inner=()):
     """All matched points for one half: joints, outline, mirrored copies."""
     pmask = plate_mask(plate, pj)
     pairs = [((x * S, y * S), pj[k]) for k, (x, y) in cj.items()]
     if torso:
-        # Given torso edge: canvas edge at that height <-> plate x at the same
-        # proportion between notch and crotch. The figure outline includes it.
+        # Given torso edge: at proportion t between notch and crotch, the
+        # canvas edge <-> plate x. The figure outline includes it.
         n0, c0 = cj["notch"][1], cj["crotch"][1]; pn, pc = pj["notch"][1], pj["crotch"][1]
-        poly = [(pj["notch"][0], pn + (torso[0][0] - n0) / (c0 - n0) * (pc - pn))]
-        for cy, px in torso:
-            py = pn + (cy - n0) / (c0 - n0) * (pc - pn)
-            kc = march(cmask, np.array([100 * S, cy * S]), (1, 0), 45 * S)
+        poly = [(pj["notch"][0], pn + torso[0][0] * (pc - pn))]
+        for t, px in torso:
+            py = pn + t * (pc - pn); cy = n0 + t * (c0 - n0)
+            kc = march(cmask, np.array([100 * S, cy * S]), (1, 0), 60 * S)
             if kc: pairs.append(((100 * S + kc, cy * S), (px, py)))
             poly.append((px, py))
         poly.append((pj["notch"][0], poly[-1][1]))
-        pts = np.array(poly, np.int32)
-        cv2.fillPoly(pmask, [pts], 1)
+        cv2.fillPoly(pmask, [np.array(poly, np.int32)], 1)
         cv2.fillPoly(pmask, [np.array([(2 * pj["notch"][0] - x, y) for x, y in poly], np.int32)], 1)
-        pairs += [e for e in edge_pairs(cmask, cj, pmask, pj) if not (n0 * S < e[0][1] < c0 * S and abs(e[0][0] - 100 * S) < 45 * S and e[0][1] < (torso[-1][0] + 4) * S and e[0][1] > (torso[0][0] - 4) * S)]
+        lo_y = (n0 + torso[0][0] * (c0 - n0) - 4) * S; hi_y = (n0 + torso[-1][0] * (c0 - n0) + 4) * S
+        pairs += [e for e in edge_pairs(cmask, cj, pmask, pj) if not (lo_y < e[0][1] < hi_y and abs(e[0][0] - 100 * S) < 60 * S)]
     else:
         pairs += edge_pairs(cmask, cj, pmask, pj)
+    pairs += list(inner)
     mid_c, mid_p = 100 * S, pj["crown"][0]
     mirror = [((2 * mid_c - c[0], c[1]), (2 * mid_p - p[0], p[1])) for c, p in pairs if c[0] > mid_c + 3]
     return pairs + mirror, pmask
@@ -181,12 +196,58 @@ def tps_map(model):
         out[k:k + 400000] += U @ W[:n]
     return out[:, 0].reshape(CH, CW).astype(np.float32), out[:, 1].reshape(CH, CW).astype(np.float32)
 
-def warp(plate, pairs, mask=None):
+def half_widths(mask, A, B, ts, limit):
+    """The limb's half-width each side of bone A->B at proportions ts."""
+    d = (B - A) / np.linalg.norm(B - A); n = np.array([-d[1], d[0]])
+    w = []
+    for t in ts:
+        p = A + (B - A) * t
+        w.append([march(mask, p, n * sg, limit) or limit for sg in (1, -1)])
+    w = np.array(w, float)
+    med = np.median(w, 0)
+    return np.minimum(w, med * 1.5)   # a march that ran into the torso
+
+def bone_map(cmask, cj, pmask, pj, region, seg):
+    """Plate coordinates for canvas pixels of a posed limb segment: the same
+    proportion along the bone and the same fraction of the limb's width
+    across it, so a limb raised on the body takes the plate's hanging limb."""
+    a_, b_ = seg
+    A, B = np.array(cj[a_], float) * S, np.array(cj[b_], float) * S
+    a2, b2 = np.array(pj[a_], float), np.array(pj[b_], float)
+    ts = np.linspace(0.05, 0.95, 10)
+    sc = np.linalg.norm(b2 - a2) / np.linalg.norm(B - A)
+    wc = half_widths(cmask, A, B, ts, 40 * S); wp = half_widths(pmask, a2, b2, ts, 40 * S * sc)
+    ys_, xs_ = np.nonzero(region)
+    q = np.stack([xs_, ys_], 1).astype(float)
+    d = (B - A) / np.linalg.norm(B - A); n = np.array([-d[1], d[0]])
+    t = ((q - A) @ d) / np.linalg.norm(B - A); off = (q - A) @ n
+    dp = (b2 - a2) / np.linalg.norm(b2 - a2); np_ = np.array([-dp[1], dp[0]])
+    tc = np.clip(t, ts[0], ts[-1])
+    side = np.where(off >= 0, 0, 1)
+    wci = np.where(side == 0, np.interp(tc, ts, wc[:, 0]), np.interp(tc, ts, wc[:, 1]))
+    wpi = np.where(side == 0, np.interp(tc, ts, wp[:, 0]), np.interp(tc, ts, wp[:, 1]))
+    src = a2 + np.outer(t, b2 - a2) + np.outer(off * wpi / np.maximum(wci, 1), np_)
+    return ys_, xs_, src
+
+def warp(plate, pairs, mask=None, arms=None, interp=cv2.INTER_CUBIC):
     """The plate on the canvas. Where the canvas outline reaches past the
-    plate's figure (paper would show), the nearest figure pixel is used."""
+    plate's figure (paper would show), a smooth fill is used. `arms`
+    (cmask, cj, pmask, pj, side) maps the arms bone by bone instead."""
     dst = [c for c, _ in pairs]; src = [p for _, p in pairs]
     mx, my = tps_map(tps_fit(dst, src))
-    out = cv2.remap(plate, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    if arms is not None:
+        cmask, cj, pmask, pj, side = arms
+        right = np.zeros(cmask.shape, bool); right[:, CW // 2:] = True
+        bm_x, bm_y = mx.copy(), my.copy(); weight = np.zeros(cmask.shape, np.float32)
+        for nm, seg in (("upper", ("shoulder", "elbow")), ("fore", ("elbow", "wrist")), ("hand", ("elbow", "wrist"))):
+            reg = part_is(side, nm) & right & (cmask > 0)
+            reg = cv2.dilate(reg.astype(np.uint8), np.ones((15, 15), np.uint8)).astype(bool) & right
+            if not reg.any(): continue
+            yy, xx, sp = bone_map(cmask, cj, pmask, pj, reg, seg)
+            bm_x[yy, xx] = sp[:, 0]; bm_y[yy, xx] = sp[:, 1]; weight[yy, xx] = 1
+        weight = cv2.GaussianBlur(weight, (0, 0), 5)
+        mx = mx * (1 - weight) + bm_x * weight; my = my * (1 - weight) + bm_y * weight
+    out = cv2.remap(plate, mx, my, interp, borderMode=cv2.BORDER_REFLECT)
     if mask is not None:
         wm = cv2.remap(mask, mx, my, cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         wm = cv2.erode(wm, np.ones((5, 5), np.uint8))
@@ -248,10 +309,6 @@ for s in ("Front", "Back"):
         if not os.path.exists(keep): os.rename(o, keep)
 oldshade = {s: cv2.imread(os.path.join(PAINT, f"old_BodyShade{s}.png"), cv2.IMREAD_UNCHANGED) for s in ("Front", "Back")}
 names = json.load(open(os.path.join(HERE, "ids.json")))
-oldids = {}
-for side in ("front", "back"):
-    # ids from the old outlines (make_ids.py), area index x 4
-    import subprocess, sys
 oldids_src = {}
 rows = [l.split("\t") for l in open(os.path.join(HERE, "old_specs.txt")).read().splitlines()]
 for side in ("front", "back"):
@@ -264,18 +321,51 @@ for side in ("front", "back"):
     oldids_src[side] = img
 
 ys = np.arange(CH)[:, None] / S
-def canvas_mask(side): return (old[side][..., 3] > 128).astype(np.uint8)
+RELIEF = os.path.join(HERE, "relief")
+clay = {s: cv2.imread(os.path.join(RELIEF, f"clay_{s}.png"), cv2.IMREAD_UNCHANGED) for s in ("front", "back")}
+part = {s: cv2.imread(os.path.join(RELIEF, f"part_{s}.png"))[..., 2].astype(np.float32) / 255 for s in ("front", "back")}
+def canvas_mask(side): return (clay[side.lower()][..., 3] > 128).astype(np.uint8)
+# Body parts from the render: 1 head, .8 upper arm, .6 forearm, .4 hand, .2 foot.
+def part_is(side, *names_):
+    v = part[side]; out = np.zeros(v.shape, bool)
+    for n in names_:
+        c = {"head": 1.0, "upper": 0.8, "fore": 0.6, "hand": 0.4, "foot": 0.2}[n]
+        out |= np.abs(v - c) < 0.09
+    return out
+
+def warp_ids(src_ids, side):
+    """The old muscle areas, carried from the old painting onto the body's
+    render by joints and outline (only seeds for the re-cut below)."""
+    oj = OLD_J if side == "front" else OLD_J_BACK
+    om = (old[side.capitalize()][..., 3] > 128).astype(np.uint8)
+    pairs = [((x * S, y * S), (oj[k][0] * S, oj[k][1] * S)) for k, (x, y) in CANVAS[side].items()]
+    pairs += edge_pairs(canvas_mask(side), CANVAS[side], om, {k: (x * S, y * S) for k, (x, y) in oj.items()})
+    pairs += [((2 * 560 - c[0], c[1]), (2 * 560 - p[0], p[1])) for c, p in pairs if c[0] > 563]
+    ojp = {k: (x * S, y * S) for k, (x, y) in oj.items()}
+    out = warp(src_ids.astype(np.float32), pairs, None, arms=(canvas_mask(side), CANVAS[side], om, ojp, side), interp=cv2.INTER_NEAREST)
+    return np.round(out).astype(np.int32)
+for side in ("front", "back"):
+    w_ = warp_ids(oldids_src[side], side)
+    # Arms were mapped on the right half; the left half mirrors it with each
+    # area's left/right swapped.
+    swap = {names[k]: names[k.replace('Left', '#').replace('Right', 'Left').replace('#', 'Right')] for k in names}
+    lut = np.arange(256); [lut.__setitem__(a_, b_) for a_, b_ in swap.items()]
+    mir = lut[np.clip(w_[:, ::-1], 0, 255)]
+    w_[:, :CW // 2] = mir[:, :CW // 2]
+    oldids_src[side] = w_ * canvas_mask(side)
+
 front_plate = remove_labels(remove_fold_bar(cv2.imread(os.path.join(SRC, "Bougle_whole2.jpg"))))
 back_plate = remove_labels(cv2.imread(os.path.join(SRC, "Bougle_whole5.jpg")))
-fp, fmask = fit_pairs(canvas_mask("Front"), CANVAS_J, front_plate, FRONT_J, FRONT_TORSO)
-fw = warp(front_plate, fp, fmask)
+fp, fmask = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_plate, FRONT_J, FRONT_TORSO, FRONT_INNER)
+fw = warp(front_plate, fp, fmask, arms=(canvas_mask('front'), CANVAS['front'], fmask, FRONT_J, 'front'))
 front_mirror_plate = front_plate[:, ::-1].copy()
 FJ_M = {k: (front_plate.shape[1] - 1 - (2 * FRONT_MID - x), y) for k, (x, y) in FRONT_J.items()}
 # (the viewer-left half, mirrored onto the right: same joints, x flipped twice)
 FJ_M = {k: (2 * FRONT_MID - x, y) for k, (x, y) in FRONT_J.items()}
 FJ_M = {k: (front_plate.shape[1] - 1 - x, y) for k, (x, y) in FJ_M.items()}
-FT_M = [(cy, front_plate.shape[1] - 1 - (2 * FRONT_MID - px)) for cy, px in FRONT_TORSO]  # assumed symmetric
-fpm, fmm = fit_pairs(canvas_mask("Front"), CANVAS_J, front_mirror_plate, FJ_M, FT_M)
+FT_M = [(t, front_plate.shape[1] - 1 - (2 * FRONT_MID - px)) for t, px in FRONT_TORSO]  # assumed symmetric
+FI_M = [(c, (front_plate.shape[1] - 1 - (2 * FRONT_MID - p[0]), p[1])) for c, p in FRONT_INNER]
+fpm, fmm = fit_pairs(canvas_mask("Front"), CANVAS["front"], front_mirror_plate, FJ_M, FT_M, FI_M)
 fwm = warp(front_mirror_plate, fpm, fmm)
 front = mirror_half(fw, right=True)
 abs_zone = (oldids_src["front"] == names["abs"]).astype(np.uint8)
@@ -283,13 +373,15 @@ abs_zone = cv2.dilate(abs_zone, np.ones((25, 25), np.uint8))
 z = cv2.GaussianBlur(abs_zone.astype(np.float32), (31, 31), 0)[..., None]
 front = mirror_half((front * (1 - z) + mirror_half(fwm, right=True) * z).astype(np.uint8), right=True)
 
-bp, bmask = fit_pairs(canvas_mask("Back"), CANVAS_J, back_plate, BACK_UPPER_J)
-bu = mirror_half(warp(back_plate, bp, bmask), right=True)
+bp, bmask = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_plate, BACK_UPPER_J, None, BACK_UPPER_INNER)
+bu = mirror_half(warp(back_plate, bp, bmask, arms=(canvas_mask('back'), CANVAS['back'], bmask, BACK_UPPER_J, 'back')), right=True)
 back_mirror_plate = back_plate[:, ::-1].copy()
 BL = {k: (back_plate.shape[1] - 1 - (2 * BACK_MID - x), y) for k, (x, y) in BACK_LEGS_J.items()}
-blp, blm = fit_pairs(canvas_mask("Back"), CANVAS_J, back_mirror_plate, BL)
+BLI = [(c, (back_plate.shape[1] - 1 - (2 * BACK_MID - p[0]), p[1])) for c, p in BACK_LEGS_INNER]
+blp, blm = fit_pairs(canvas_mask("Back"), CANVAS["back"], back_mirror_plate, BL, None, BLI)
 bl = mirror_half(warp(back_mirror_plate, blp, blm), right=True)
-t = np.clip((ys - 186) / 14, 0, 1)[..., None]
+wy = (CANVAS['back']['notch'][1] + 0.78 * (CANVAS['back']['crotch'][1] - CANVAS['back']['notch'][1]))
+t = np.clip((ys - wy) / 14, 0, 1)[..., None]
 back = (bu * (1 - t) + bl * t).astype(np.uint8)
 for nm, pairs, plate, pm in (("front", fp, front_plate, fmask), ("back", bp, back_plate, bmask)):
     v = plate.copy(); v[pm == 0] = (v[pm == 0] * 0.35).astype(np.uint8)
@@ -297,40 +389,35 @@ for nm, pairs, plate, pm in (("front", fp, front_plate, fmask), ("back", bp, bac
     cv2.imwrite(os.path.join(PREV, f"pairs_{nm}.jpg"), cv2.resize(v, None, fx=0.3, fy=0.3))
 
 def finish(col, side):
-    """Grey anatomy + shade in the old painting's look, inside its outline."""
-    S_ = side.capitalize(); o = old[S_]; alpha = o[..., 3]
+    """Grey anatomy + shade on the body's render, inside its outline. Head,
+    hands and feet are plain body grey: not muscle the app lights."""
+    S_ = side.capitalize(); alpha = clay[side][..., 3]
     lab = cv2.cvtColor(col, cv2.COLOR_BGR2LAB).astype(np.float32)
     L = lab[..., 0] / 255.0
     # Muscle tissue: red (a* well above the plate's tendons and paper),
     # read over a few px so fibre lines don't count as gaps.
     red = cv2.GaussianBlur(np.clip((lab[..., 1] - 132) / 12, 0, 1), (0, 0), 3)
-    # Grey: muscles a mid grey with their fibres, tendons and fascia light.
     g = np.clip(0.20 + 0.55 * L ** 1.3 + 0.10 * (1 - red), 0, 1)
-    grey = (g * 255).astype(np.uint8)
-    keep_old = np.zeros(alpha.shape, np.float32)
-    keep_old[ys[:, 0] < 56] = 1                                 # head
-    keep_old[ys[:, 0] > 363] = 1                                # feet
-    ids = oldids_src[side]
-    for n in ("handLeft", "handRight", "wristLeft", "wristRight"):
-        keep_old[ids == names[n]] = 1
-    keep_old = cv2.GaussianBlur(keep_old, (41, 41), 0)
-    og = cv2.cvtColor(o[..., :3], cv2.COLOR_BGR2GRAY).astype(np.float32)
-    an = keep_old * og + (1 - keep_old) * grey
+    grey = g * 255
+    pl = part_is(side, 'head', 'hand', 'foot').astype(np.uint8)
+    if side == "front":
+        # The plate draws genitals; the body is smooth there. Plain grey.
+        cj = CANVAS[side]
+        cy = int((cj["crotch"][1] * S + (cj["notch"][1] + 0.83 * (cj["crotch"][1] - cj["notch"][1])) * S) / 2)
+        cv2.ellipse(pl, (CW // 2, cy), (62, 70), 0, 0, 360, 1, -1)
+    plain = cv2.GaussianBlur(pl.astype(np.float32), (0, 0), 4)
+    an = plain * 112 + (1 - plain) * grey
     anat = np.dstack([an, an, an * 1.04, alpha]).clip(0, 255).astype(np.uint8)
-    # Shade: the plate's own light/dark, normalised over the muscle.
-    # Local contrast first (CLAHE), so the fibre lines survive the small
-    # size the body is drawn at instead of averaging out to flat colour.
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(24, 48))
     sh = clahe.apply((L * 255).astype(np.uint8)).astype(np.float32) / 255.0
     m = (alpha > 128) & (red > 0.3)
     lo, hi = np.percentile(sh[m], 3), np.percentile(sh[m], 98)
     sh = np.clip((sh - lo) / (hi - lo), 0, 1) * 255
-    osd = cv2.cvtColor(oldshade[S_][..., :3], cv2.COLOR_BGR2GRAY).astype(np.float32)
-    sh = keep_old * osd + (1 - keep_old) * sh
+    sh = plain * 200 + (1 - plain) * sh
     shade = np.dstack([sh, sh, sh, alpha]).clip(0, 255).astype(np.uint8)
     cv2.imwrite(os.path.join(PAINT, f"orig_BodyAnatomy{S_}.png"), anat)
     cv2.imwrite(os.path.join(PAINT, f"orig_BodyShade{S_}.png"), shade)
-    return red, L, keep_old, alpha
+    return red, L, plain, alpha
 
 for side, col in (("front", front), ("back", back)):
     cv2.imwrite(os.path.join(PREV, f"plate_{side}.jpg"), col)
@@ -375,12 +462,20 @@ for side, col in (("front", front), ("back", back)):
     for n in ("head", "handLeft", "handRight", "footLeft", "footRight", "wristLeft", "wristRight",
               "elbowLeft", "elbowRight", "kneeLeft", "kneeRight", "ankleLeft", "ankleRight"):
         new[new == names[n]] = 0; new[ids == names[n]] = names[n]
+    # Head, hands and feet exactly as the body's own parts.
+    pv_ = part[side]; right = np.zeros_like(new, bool); right[:, CW // 2:] = True
+    near_side = "Left" if side == "front" else "Right"     # the viewer's right half
+    far_side = "Right" if side == "front" else "Left"
+    new[part_is(side, "head")] = names["head"]
+    new[(keep_old > 0.5) & ~part_is(side, "head", "hand", "foot")] = names["groin"]
+    hand = part_is(side, "hand"); foot = part_is(side, "foot")
+    new[hand & right] = names["hand" + near_side]; new[hand & ~right] = names["hand" + far_side]
+    new[foot & right] = names["foot" + near_side]; new[foot & ~right] = names["foot" + far_side]
     new = cv2.medianBlur(new.astype(np.uint8), 5)
     out = (new * 4).astype(np.uint8)
     cv2.imwrite(os.path.join(HERE, f"ids_{side}.png"), cv2.merge([out, out, out]))
     # Previews: fitted plate with the old outline, and the new areas.
-    o = old[side.capitalize()]
-    edge = cv2.Canny((o[..., 3] > 128).astype(np.uint8) * 255, 50, 150)
+    edge = cv2.Canny(canvas_mask(side) * 255, 50, 150)
     pv = col.copy(); pv[edge > 0] = (0, 255, 0)
     rng = np.random.RandomState(4); pal = rng.randint(50, 255, (256, 3)).astype(np.uint8); pal[0] = 0
     sh = cv2.imread(os.path.join(PAINT, f"orig_BodyShade{side.capitalize()}.png"))
